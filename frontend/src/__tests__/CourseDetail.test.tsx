@@ -40,7 +40,7 @@ const mockMatrix: CourseMatrix = {
         '101': { status: 'completed', score: 9, late: false, missing: false },
         '102': { status: 'not_started', score: null, late: false, missing: false },
       },
-      metrics: { completion_rate: 0.5, on_time_rate: 1.0, current_score: 90, current_grade: 'A' },
+      metrics: { completion_rate: 0.5, on_time_rate: 1.0, current_score: 90 },
     },
   ],
 }

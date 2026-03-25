@@ -26,7 +26,7 @@ function makeMatrix(overrides: Partial<CourseMatrix> = {}): CourseMatrix {
           '10': { status: 'completed', score: 10, late: false, missing: false },
           '11': { status: 'not_started', score: null, late: false, missing: false },
         },
-        metrics: { completion_rate: 0.5, on_time_rate: 1.0, current_score: 85, current_grade: 'A' },
+        metrics: { completion_rate: 0.5, on_time_rate: 1.0, current_score: 85 },
       },
     ],
     ...overrides,
@@ -47,8 +47,8 @@ describe('ActivityTable', () => {
   it('renders student rows and assignment columns', () => {
     const matrix = makeMatrix({
       students: [
-        { id: 1, name: 'Alice', sortable_name: 'Alice', submissions: { '10': { status: 'completed', score: 10, late: false, missing: false }, '11': { status: 'not_started', score: null, late: false, missing: false } }, metrics: { completion_rate: 0.5, on_time_rate: 1, current_score: 85, current_grade: 'A' } },
-        { id: 2, name: 'Bob', sortable_name: 'Bob', submissions: { '10': { status: 'in_progress', score: null, late: false, missing: false }, '11': { status: 'not_started', score: null, late: false, missing: false } }, metrics: { completion_rate: 0, on_time_rate: 0, current_score: null, current_grade: null } },
+        { id: 1, name: 'Alice', sortable_name: 'Alice', submissions: { '10': { status: 'completed', score: 10, late: false, missing: false }, '11': { status: 'not_started', score: null, late: false, missing: false } }, metrics: { completion_rate: 0.5, on_time_rate: 1, current_score: 85 } },
+        { id: 2, name: 'Bob', sortable_name: 'Bob', submissions: { '10': { status: 'in_progress', score: null, late: false, missing: false }, '11': { status: 'not_started', score: null, late: false, missing: false } }, metrics: { completion_rate: 0, on_time_rate: 0, current_score: null } },
       ],
     })
     render(<ActivityTable matrix={matrix} />)
@@ -69,7 +69,7 @@ describe('ActivityTable', () => {
         },
       ],
       students: [
-        { id: 1, name: 'Alice', sortable_name: 'Alice', submissions: { '10': { status: 'completed', score: 10, late: false, missing: false }, '11': { status: 'not_started', score: null, late: false, missing: false }, '12': { status: 'not_started', score: null, late: false, missing: false } }, metrics: { completion_rate: 0.33, on_time_rate: 1, current_score: null, current_grade: null } },
+        { id: 1, name: 'Alice', sortable_name: 'Alice', submissions: { '10': { status: 'completed', score: 10, late: false, missing: false }, '11': { status: 'not_started', score: null, late: false, missing: false }, '12': { status: 'not_started', score: null, late: false, missing: false } }, metrics: { completion_rate: 0.33, on_time_rate: 1, current_score: null } },
       ],
     })
     const { container } = render(<ActivityTable matrix={matrix} />)
