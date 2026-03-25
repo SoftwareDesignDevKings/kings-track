@@ -41,7 +41,6 @@ export interface StudentMetrics {
   completion_rate: number | null
   on_time_rate: number | null
   current_score: number | null
-  current_grade: string | null
 }
 
 export interface StudentRow {

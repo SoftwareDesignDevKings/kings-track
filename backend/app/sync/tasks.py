@@ -278,7 +278,7 @@ async def compute_metrics(db: AsyncSession, course_id: int) -> int:
     await db.execute(
         text("""
             INSERT INTO student_metrics (course_id, user_id, completion_rate, on_time_rate,
-                current_score, current_grade, computed_at)
+                current_score, computed_at)
             SELECT
                 e.course_id,
                 e.user_id,
@@ -295,18 +295,16 @@ async def compute_metrics(db: AsyncSession, course_id: int) -> int:
                     0
                 ) AS on_time_rate,
                 e.current_score,
-                e.current_grade,
                 :computed_at
             FROM enrollments e
             LEFT JOIN assignments a ON a.course_id = e.course_id AND a.workflow_state = 'published'
             LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = e.user_id
             WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
-            GROUP BY e.course_id, e.user_id, e.current_score, e.current_grade
+            GROUP BY e.course_id, e.user_id, e.current_score
             ON CONFLICT (course_id, user_id) DO UPDATE SET
                 completion_rate = EXCLUDED.completion_rate,
                 on_time_rate = EXCLUDED.on_time_rate,
                 current_score = EXCLUDED.current_score,
-                current_grade = EXCLUDED.current_grade,
                 computed_at = EXCLUDED.computed_at
         """),
         {"course_id": course_id, "computed_at": now},
