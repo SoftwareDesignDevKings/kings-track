@@ -38,6 +38,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+run_local.py
 
 # Logs
 *.log

@@ -3,6 +3,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.config import settings
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -20,26 +21,50 @@ def _submission_status(workflow_state: str | None, score, excused: bool | None) 
 
 @router.get("")
 async def list_courses(db: AsyncSession = Depends(get_db)):
-    """List all synced courses with summary stats."""
-    result = await db.execute(
-        text("""
-            SELECT
-                c.id,
-                c.name,
-                c.course_code,
-                c.workflow_state,
-                c.synced_at,
-                COUNT(DISTINCT e.user_id) AS student_count,
-                ROUND(AVG(sm.completion_rate)::numeric, 3) AS avg_completion_rate,
-                ROUND(AVG(sm.on_time_rate)::numeric, 3) AS avg_on_time_rate,
-                ROUND(AVG(sm.current_score)::numeric, 1) AS avg_current_score
-            FROM courses c
-            LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
-            LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
-            GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
-            ORDER BY c.name
-        """)
-    )
+    """List synced courses with summary stats. Respects CANVAS_COURSE_WHITELIST if set."""
+    whitelist = settings.course_whitelist
+    if whitelist:
+        result = await db.execute(
+            text("""
+                SELECT
+                    c.id,
+                    c.name,
+                    c.course_code,
+                    c.workflow_state,
+                    c.synced_at,
+                    COUNT(DISTINCT e.user_id) AS student_count,
+                    ROUND(AVG(sm.completion_rate)::numeric, 3) AS avg_completion_rate,
+                    ROUND(AVG(sm.on_time_rate)::numeric, 3) AS avg_on_time_rate,
+                    ROUND(AVG(sm.current_score)::numeric, 1) AS avg_current_score
+                FROM courses c
+                LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
+                LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
+                WHERE c.id = ANY(:ids)
+                GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
+                ORDER BY c.name
+            """),
+            {"ids": whitelist},
+        )
+    else:
+        result = await db.execute(
+            text("""
+                SELECT
+                    c.id,
+                    c.name,
+                    c.course_code,
+                    c.workflow_state,
+                    c.synced_at,
+                    COUNT(DISTINCT e.user_id) AS student_count,
+                    ROUND(AVG(sm.completion_rate)::numeric, 3) AS avg_completion_rate,
+                    ROUND(AVG(sm.on_time_rate)::numeric, 3) AS avg_on_time_rate,
+                    ROUND(AVG(sm.current_score)::numeric, 1) AS avg_current_score
+                FROM courses c
+                LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
+                LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
+                GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
+                ORDER BY c.name
+            """)
+        )
     rows = result.fetchall()
 
     return [
@@ -190,6 +215,13 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
         for aid in all_assignment_ids:
             if aid in user_subs:
                 submissions[str(aid)] = user_subs[aid]
+            else:
+                submissions[str(aid)] = {
+                    "status": "not_started",
+                    "score": None,
+                    "late": False,
+                    "missing": False,
+                }
 
         students.append({
             "id": uid,

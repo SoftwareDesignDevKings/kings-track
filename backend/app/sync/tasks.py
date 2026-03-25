@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.canvas.client import CanvasClient
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +29,13 @@ def _parse_dt(value: str | None) -> datetime | None:
 
 
 async def sync_courses(canvas: CanvasClient, db: AsyncSession) -> int:
-    """Fetch and upsert all teacher courses. Returns record count."""
+    """Fetch and upsert courses. If a whitelist is configured, only those IDs are stored."""
     courses = await canvas.list_courses()
+    whitelist = settings.course_whitelist
+    if whitelist:
+        all_count = len(courses)
+        courses = [c for c in courses if c["id"] in whitelist]
+        logger.info("Whitelist active — syncing %d of %d available courses", len(courses), all_count)
     now = _now()
 
     for course in courses:
@@ -203,11 +209,18 @@ async def sync_submissions(
     count = 0
     now = _now()
 
+    # Load enrolled student IDs to skip submissions for users not in our DB
+    result = await db.execute(
+        text("SELECT user_id FROM enrollments WHERE course_id = :course_id AND role = 'StudentEnrollment'"),
+        {"course_id": course_id},
+    )
+    enrolled_user_ids = {row[0] for row in result}
+
     async for submission in canvas.list_submissions(course_id):
         user_id = submission.get("user_id")
         assignment_id = submission.get("assignment_id")
 
-        if not user_id or not assignment_id:
+        if not user_id or not assignment_id or user_id not in enrolled_user_ids:
             continue
 
         await db.execute(

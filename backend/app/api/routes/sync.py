@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+import asyncio
+from fastapi import APIRouter, BackgroundTasks
 from sqlalchemy import text
 
 from app.db import AsyncSessionLocal
@@ -7,15 +8,17 @@ from app.sync.engine import sync_engine
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 
+async def _run_sync():
+    await sync_engine.full_sync()
+
+
 @router.post("/trigger")
-async def trigger_sync():
+async def trigger_sync(background_tasks: BackgroundTasks):
     """Manually trigger a full Canvas data sync."""
     if sync_engine.is_running:
         return {"status": "already_running", "message": "A sync is already in progress"}
 
-    # Run sync in background so the request returns immediately
-    import asyncio
-    asyncio.create_task(sync_engine.full_sync())
+    background_tasks.add_task(_run_sync)
 
     return {"status": "started", "message": "Sync triggered"}
 
