@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Float, String, DateTime, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy import BigInteger, Float, DateTime, Integer, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 
@@ -21,7 +21,6 @@ class StudentMetrics(Base):
     completion_rate: Mapped[float | None] = mapped_column(Float)   # submitted / total_assigned
     on_time_rate: Mapped[float | None] = mapped_column(Float)      # on-time / submitted
     current_score: Mapped[float | None] = mapped_column(Float)
-    current_grade: Mapped[str | None] = mapped_column(String)
     computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Phase 2+ (reserved columns — add via migration when needed):

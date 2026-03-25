@@ -5,22 +5,6 @@ interface Props {
   matrix: CourseMatrix
 }
 
-function GradeChip({ grade, score }: { grade: string | null; score: number | null }) {
-  if (!grade && score === null) return <span className="text-slate-300">—</span>
-  const g = grade || ''
-  const colorClass =
-    g.startsWith('A') ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' :
-    g.startsWith('B') ? 'bg-blue-50 text-blue-700 ring-blue-200' :
-    g.startsWith('C') ? 'bg-amber-50 text-amber-700 ring-amber-200' :
-    'bg-red-50 text-red-700 ring-red-200'
-
-  return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold ring-1 ${colorClass}`}>
-      {grade || `${score}%`}
-    </span>
-  )
-}
-
 function CompletionBar({ value }: { value: number | null }) {
   if (value === null) return <span className="text-slate-300 text-xs">—</span>
   const pct = Math.round(value * 100)
@@ -87,10 +71,7 @@ export default function ActivityTable({ matrix }: Props) {
             >
               Student
             </th>
-            {/* Completion / grade columns */}
-            <th className="sticky-col-header px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[90px]" rowSpan={2}>
-              Grade
-            </th>
+            {/* Completion column */}
             <th className="sticky-col-header px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[130px]" rowSpan={2}>
               Completion
             </th>
@@ -134,14 +115,6 @@ export default function ActivityTable({ matrix }: Props) {
               {/* Student name — sticky */}
               <td className={`sticky-col px-4 py-2.5 border-r border-slate-200 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
                 <span className="font-medium text-slate-800 text-sm">{student.name}</span>
-              </td>
-
-              {/* Grade chip */}
-              <td className="px-3 py-2.5 border-r border-slate-200 text-center">
-                <GradeChip
-                  grade={student.metrics.current_grade}
-                  score={student.metrics.current_score}
-                />
               </td>
 
               {/* Completion bar */}

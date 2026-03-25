@@ -169,7 +169,7 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
     students_result = await db.execute(
         text("""
             SELECT u.id, u.name, u.sortable_name,
-                   sm.completion_rate, sm.on_time_rate, sm.current_score, sm.current_grade
+                   sm.completion_rate, sm.on_time_rate, sm.current_score
             FROM enrollments e
             JOIN users u ON u.id = e.user_id
             LEFT JOIN student_metrics sm ON sm.user_id = e.user_id AND sm.course_id = e.course_id
@@ -208,7 +208,7 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
     all_assignment_ids = [a["id"] for g in assignment_groups for a in g["assignments"]]
     students = []
     for s_row in students_raw:
-        uid, name, sortable_name, completion_rate, on_time_rate, current_score, current_grade = s_row
+        uid, name, sortable_name, completion_rate, on_time_rate, current_score = s_row
         user_subs = sub_lookup.get(uid, {})
 
         submissions = {}
@@ -232,7 +232,6 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
                 "completion_rate": float(completion_rate) if completion_rate is not None else None,
                 "on_time_rate": float(on_time_rate) if on_time_rate is not None else None,
                 "current_score": float(current_score) if current_score is not None else None,
-                "current_grade": current_grade,
             },
         })
 
