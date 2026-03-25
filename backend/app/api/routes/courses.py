@@ -104,18 +104,7 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
     if not course_row:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    # Fetch assignment groups and assignments (ordered)
-    ag_result = await db.execute(
-        text("""
-            SELECT DISTINCT assignment_group_name, assignment_group_id
-            FROM assignments
-            WHERE course_id = :course_id AND workflow_state = 'published'
-            ORDER BY assignment_group_id NULLS LAST
-        """),
-        {"course_id": course_id},
-    )
-    groups_raw = ag_result.fetchall()
-
+    # Fetch assignments with group info (ordered)
     assignment_result = await db.execute(
         text("""
             SELECT id, name, assignment_group_name, assignment_group_id, points_possible, due_at, position
@@ -201,13 +190,6 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
         for aid in all_assignment_ids:
             if aid in user_subs:
                 submissions[str(aid)] = user_subs[aid]
-            else:
-                submissions[str(aid)] = {
-                    "status": "not_started",
-                    "score": None,
-                    "late": False,
-                    "missing": False,
-                }
 
         students.append({
             "id": uid,

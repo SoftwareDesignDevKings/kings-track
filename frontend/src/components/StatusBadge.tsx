@@ -48,7 +48,7 @@ export default function StatusBadge({ status, score, pointsPossible, late, missi
   const config = statusConfig[status]
 
   const tooltipParts: string[] = [config.label]
-  if (score !== null && score !== undefined && pointsPossible) {
+  if (score !== null && score !== undefined && pointsPossible !== null && pointsPossible !== undefined) {
     tooltipParts.push(`${score} / ${pointsPossible} pts`)
   } else if (score !== null && score !== undefined) {
     tooltipParts.push(`${score} pts`)

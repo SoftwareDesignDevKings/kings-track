@@ -36,6 +36,7 @@ export function useCourseMatrix(courseId: number) {
     queryKey: ['matrix', courseId],
     queryFn: () => fetchJSON<CourseMatrix>(`/courses/${courseId}/matrix`),
     staleTime: 60_000,
+    enabled: !isNaN(courseId),
   })
 }
 
