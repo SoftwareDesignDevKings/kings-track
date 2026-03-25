@@ -298,7 +298,7 @@ async def compute_metrics(db: AsyncSession, course_id: int) -> int:
                 e.current_grade,
                 :computed_at
             FROM enrollments e
-            JOIN assignments a ON a.course_id = e.course_id AND a.workflow_state = 'published'
+            LEFT JOIN assignments a ON a.course_id = e.course_id AND a.workflow_state = 'published'
             LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = e.user_id
             WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
             GROUP BY e.course_id, e.user_id, e.current_score, e.current_grade

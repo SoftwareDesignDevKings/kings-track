@@ -1,4 +1,3 @@
-import asyncio
 from fastapi import APIRouter, BackgroundTasks
 from sqlalchemy import text
 

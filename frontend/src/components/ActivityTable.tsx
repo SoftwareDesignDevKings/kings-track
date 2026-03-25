@@ -114,7 +114,7 @@ export default function ActivityTable({ matrix }: Props) {
               <th
                 key={a.id}
                 className="px-2 py-2 text-center text-xs font-medium text-slate-500 border-r border-slate-100 last:border-r-slate-200 max-w-[52px]"
-                title={`${a.name}${a.points_possible ? ` (${a.points_possible} pts)` : ''}${a.due_at ? ` · Due ${new Date(a.due_at).toLocaleDateString()}` : ''}`}
+                title={`${a.name}${a.points_possible != null ? ` (${a.points_possible} pts)` : ''}${a.due_at ? ` · Due ${new Date(a.due_at).toLocaleDateString()}` : ''}`}
               >
                 <span className="block w-10 overflow-hidden text-ellipsis mx-auto text-center leading-tight">
                   {/* Show short number from name if it matches pattern like "1.1", "2.3", else abbreviate */}
