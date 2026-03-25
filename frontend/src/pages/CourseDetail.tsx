@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, Navigate } from 'react-router-dom'
 import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
 import Placeholder from '../components/Placeholder'
@@ -26,6 +26,10 @@ export default function CourseDetail() {
   const [activeTab, setActiveTab] = useState<TabId>('activities')
 
   const { data: matrix, isLoading, error } = useCourseMatrix(id)
+
+  if (!courseId || isNaN(id)) {
+    return <Navigate to="/" replace />
+  }
 
   // Summary stats derived from matrix
   const totalStudents = matrix?.students.length ?? 0

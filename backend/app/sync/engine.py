@@ -46,6 +46,7 @@ async def _log_sync(db, entity_type: str, course_id: int | None, status: str, re
 
 class SyncEngine:
     def __init__(self):
+        self._lock = asyncio.Lock()
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -60,7 +61,7 @@ class SyncEngine:
 
         Processes one course at a time to minimise memory usage.
         """
-        if self._running:
+        if self._lock.locked():
             logger.info("Sync already in progress — skipping")
             return {"status": "already_running"}
 
@@ -68,87 +69,114 @@ class SyncEngine:
             logger.warning("Canvas API not configured — skipping sync")
             return {"status": "not_configured", "message": "Set CANVAS_API_URL and CANVAS_API_TOKEN"}
 
-        self._running = True
-        started_at = datetime.now(timezone.utc)
-        results = {}
+        async with self._lock:
+            self._running = True
+            started_at = datetime.now(timezone.utc)
+            results = {}
+            sync_failed = False
 
-        try:
-            async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
+            try:
                 async with AsyncSessionLocal() as db:
-                    # 1. Sync course list
-                    logger.info("Syncing courses…")
-                    try:
-                        count = await sync_courses(canvas, db)
-                        results["courses"] = {"status": "ok", "records": count}
-                        logger.info("Synced %d courses", count)
-                    except Exception as exc:
-                        logger.error("Failed to sync courses: %s", exc)
-                        results["courses"] = {"status": "error", "error": str(exc)}
-                        return results  # Can't proceed without courses
+                    await _log_sync(db, "full_sync", None, "started")
 
-                    # 2. Fetch course IDs from DB
-                    rows = await db.execute(
-                        text("SELECT id FROM courses WHERE workflow_state = 'available'")
-                    )
-                    course_ids = [row[0] for row in rows]
-
-                # Process each course with its own session (frees memory between courses)
-                for course_id in course_ids:
-                    course_results = {}
-                    logger.info("Processing course %d…", course_id)
-
+                async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
                     async with AsyncSessionLocal() as db:
-                        # Enrollments
+                        # 1. Sync course list
+                        logger.info("Syncing courses…")
                         try:
-                            count = await sync_enrollments(canvas, db, course_id)
-                            course_results["enrollments"] = count
-                            logger.info("  Course %d: %d enrollments", course_id, count)
+                            count = await sync_courses(canvas, db)
+                            results["courses"] = {"status": "ok", "records": count}
+                            await _log_sync(db, "courses", None, "completed", records=count)
+                            logger.info("Synced %d courses", count)
                         except Exception as exc:
-                            logger.error("  Course %d enrollments failed: %s", course_id, exc)
-                            course_results["enrollments_error"] = str(exc)
+                            logger.error("Failed to sync courses: %s", exc)
+                            await _log_sync(db, "courses", None, "failed", error=str(exc))
+                            results["courses"] = {"status": "error", "error": str(exc)}
+                            async with AsyncSessionLocal() as log_db:
+                                await _log_sync(log_db, "full_sync", None, "failed", error=str(exc))
+                            sync_failed = True
+                            return results  # Can't proceed without courses
 
-                        # Assignments
-                        try:
-                            count = await sync_assignments(canvas, db, course_id)
-                            course_results["assignments"] = count
-                            logger.info("  Course %d: %d assignments", course_id, count)
-                        except Exception as exc:
-                            logger.error("  Course %d assignments failed: %s", course_id, exc)
-                            course_results["assignments_error"] = str(exc)
+                        # 2. Fetch course IDs from DB
+                        rows = await db.execute(
+                            text("SELECT id FROM courses WHERE workflow_state = 'available'")
+                        )
+                        course_ids = [row[0] for row in rows]
 
-                        # Submissions (page-by-page streaming)
-                        try:
-                            count = await sync_submissions(canvas, db, course_id)
-                            course_results["submissions"] = count
-                            logger.info("  Course %d: %d submissions", course_id, count)
-                        except Exception as exc:
-                            logger.error("  Course %d submissions failed: %s", course_id, exc)
-                            course_results["submissions_error"] = str(exc)
+                    # Process each course with its own session (frees memory between courses)
+                    for course_id in course_ids:
+                        course_results = {}
+                        logger.info("Processing course %d…", course_id)
 
-                        # Compute metrics (DB-only, no API calls)
-                        try:
-                            count = await compute_metrics(db, course_id)
-                            course_results["metrics"] = count
-                            logger.info("  Course %d: metrics computed for %d students", course_id, count)
-                        except Exception as exc:
-                            logger.error("  Course %d metrics failed: %s", course_id, exc)
-                            course_results["metrics_error"] = str(exc)
+                        async with AsyncSessionLocal() as db:
+                            # Enrollments
+                            try:
+                                count = await sync_enrollments(canvas, db, course_id)
+                                course_results["enrollments"] = count
+                                await _log_sync(db, "enrollments", course_id, "completed", records=count)
+                                logger.info("  Course %d: %d enrollments", course_id, count)
+                            except Exception as exc:
+                                logger.error("  Course %d enrollments failed: %s", course_id, exc)
+                                await _log_sync(db, "enrollments", course_id, "failed", error=str(exc))
+                                course_results["enrollments_error"] = str(exc)
 
-                    results[str(course_id)] = course_results
+                            # Assignments
+                            try:
+                                count = await sync_assignments(canvas, db, course_id)
+                                course_results["assignments"] = count
+                                await _log_sync(db, "assignments", course_id, "completed", records=count)
+                                logger.info("  Course %d: %d assignments", course_id, count)
+                            except Exception as exc:
+                                logger.error("  Course %d assignments failed: %s", course_id, exc)
+                                await _log_sync(db, "assignments", course_id, "failed", error=str(exc))
+                                course_results["assignments_error"] = str(exc)
 
-        except CanvasAPIError as exc:
-            logger.error("Canvas API error during sync: %s", exc)
-            results["error"] = str(exc)
-        except Exception as exc:
-            logger.exception("Unexpected error during sync: %s", exc)
-            results["error"] = str(exc)
-        finally:
-            self._running = False
+                            # Submissions (page-by-page streaming)
+                            try:
+                                count = await sync_submissions(canvas, db, course_id)
+                                course_results["submissions"] = count
+                                await _log_sync(db, "submissions", course_id, "completed", records=count)
+                                logger.info("  Course %d: %d submissions", course_id, count)
+                            except Exception as exc:
+                                logger.error("  Course %d submissions failed: %s", course_id, exc)
+                                await _log_sync(db, "submissions", course_id, "failed", error=str(exc))
+                                course_results["submissions_error"] = str(exc)
 
-        elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
-        results["elapsed_seconds"] = round(elapsed, 1)
-        logger.info("Sync completed in %.1fs", elapsed)
-        return results
+                            # Compute metrics (DB-only, no API calls)
+                            try:
+                                count = await compute_metrics(db, course_id)
+                                course_results["metrics"] = count
+                                await _log_sync(db, "metrics", course_id, "completed", records=count)
+                                logger.info("  Course %d: metrics computed for %d students", course_id, count)
+                            except Exception as exc:
+                                logger.error("  Course %d metrics failed: %s", course_id, exc)
+                                await _log_sync(db, "metrics", course_id, "failed", error=str(exc))
+                                course_results["metrics_error"] = str(exc)
+
+                        results[str(course_id)] = course_results
+
+            except CanvasAPIError as exc:
+                logger.error("Canvas API error during sync: %s", exc)
+                results["error"] = str(exc)
+                sync_failed = True
+                async with AsyncSessionLocal() as log_db:
+                    await _log_sync(log_db, "full_sync", None, "failed", error=str(exc))
+            except Exception as exc:
+                logger.exception("Unexpected error during sync: %s", exc)
+                results["error"] = str(exc)
+                sync_failed = True
+                async with AsyncSessionLocal() as log_db:
+                    await _log_sync(log_db, "full_sync", None, "failed", error=str(exc))
+            finally:
+                if not sync_failed:
+                    async with AsyncSessionLocal() as log_db:
+                        await _log_sync(log_db, "full_sync", None, "completed")
+                self._running = False
+
+            elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+            results["elapsed_seconds"] = round(elapsed, 1)
+            logger.info("Sync completed in %.1fs", elapsed)
+            return results
 
     def start_scheduler(self, interval_hours: int = 24):
         """Start the background sync scheduler."""

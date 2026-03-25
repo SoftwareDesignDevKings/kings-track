@@ -54,7 +54,8 @@ class CanvasClient:
         retries: int = 3,
         **kwargs,
     ) -> httpx.Response:
-        url = f"{self.base_url}{path}"
+        # Accept either a full URL (next-page links) or a path relative to base_url
+        url = path if path.startswith("http") else f"{self.base_url}{path}"
         delay = 1.0
 
         for attempt in range(retries):
@@ -102,14 +103,8 @@ class CanvasClient:
                 first_request = False
             else:
                 # For subsequent pages, use the full URL from Link header
-                resp = await self._client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {self.token}"},
-                )
-                # Check rate limit on subsequent pages too
-                remaining = resp.headers.get("X-Rate-Limit-Remaining")
-                if remaining and float(remaining) < RATE_LIMIT_BACKOFF_THRESHOLD:
-                    await asyncio.sleep(RATE_LIMIT_BACKOFF_DELAY)
+                # Route through _request() for retry/backoff/error handling
+                resp = await self._request("GET", url)
 
             data = resp.json()
             if isinstance(data, list):

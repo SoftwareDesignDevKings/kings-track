@@ -3,6 +3,10 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "https://kings-analytics-backend.fly.dev/api/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
