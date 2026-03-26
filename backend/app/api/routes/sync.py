@@ -1,10 +1,11 @@
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import text
 
 from app.db import AsyncSessionLocal
 from app.sync.engine import sync_engine
+from app.api.deps import require_auth
 
-router = APIRouter(prefix="/sync", tags=["sync"])
+router = APIRouter(prefix="/sync", tags=["sync"], dependencies=[Depends(require_auth)])
 
 
 def _to_iso(value):
