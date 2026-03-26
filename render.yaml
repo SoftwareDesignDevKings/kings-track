@@ -21,5 +21,7 @@ services:
         sync: false
       - key: SYNC_INTERVAL_HOURS
         value: "24"
+      - key: EDSTEM_API_TOKEN
+        sync: false
       - key: SUPABASE_URL
         sync: false
