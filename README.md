@@ -1,117 +1,164 @@
-# kings-track
+# Kings Analytics Dashboard
 
-This repo is already split the right way for your target stack:
+A Canvas LMS analytics platform that gives teachers real-time visibility into student progress, assignment submissions, and course performance across Kings school.
 
-- `frontend/` -> Vercel
-- `backend/` -> Render
-- Postgres -> Supabase
+## Features
 
-The clean deployment pattern is:
+- **Course overview** with summary statistics (completion rates, on-time submission, average scores)
+- **Student activity matrix** showing per-student submission status and grades
+- **Background sync** pulls data from Canvas on a configurable schedule
+- **Admin dashboard** for managing users and controlling which courses are visible
+- **Pluggable integrations** for third-party platforms (Gradeo, EdStem)
 
-1. Vercel stays connected directly to GitHub and auto-deploys the frontend on pushes to `main`.
-2. Render stays connected directly to GitHub and auto-deploys the backend on pushes to `main`.
-3. Supabase hosts the database, while Alembic migrations continue to run from the backend release step.
+## Tech stack
 
-## What is already wired up in this repo
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18, TypeScript, Vite, TailwindCSS, TanStack Query |
+| Backend | FastAPI (async), SQLAlchemy 2.0, Alembic |
+| Database | PostgreSQL 16 |
+| Auth | Supabase JWT (production) / bypass mode (local dev) |
+| Hosting | Vercel (frontend), Render (backend), Supabase (database) |
+| CI | GitHub Actions |
 
-- [vercel.json](/Users/hamillmamo_li/kings-track/app/vercel.json) builds the Vite frontend as a single-page app for Vercel.
-- [render.yaml](/Users/hamillmamo_li/kings-track/app/render.yaml) defines a Render web service that deploys the backend Docker image from GitHub.
-- [.github/workflows/ci.yml](/Users/hamillmamo_li/kings-track/app/.github/workflows/ci.yml) runs frontend and backend checks on PRs and `main`.
-- [frontend/src/services/api.ts](/Users/hamillmamo_li/kings-track/app/frontend/src/services/api.ts) supports `VITE_API_BASE_URL`, which should point at your Render backend in production.
-- [backend/Dockerfile](/Users/hamillmamo_li/kings-track/app/backend/Dockerfile) now starts Uvicorn on the platform-provided `PORT`, which Render expects.
+## Quick start (local)
 
-## 1. Supabase setup
+**Prerequisites:** Docker Desktop
 
-Create a new Supabase project, then copy its Postgres connection string.
-
-Use that connection string as `DATABASE_URL` for the backend. For this app it should look like:
-
-```env
-DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@HOST:5432/postgres?ssl=require
+```bash
+python run_local.py
 ```
 
-Notes:
+This prompts for your Canvas credentials, writes `.env`, starts Docker Compose, runs migrations, and opens the app.
 
-- Keep the `postgresql+asyncpg://` prefix because the backend uses SQLAlchemy async mode.
-- Keep SSL enabled.
-- You do not need to move schema management into Supabase. Alembic already handles it from the backend deploy.
+**Or manually:**
 
-## 2. Render backend setup
-
-### First-time setup
-
-1. In Render, create a new `Web Service` from this GitHub repo.
-2. Let Render use [render.yaml](/Users/hamillmamo_li/kings-track/app/render.yaml), or mirror its settings manually:
-   service type `web`, runtime `docker`, branch `main`, health check `/api/health`.
-3. In Render, set these environment variables:
-
-```env
-CANVAS_API_URL=https://kings.instructure.com
-CANVAS_API_TOKEN=your-token
-DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@HOST:5432/postgres?ssl=require
-CORS_ORIGINS=https://your-vercel-app.vercel.app
-SYNC_INTERVAL_HOURS=24
-CANVAS_COURSE_WHITELIST=
+```bash
+cp .env.example .env        # fill in values
+docker compose up -d db
+docker compose run --rm backend alembic upgrade head
+docker compose up backend frontend
 ```
 
-4. Trigger the first deploy. The backend container already runs `alembic upgrade head` before starting Uvicorn, so your schema will migrate during deploy.
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8000/api`
+- Swagger docs: `http://localhost:8000/docs`
 
-### GitHub auto-deploy
+### Without Docker
 
-Once the Render service is linked to GitHub with Auto-Deploy enabled, pushes to `main` will deploy the backend automatically. No GitHub Actions secret is needed for backend deployment anymore.
+```bash
+# Backend
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload
 
-## 3. Vercel frontend setup
-
-In Vercel:
-
-1. Import this GitHub repo.
-2. Set the Root Directory to `.`.
-3. Vercel will read [vercel.json](/Users/hamillmamo_li/kings-track/app/vercel.json), so the build/install/output settings are already defined.
-4. Add `VITE_API_BASE_URL=https://your-render-service.onrender.com/api`.
-
-Once the repo is connected, Vercel will auto-deploy on every push to `main` by default.
-
-Why this changed:
-
-- The frontend no longer relies on a hardcoded Fly rewrite.
-- Vercel serves the SPA.
-- The browser calls the Render API URL directly.
-- CORS must include your Vercel frontend origin on the backend.
-
-## 4. Production values to set
-
-Use these values as your production baseline:
-
-```env
-CANVAS_API_URL=https://kings.instructure.com
-CANVAS_API_TOKEN=...
-DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@HOST:5432/postgres?ssl=require
-CORS_ORIGINS=https://your-vercel-app.vercel.app
-VITE_API_BASE_URL=https://your-render-service.onrender.com/api
-SYNC_INTERVAL_HOURS=24
-CANVAS_COURSE_WHITELIST=
+# Frontend
+cd frontend
+npm install
+npm run dev
 ```
 
-Set them in:
+## Environment variables
 
-- Render for backend runtime variables
-- Vercel for `VITE_API_BASE_URL`
+### Backend
 
-## 5. How updates flow
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DATABASE_URL` | Postgres connection string (must use `postgresql+asyncpg://`) | `postgresql+asyncpg://kings:kings@db:5432/kings_analytics` |
+| `CANVAS_API_URL` | Canvas instance URL | `https://kings.instructure.com` |
+| `CANVAS_API_TOKEN` | Canvas API access token | |
+| `CORS_ORIGINS` | Comma-separated allowed origins | `http://localhost:5173` |
+| `AUTH_MODE` | `local` or `supabase` | `local` |
+| `SUPABASE_URL` | Supabase project URL (when `AUTH_MODE=supabase`) | `https://xxx.supabase.co` |
+| `LOCAL_DEV_USER_EMAIL` | Dev user email (when `AUTH_MODE=local`) | `admin@local.dev` |
+| `LOCAL_DEV_USER_ROLE` | Dev user role (when `AUTH_MODE=local`) | `admin` |
+| `SYNC_INTERVAL_HOURS` | Background sync interval | `24` |
 
-- Push to `main`
-- GitHub Actions runs CI
-- Render detects the same GitHub push and deploys the backend
-- Vercel detects the same GitHub push and deploys the frontend
-- Frontend calls backend through `VITE_API_BASE_URL`
-- Backend talks to Supabase through `DATABASE_URL`
+### Frontend
 
-## 6. Local vs production
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `VITE_API_BASE_URL` | Backend API URL | `/api` (dev) or `https://your-app.onrender.com/api` (prod) |
 
-Local development can keep using the root `.env` and `docker-compose.yml`.
+See `.env.example` for defaults.
 
-Production should use:
+## Testing
 
-- Render environment variables for backend runtime config
-- Vercel project settings for frontend env vars
-- Supabase only as the managed Postgres host
+```bash
+# Backend
+cd backend && pytest
+
+# Frontend
+cd frontend && npm test
+```
+
+CI runs both suites on every PR and push to `main`.
+
+## API routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Health check |
+| `GET` | `/api/auth/me` | Current user |
+| `GET` | `/api/courses` | List courses with stats |
+| `GET` | `/api/courses/:id` | Course detail |
+| `GET` | `/api/courses/:id/matrix` | Student activity matrix |
+| `GET` | `/api/sync/status` | Latest sync status |
+| `POST` | `/api/sync/trigger` | Trigger manual sync |
+| `GET` | `/admin/users` | List app users |
+| `POST` | `/admin/users` | Add user |
+| `DELETE` | `/admin/users/:email` | Remove user |
+| `GET` | `/admin/whitelist` | List whitelisted courses |
+| `POST` | `/admin/whitelist` | Add course to whitelist |
+| `DELETE` | `/admin/whitelist/:id` | Remove from whitelist |
+
+## Database migrations
+
+```bash
+cd backend
+alembic upgrade head          # apply all
+alembic downgrade -1          # rollback one
+alembic revision -m "desc"   # create new
+```
+
+Migrations run automatically on deploy (the Dockerfile runs `alembic upgrade head` before starting the server).
+
+## Deployment
+
+Both services auto-deploy from `main` via their respective platform integrations.
+
+### Backend (Render)
+
+Render reads `render.yaml` and deploys the Docker image from `backend/`. Set the environment variables listed above in the Render dashboard. Health check endpoint: `/api/health`.
+
+### Frontend (Vercel)
+
+Vercel reads `vercel.json`, builds the Vite SPA from `frontend/`, and serves it with SPA rewrites. Set `VITE_API_BASE_URL` in Vercel project settings.
+
+### Database (Supabase)
+
+Create a Supabase project and use its Postgres connection string as `DATABASE_URL`. Keep the `postgresql+asyncpg://` prefix and `?ssl=require` suffix. Alembic handles all schema management — no Supabase migrations needed.
+
+## Project structure
+
+```
+├── backend/
+│   ├── app/
+│   │   ├── api/routes/       # FastAPI route handlers
+│   │   ├── canvas/           # Canvas API client
+│   │   ├── integrations/     # Third-party platform plugins
+│   │   ├── models/           # SQLAlchemy models
+│   │   └── sync/             # Background sync engine
+│   ├── alembic/              # Database migrations
+│   └── tests/
+├── frontend/
+│   └── src/
+│       ├── components/       # React components
+│       ├── pages/            # Route pages
+│       └── services/         # API client & hooks
+├── docker-compose.yml        # Local dev environment
+├── render.yaml               # Render deployment config
+└── vercel.json               # Vercel deployment config
+```

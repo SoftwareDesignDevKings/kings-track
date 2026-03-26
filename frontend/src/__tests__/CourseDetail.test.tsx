@@ -9,6 +9,7 @@ vi.mock('../services/api', () => ({
   useCourseMatrix: vi.fn(),
   useSyncStatus: vi.fn(() => ({ data: { is_running: false, logs: [] } })),
   useTriggerSync: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useCurrentUser: vi.fn(() => ({ data: { email: 'test@example.com', role: 'admin' } })),
 }))
 
 vi.mock('react-router-dom', async () => {

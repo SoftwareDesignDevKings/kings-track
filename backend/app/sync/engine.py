@@ -18,6 +18,7 @@ from app.sync.tasks import (
     sync_submissions,
     compute_metrics,
 )
+from app.whitelist import get_effective_whitelist
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +76,18 @@ class SyncEngine:
         try:
             async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
                 async with AsyncSessionLocal() as db:
-                    # 1. Sync course list
-                    logger.info("Syncing courses…")
+                    whitelist = await get_effective_whitelist(db)
+
+                    if not whitelist:
+                        logger.info("Whitelist is empty — nothing to sync")
+                        results["courses"] = {"status": "ok", "records": 0}
+                        results["skipped"] = "No courses in whitelist"
+                        return results
+
+                    # 1. Sync course list (only whitelisted courses)
+                    logger.info("Syncing %d whitelisted courses…", len(whitelist))
                     try:
-                        count = await sync_courses(canvas, db)
+                        count = await sync_courses(canvas, db, whitelist_ids=whitelist)
                         results["courses"] = {"status": "ok", "records": count}
                         logger.info("Synced %d courses", count)
                     except Exception as exc:
@@ -86,17 +95,10 @@ class SyncEngine:
                         results["courses"] = {"status": "error", "error": str(exc)}
                         return results  # Can't proceed without courses
 
-                    # 2. Fetch course IDs from DB, respecting whitelist
-                    whitelist = settings.course_whitelist
-                    if whitelist:
-                        rows = await db.execute(
-                            text("SELECT id FROM courses WHERE workflow_state = 'available' AND id = ANY(:ids)"),
-                            {"ids": whitelist},
-                        )
-                    else:
-                        rows = await db.execute(
-                            text("SELECT id FROM courses WHERE workflow_state = 'available'")
-                        )
+                    rows = await db.execute(
+                        text("SELECT id FROM courses WHERE workflow_state = 'available' AND id = ANY(:ids)"),
+                        {"ids": whitelist},
+                    )
                     course_ids = [row[0] for row in rows]
 
                 # Process each course with its own session (frees memory between courses)

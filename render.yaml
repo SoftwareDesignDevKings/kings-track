@@ -21,7 +21,5 @@ services:
         sync: false
       - key: SYNC_INTERVAL_HOURS
         value: "24"
-      - key: CANVAS_COURSE_WHITELIST
-        value: ""
       - key: SUPABASE_URL
         sync: false
