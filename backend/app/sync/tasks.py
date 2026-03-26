@@ -284,14 +284,14 @@ async def compute_metrics(db: AsyncSession, course_id: int) -> int:
                 e.user_id,
                 -- completion_rate: % of published assignments with any submission
                 COALESCE(
-                    COUNT(s.id) FILTER (WHERE s.workflow_state != 'unsubmitted')::float /
+                    1.0 * SUM(CASE WHEN s.workflow_state != 'unsubmitted' THEN 1 ELSE 0 END) /
                     NULLIF(COUNT(a.id), 0),
                     0
                 ) AS completion_rate,
                 -- on_time_rate: % of submitted assignments that were not late
                 COALESCE(
-                    COUNT(s.id) FILTER (WHERE s.workflow_state != 'unsubmitted' AND s.late = false)::float /
-                    NULLIF(COUNT(s.id) FILTER (WHERE s.workflow_state != 'unsubmitted'), 0),
+                    1.0 * SUM(CASE WHEN s.workflow_state != 'unsubmitted' AND s.late = false THEN 1 ELSE 0 END) /
+                    NULLIF(SUM(CASE WHEN s.workflow_state != 'unsubmitted' THEN 1 ELSE 0 END), 0),
                     0
                 ) AS on_time_rate,
                 e.current_score,

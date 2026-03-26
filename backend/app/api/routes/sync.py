@@ -7,6 +7,12 @@ from app.sync.engine import sync_engine
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 
+def _to_iso(value):
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
 async def _run_sync():
     await sync_engine.full_sync()
 
@@ -43,8 +49,8 @@ async def sync_status():
             "course_id": row[1],
             "status": row[2],
             "records_synced": row[3],
-            "started_at": row[4].isoformat() if row[4] else None,
-            "completed_at": row[5].isoformat() if row[5] else None,
+            "started_at": _to_iso(row[4]),
+            "completed_at": _to_iso(row[5]),
             "error_message": row[6],
         }
         for row in rows

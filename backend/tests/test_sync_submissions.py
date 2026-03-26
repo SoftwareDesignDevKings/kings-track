@@ -40,7 +40,7 @@ def _make_submission(user_id: int, assignment_id: int = ASSIGNMENT_ID) -> dict:
 @pytest.fixture(autouse=True)
 def setup_course():
     now = datetime.now(timezone.utc).isoformat()
-    seed("INSERT INTO courses (id, name, workflow_state, synced_at) VALUES (:id, 'Test', 'available', :now) ON CONFLICT (id) DO NOTHING", {"id": COURSE_ID, "now": now})
+    seed("INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'Test', 'available', :now, 0) ON CONFLICT (id) DO NOTHING", {"id": COURSE_ID, "now": now})
     seed("INSERT INTO users (id, name, sis_id) VALUES (:id, 'Enrolled', :sis) ON CONFLICT (id) DO NOTHING", {"id": ENROLLED_USER_ID, "sis": str(ENROLLED_USER_ID)})
     seed("INSERT INTO enrollments (id, course_id, user_id, role, enrollment_state) VALUES (:id, :cid, :uid, 'StudentEnrollment', 'active') ON CONFLICT (id) DO NOTHING", {"id": 50010, "cid": COURSE_ID, "uid": ENROLLED_USER_ID})
     seed("INSERT INTO assignments (id, course_id, name, workflow_state) VALUES (:id, :cid, 'A1', 'published') ON CONFLICT (id) DO NOTHING", {"id": ASSIGNMENT_ID, "cid": COURSE_ID})

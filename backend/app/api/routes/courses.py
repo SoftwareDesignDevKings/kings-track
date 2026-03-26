@@ -1,11 +1,17 @@
 from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.config import settings
 
 router = APIRouter(prefix="/courses", tags=["courses"])
+
+
+def _to_iso(value):
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
 def _submission_status(workflow_state: str | None, score, excused: bool | None) -> str:
@@ -23,47 +29,40 @@ def _submission_status(workflow_state: str | None, score, excused: bool | None) 
 async def list_courses(db: AsyncSession = Depends(get_db)):
     """List synced courses with summary stats. Respects CANVAS_COURSE_WHITELIST if set."""
     whitelist = settings.course_whitelist
+    base_query = """
+        SELECT
+            c.id,
+            c.name,
+            c.course_code,
+            c.workflow_state,
+            c.synced_at,
+            COUNT(DISTINCT e.user_id) AS student_count,
+            ROUND(CAST(AVG(sm.completion_rate) AS numeric), 3) AS avg_completion_rate,
+            ROUND(CAST(AVG(sm.on_time_rate) AS numeric), 3) AS avg_on_time_rate,
+            ROUND(CAST(AVG(sm.current_score) AS numeric), 1) AS avg_current_score
+        FROM courses c
+        LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
+        LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
+    """
     if whitelist:
-        result = await db.execute(
-            text("""
-                SELECT
-                    c.id,
-                    c.name,
-                    c.course_code,
-                    c.workflow_state,
-                    c.synced_at,
-                    COUNT(DISTINCT e.user_id) AS student_count,
-                    ROUND(AVG(sm.completion_rate)::numeric, 3) AS avg_completion_rate,
-                    ROUND(AVG(sm.on_time_rate)::numeric, 3) AS avg_on_time_rate,
-                    ROUND(AVG(sm.current_score)::numeric, 1) AS avg_current_score
-                FROM courses c
-                LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
-                LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
-                WHERE c.id = ANY(:ids)
+        statement = text(
+            base_query
+            + """
+                WHERE c.id IN :ids
                 GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
                 ORDER BY c.name
-            """),
-            {"ids": whitelist},
-        )
+            """
+        ).bindparams(bindparam("ids", expanding=True))
+        result = await db.execute(statement, {"ids": whitelist})
     else:
         result = await db.execute(
-            text("""
-                SELECT
-                    c.id,
-                    c.name,
-                    c.course_code,
-                    c.workflow_state,
-                    c.synced_at,
-                    COUNT(DISTINCT e.user_id) AS student_count,
-                    ROUND(AVG(sm.completion_rate)::numeric, 3) AS avg_completion_rate,
-                    ROUND(AVG(sm.on_time_rate)::numeric, 3) AS avg_on_time_rate,
-                    ROUND(AVG(sm.current_score)::numeric, 1) AS avg_current_score
-                FROM courses c
-                LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
-                LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
-                GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
-                ORDER BY c.name
-            """)
+            text(
+                base_query
+                + """
+                    GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
+                    ORDER BY c.name
+                """
+            )
         )
     rows = result.fetchall()
 
@@ -73,7 +72,7 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
             "name": row[1],
             "course_code": row[2],
             "workflow_state": row[3],
-            "last_synced": row[4].isoformat() if row[4] else None,
+            "last_synced": _to_iso(row[4]),
             "student_count": row[5] or 0,
             "avg_completion_rate": float(row[6]) if row[6] is not None else None,
             "avg_on_time_rate": float(row[7]) if row[7] is not None else None,
@@ -108,7 +107,7 @@ async def get_course(course_id: int, db: AsyncSession = Depends(get_db)):
         "name": row[1],
         "course_code": row[2],
         "workflow_state": row[3],
-        "last_synced": row[4].isoformat() if row[4] else None,
+        "last_synced": _to_iso(row[4]),
         "student_count": row[5] or 0,
         "assignment_count": row[6] or 0,
     }
@@ -135,7 +134,7 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
             SELECT id, name, assignment_group_name, assignment_group_id, points_possible, due_at, position
             FROM assignments
             WHERE course_id = :course_id AND workflow_state = 'published'
-            ORDER BY assignment_group_id NULLS LAST, position NULLS LAST, id
+            ORDER BY assignment_group_id IS NULL, assignment_group_id, position IS NULL, position, id
         """),
         {"course_id": course_id},
     )
@@ -157,7 +156,7 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
             "id": a_id,
             "name": a_name,
             "points_possible": points,
-            "due_at": due_at.isoformat() if due_at else None,
+            "due_at": _to_iso(due_at),
         })
 
     assignment_groups = [
@@ -174,7 +173,7 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
             JOIN users u ON u.id = e.user_id
             LEFT JOIN student_metrics sm ON sm.user_id = e.user_id AND sm.course_id = e.course_id
             WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
-            ORDER BY u.sortable_name NULLS LAST
+            ORDER BY u.sortable_name IS NULL, u.sortable_name
         """),
         {"course_id": course_id},
     )

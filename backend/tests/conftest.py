@@ -13,13 +13,35 @@ Seed/cleanup use psycopg2 (sync) — completely loop-agnostic.
 """
 import os
 import re
+
 import psycopg2
 import pytest
 from unittest.mock import patch
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
 
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+asyncpg://kings:kings@127.0.0.1:5432/kings_analytics",
+)
+
 from app.config import settings as app_settings
+from app.models import Base
+
+
+def _sync_db_url() -> str:
+    return (
+        app_settings.database_url
+        .replace("postgresql+asyncpg://", "postgresql://")
+        .replace("postgresql+psycopg2://", "postgresql://")
+    )
+
+
+_schema_engine = create_engine(_sync_db_url())
+Base.metadata.drop_all(_schema_engine, checkfirst=True)
+Base.metadata.create_all(_schema_engine)
+_schema_engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -37,12 +59,7 @@ _TestSessionLocal = async_sessionmaker(
 # ---------------------------------------------------------------------------
 
 def _dsn() -> str:
-    database_url = os.environ.get("DATABASE_URL", "")
-    return (
-        database_url
-        .replace("postgresql+asyncpg://", "postgresql://")
-        .replace("postgresql+psycopg2://", "postgresql://")
-    )
+    return _sync_db_url()
 
 
 def _sync_exec(sql: str, params: dict = None):
