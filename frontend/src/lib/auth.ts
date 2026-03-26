@@ -5,7 +5,7 @@ export interface AuthUser {
   localAuth: boolean
 }
 
-const authMode = (import.meta.env.VITE_AUTH_MODE || 'local').toLowerCase()
+const authMode = (import.meta.env.VITE_AUTH_MODE || 'prod').toLowerCase()
 
 export const isLocalAuth = authMode === 'local'
 
