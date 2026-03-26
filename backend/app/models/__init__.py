@@ -6,6 +6,8 @@ from app.models.assignment import Assignment
 from app.models.submission import Submission
 from app.models.student_metrics import StudentMetrics
 from app.models.sync_log import SyncLog
+from app.models.app_user import AppUser
+from app.models.course_whitelist import CourseWhitelist
 
 __all__ = [
     "Base",
@@ -16,4 +18,6 @@ __all__ = [
     "Submission",
     "StudentMetrics",
     "SyncLog",
+    "AppUser",
+    "CourseWhitelist",
 ]
