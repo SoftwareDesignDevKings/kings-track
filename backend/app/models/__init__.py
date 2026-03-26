@@ -8,6 +8,9 @@ from app.models.student_metrics import StudentMetrics
 from app.models.sync_log import SyncLog
 from app.models.app_user import AppUser
 from app.models.course_whitelist import CourseWhitelist
+from app.models.edstem_course_mapping import EdStemCourseMapping
+from app.models.edstem_lesson import EdStemLesson
+from app.models.edstem_lesson_progress import EdStemLessonProgress
 
 __all__ = [
     "Base",
@@ -20,4 +23,7 @@ __all__ = [
     "SyncLog",
     "AppUser",
     "CourseWhitelist",
+    "EdStemCourseMapping",
+    "EdStemLesson",
+    "EdStemLessonProgress",
 ]

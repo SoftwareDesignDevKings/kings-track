@@ -11,6 +11,7 @@ from sqlalchemy import text
 from app.canvas.client import CanvasClient, CanvasAPIError
 from app.config import settings
 from app.db import AsyncSessionLocal
+from app.edstem.client import EdStemClient
 from app.sync.tasks import (
     sync_courses,
     sync_enrollments,
@@ -18,6 +19,7 @@ from app.sync.tasks import (
     sync_submissions,
     compute_metrics,
 )
+from app.sync.edstem_tasks import sync_edstem_lessons
 from app.whitelist import get_effective_whitelist
 
 logger = logging.getLogger(__name__)
@@ -118,6 +120,26 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d metrics failed: %s", course_id, exc)
                 course_results["metrics_error"] = str(exc)
+
+
+            # EdStem lesson progress (optional — only runs if token is configured)
+            if settings.edstem_configured:
+                try:
+                    async with EdStemClient(settings.edstem_api_url, settings.edstem_api_token) as edstem:
+                        count = await sync_edstem_lessons(edstem, db, course_id)
+                        course_results["edstem_lessons"] = count
+                        if count:
+                            logger.info("  Course %d: %d edstem progress records", course_id, count)
+                except Exception as exc:
+                    logger.error("  Course %d edstem failed: %s", course_id, exc)
+                    course_results["edstem_error"] = str(exc)
+
+            # Stamp synced_at now that all data for this course is complete
+            await db.execute(
+                text("UPDATE courses SET synced_at = NOW() WHERE id = :id"),
+                {"id": course_id},
+            )
+            await db.commit()
 
         return course_results
 

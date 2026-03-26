@@ -234,3 +234,137 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
         "assignment_groups": assignment_groups,
         "students": students,
     }
+
+
+@router.get("/{course_id}/edstem-matrix")
+async def get_edstem_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Return the EdStem lesson completion matrix for a course.
+    Rows = students, columns = lessons grouped by module.
+    Returns {"mapped": false} if no EdStem mapping exists for this course.
+    """
+    # Verify course exists
+    course_result = await db.execute(
+        text("SELECT id FROM courses WHERE id = :id"),
+        {"id": course_id},
+    )
+    if not course_result.fetchone():
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Check for EdStem mapping
+    mapping_result = await db.execute(
+        text("SELECT edstem_course_id, edstem_course_name FROM edstem_course_mappings WHERE canvas_course_id = :cid"),
+        {"cid": course_id},
+    )
+    mapping_row = mapping_result.fetchone()
+    if not mapping_row:
+        return {"mapped": False}
+
+    edstem_course_id, edstem_course_name = mapping_row
+
+    # Fetch lessons ordered by module_name, position
+    lessons_result = await db.execute(
+        text("""
+            SELECT id, title, module_id, module_name, is_interactive, position
+            FROM edstem_lessons
+            WHERE edstem_course_id = :edstem_course_id
+            ORDER BY module_name IS NULL, module_name, position IS NULL, position, id
+        """),
+        {"edstem_course_id": edstem_course_id},
+    )
+    lessons_raw = lessons_result.fetchall()
+
+    # Build modules structure (like assignment_groups)
+    module_order: list[str] = []
+    seen_modules: set = set()
+    module_lessons: dict[str, list] = {}
+    all_lesson_ids: list[int] = []
+
+    for row in lessons_raw:
+        l_id, l_title, l_module_id, l_module_name, l_interactive, l_position = row
+        module_key = l_module_name or "Uncategorised"
+        if module_key not in seen_modules:
+            module_order.append(module_key)
+            seen_modules.add(module_key)
+            module_lessons[module_key] = []
+        module_lessons[module_key].append({
+            "id": l_id,
+            "title": l_title,
+            "is_interactive": bool(l_interactive),
+        })
+        all_lesson_ids.append(l_id)
+
+    modules = [{"name": m, "lessons": module_lessons[m]} for m in module_order]
+
+    # Fetch enrolled students
+    students_result = await db.execute(
+        text("""
+            SELECT u.id, u.name, u.sortable_name
+            FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
+            ORDER BY u.sortable_name IS NULL, u.sortable_name
+        """),
+        {"course_id": course_id},
+    )
+    students_raw = students_result.fetchall()
+
+    # Fetch all progress records for this EdStem course in one query
+    if all_lesson_ids:
+        progress_result = await db.execute(
+            text("""
+                SELECT user_id, edstem_lesson_id, status, completed_at
+                FROM edstem_lesson_progress
+                WHERE edstem_course_id = :edstem_course_id
+            """),
+            {"edstem_course_id": edstem_course_id},
+        )
+        progress_raw = progress_result.fetchall()
+    else:
+        progress_raw = []
+
+    # Build progress lookup: {user_id: {lesson_id: {status, completed_at}}}
+    progress_lookup: dict[int, dict[int, dict]] = {}
+    for p_row in progress_raw:
+        uid, lid, p_status, p_completed_at = p_row
+        if uid not in progress_lookup:
+            progress_lookup[uid] = {}
+        progress_lookup[uid][lid] = {
+            "status": p_status,
+            "completed_at": _to_iso(p_completed_at),
+        }
+
+    # Build student rows
+    students = []
+    for s_row in students_raw:
+        uid, name, sortable_name = s_row
+        user_progress = progress_lookup.get(uid, {})
+
+        progress = {}
+        completed_count = 0
+        for lid in all_lesson_ids:
+            if lid in user_progress:
+                p = user_progress[lid]
+                progress[str(lid)] = p
+                if p["status"] == "completed":
+                    completed_count += 1
+            else:
+                progress[str(lid)] = {"status": "not_started", "completed_at": None}
+
+        completion_rate = (completed_count / len(all_lesson_ids)) if all_lesson_ids else None
+
+        students.append({
+            "id": uid,
+            "name": name,
+            "sortable_name": sortable_name,
+            "completion_rate": completion_rate,
+            "progress": progress,
+        })
+
+    return {
+        "mapped": True,
+        "edstem_course_id": edstem_course_id,
+        "edstem_course_name": edstem_course_name,
+        "modules": modules,
+        "students": students,
+    }

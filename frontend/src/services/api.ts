@@ -1,5 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import type { Course, CourseMatrix, SyncStatus, HealthResponse, AppUser, WhitelistedCourse, AvailableCourse } from '../types'
+import type {
+  Course, CourseMatrix, SyncStatus, HealthResponse, AppUser,
+  WhitelistedCourse, AvailableCourse,
+  EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
+} from '../types'
 import { getAccessToken } from '../lib/auth'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
@@ -134,32 +138,34 @@ export function useAvailableCourses() {
 export function useAddToWhitelist() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (courseId: number) =>
-      fetchJSON('/admin/whitelist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ course_id: courseId }),
-      }),
-    onMutate: async (courseId: number) => {
+    mutationFn: (course: AvailableCourse) =>
+      fetchJSON<{ course_id: number; edstem_matched: { edstem_course_id: number; edstem_course_name: string } | null }>(
+        '/admin/whitelist',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ course_id: course.id, name: course.name, course_code: course.course_code }),
+        },
+      ),
+    onMutate: async (course: AvailableCourse) => {
       await queryClient.cancelQueries({ queryKey: ['admin-whitelist'] })
       const prev = queryClient.getQueryData<WhitelistedCourse[]>(['admin-whitelist'])
-      const available = queryClient.getQueryData<AvailableCourse[]>(['admin-whitelist-available'])
-      const course = available?.find(c => c.id === courseId)
-      if (course) {
-        queryClient.setQueryData<WhitelistedCourse[]>(['admin-whitelist'], old => [
-          ...(old ?? []),
-          { course_id: courseId, name: course.name, course_code: course.course_code, added_at: null },
-        ])
-      }
+      queryClient.setQueryData<WhitelistedCourse[]>(['admin-whitelist'], old => [
+        ...(old ?? []),
+        { course_id: course.id, name: course.name, course_code: course.course_code, added_at: null },
+      ])
       return { prev }
     },
     onError: (_err, _courseId, ctx) => {
       if (ctx?.prev !== undefined) queryClient.setQueryData(['admin-whitelist'], ctx.prev)
     },
-    onSettled: () => {
+    onSettled: (_data) => {
       queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] })
       queryClient.invalidateQueries({ queryKey: ['admin-whitelist-available'] })
       queryClient.invalidateQueries({ queryKey: ['courses'] })
+      if (_data?.edstem_matched) {
+        queryClient.invalidateQueries({ queryKey: ['admin-edstem-mappings'] })
+      }
     },
   })
 }
@@ -184,6 +190,75 @@ export function useRemoveFromWhitelist() {
       queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] })
       queryClient.invalidateQueries({ queryKey: ['admin-whitelist-available'] })
       queryClient.invalidateQueries({ queryKey: ['courses'] })
+    },
+  })
+}
+
+// ─── EdStem — lesson matrix ──────────────────────────────────────────────────
+
+export function useEdStemMatrix(courseId: number) {
+  return useQuery<EdStemMatrix>({
+    queryKey: ['edstem-matrix', courseId],
+    queryFn: () => fetchJSON<EdStemMatrix>(`/courses/${courseId}/edstem-matrix`),
+    staleTime: 60_000,
+    enabled: !isNaN(courseId),
+  })
+}
+
+// ─── Admin — EdStem mappings ──────────────────────────────────────────────────
+
+export function useEdStemMappings() {
+  return useQuery<EdStemCourseMapping[]>({
+    queryKey: ['admin-edstem-mappings'],
+    queryFn: () => fetchJSON<EdStemCourseMapping[]>('/admin/edstem-mappings'),
+  })
+}
+
+export function useEdStemAvailableCourses() {
+  return useQuery<EdStemAvailableCourse[]>({
+    queryKey: ['admin-edstem-courses'],
+    queryFn: () => fetchJSON<EdStemAvailableCourse[]>('/admin/edstem-courses'),
+  })
+}
+
+export function useCreateEdStemMapping() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { canvas_course_id: number; edstem_course_id: number; edstem_course_name: string }) =>
+      fetchJSON('/admin/edstem-mappings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-edstem-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['edstem-matrix'] })
+    },
+  })
+}
+
+export function useAutoMatchEdStem() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      fetchJSON<{ matched: { canvas_course_id: number; course_code: string; edstem_course_id: number; edstem_course_name: string }[]; unmatched: string[] }>(
+        '/admin/edstem-mappings/auto-match',
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-edstem-mappings'] })
+    },
+  })
+}
+
+export function useDeleteEdStemMapping() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (canvasCourseId: number) =>
+      fetchJSON<void>(`/admin/edstem-mappings/${canvasCourseId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-edstem-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['edstem-matrix'] })
     },
   })
 }

@@ -10,7 +10,13 @@ import {
   useRemoveFromWhitelist,
   useSyncStatus,
   useTriggerSync,
+  useEdStemMappings,
+  useEdStemAvailableCourses,
+  useCreateEdStemMapping,
+  useDeleteEdStemMapping,
+  useAutoMatchEdStem,
 } from '../services/api'
+import { useHealth } from '../services/api'
 
 export default function Admin() {
   const { data: users = [], isLoading: usersLoading } = useAdminUsers()
@@ -39,9 +45,38 @@ export default function Admin() {
     return d.toLocaleDateString()
   }
 
+  const { data: health } = useHealth()
+  const { data: edStemMappings = [], isLoading: edStemMappingsLoading } = useEdStemMappings()
+  const { data: edStemCourses = [], isLoading: edStemCoursesLoading } = useEdStemAvailableCourses()
+  const createEdStemMapping = useCreateEdStemMapping()
+  const deleteEdStemMapping = useDeleteEdStemMapping()
+  const autoMatchEdStem = useAutoMatchEdStem()
+
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState<'admin' | 'teacher'>('teacher')
   const [courseSearch, setCourseSearch] = useState('')
+  const [edStemCanvasId, setEdStemCanvasId] = useState<number | ''>('')
+  const [edStemCourseId, setEdStemCourseId] = useState<number | ''>('')
+  const [autoMatchedCourse, setAutoMatchedCourse] = useState<string | null>(null)
+
+  function handleCreateEdStemMapping(e: React.FormEvent) {
+    e.preventDefault()
+    if (edStemCanvasId === '' || edStemCourseId === '') return
+    const selectedCourse = edStemCourses.find(c => c.id === edStemCourseId)
+    createEdStemMapping.mutate(
+      {
+        canvas_course_id: edStemCanvasId as number,
+        edstem_course_id: edStemCourseId as number,
+        edstem_course_name: selectedCourse?.name ?? '',
+      },
+      {
+        onSuccess: () => {
+          setEdStemCanvasId('')
+          setEdStemCourseId('')
+        },
+      },
+    )
+  }
 
   const whitelistedIds = new Set(whitelist.map(w => w.course_id))
   const notWhitelisted = available.filter(c => !whitelistedIds.has(c.id))
@@ -214,6 +249,12 @@ export default function Admin() {
               </div>
             </div>
 
+            {autoMatchedCourse && (
+              <div className="px-5 py-2.5 bg-emerald-50 border-b border-emerald-100 text-xs text-emerald-700">
+                ✓ {autoMatchedCourse}
+              </div>
+            )}
+
             {(whitelistLoading || availableLoading) ? (
               <div className="px-5 py-8 text-sm text-slate-500 text-center">Loading…</div>
             ) : available.length === 0 ? (
@@ -267,7 +308,14 @@ export default function Admin() {
                           {c.course_code && <span className="text-slate-400 ml-1.5">· {c.course_code}</span>}
                         </span>
                         <button
-                          onClick={() => addToWhitelist.mutate(c.id)}
+                          onClick={() => addToWhitelist.mutate(c, {
+                            onSuccess: (data) => {
+                              if (data?.edstem_matched) {
+                                setAutoMatchedCourse(`${c.name} auto-linked to EdStem: ${data.edstem_matched.edstem_course_name}`)
+                                setTimeout(() => setAutoMatchedCourse(null), 5000)
+                              }
+                            }
+                          })}
                           disabled={addToWhitelist.isPending}
                           className="text-xs text-brand-600 hover:text-brand-800 font-medium disabled:opacity-50 shrink-0"
                         >
@@ -279,6 +327,107 @@ export default function Admin() {
                 </div>
 
               </div>
+            )}
+          </section>
+
+          {/* ── EdStem Course Mapping ───────────────────────────────── */}
+          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">EdStem Course Mapping</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Link Canvas courses to their EdStem counterparts for lesson tracking.
+                </p>
+              </div>
+              {health?.edstem_configured && (
+                <button
+                  onClick={() => autoMatchEdStem.mutate()}
+                  disabled={autoMatchEdStem.isPending}
+                  className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {autoMatchEdStem.isPending ? 'Matching…' : 'Auto-match'}
+                </button>
+              )}
+            </div>
+
+            {!health?.edstem_configured ? (
+              <div className="px-5 py-8 text-sm text-slate-400 text-center">
+                EdStem API not configured. Set <code className="text-xs bg-slate-100 px-1 rounded">EDSTEM_API_TOKEN</code> to enable.
+              </div>
+            ) : edStemMappingsLoading ? (
+              <div className="px-5 py-8 text-sm text-slate-500 text-center">Loading…</div>
+            ) : (
+              <>
+                {edStemMappings.length === 0 ? (
+                  <div className="px-5 py-6 text-sm text-slate-400 text-center">No mappings yet.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[480px] w-full text-sm">
+                      <thead className="bg-slate-50/80 text-slate-500 text-left text-xs uppercase tracking-wider">
+                        <tr>
+                          <th className="px-5 py-2.5 font-medium">Canvas Course</th>
+                          <th className="px-5 py-2.5 font-medium">EdStem Course</th>
+                          <th className="px-5 py-2.5" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {edStemMappings.map(m => (
+                          <tr key={m.canvas_course_id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-5 py-3 text-slate-800">{m.canvas_course_name}</td>
+                            <td className="px-5 py-3 text-slate-600">{m.edstem_course_name || `ID: ${m.edstem_course_id}`}</td>
+                            <td className="px-5 py-3 text-right">
+                              <button
+                                onClick={() => deleteEdStemMapping.mutate(m.canvas_course_id)}
+                                className="text-red-500 hover:text-red-700 text-xs font-medium"
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="px-5 py-4 border-t border-slate-100 bg-slate-50/50">
+                  <form onSubmit={handleCreateEdStemMapping} className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <select
+                      value={edStemCanvasId}
+                      onChange={e => setEdStemCanvasId(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      required
+                    >
+                      <option value="">Canvas course…</option>
+                      {whitelist.map(w => (
+                        <option key={w.course_id} value={w.course_id}>{w.name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={edStemCourseId}
+                      onChange={e => setEdStemCourseId(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      required
+                      disabled={edStemCoursesLoading}
+                    >
+                      <option value="">{edStemCoursesLoading ? 'Loading EdStem courses…' : 'EdStem course…'}</option>
+                      {edStemCourses.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="submit"
+                      disabled={createEdStemMapping.isPending || edStemCanvasId === '' || edStemCourseId === ''}
+                      className="px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      Link
+                    </button>
+                  </form>
+                  {createEdStemMapping.isError && (
+                    <p className="text-sm text-red-600 mt-2">{(createEdStemMapping.error as Error).message}</p>
+                  )}
+                </div>
+              </>
             )}
           </section>
         </div>

@@ -47,4 +47,8 @@ app.include_router(auth.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "canvas_configured": settings.canvas_configured}
+    return {
+        "status": "ok",
+        "canvas_configured": settings.canvas_configured,
+        "edstem_configured": settings.edstem_configured,
+    }

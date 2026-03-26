@@ -87,6 +87,7 @@ async def test_full_sync_writes_sync_log_on_completion():
         mock_settings.canvas_configured = True
         mock_settings.canvas_api_url = "https://canvas.test"
         mock_settings.canvas_api_token = "token"
+        mock_settings.edstem_configured = False  # skip EdStem in this test
 
         mock_canvas = AsyncMock()
         mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_canvas)
@@ -116,3 +117,100 @@ async def test_full_sync_writes_sync_log_on_completion():
 
     assert engine._running is False
     assert "elapsed_seconds" in result
+
+
+async def test_sync_course_calls_edstem_when_configured():
+    """When edstem_configured=True, sync_edstem_lessons is called during _sync_course()."""
+    engine = SyncEngine()
+    mock_canvas = AsyncMock()
+
+    with patch("app.sync.engine.settings") as mock_settings, \
+         patch("app.sync.engine.sync_enrollments", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.sync_assignments", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.sync_submissions", new_callable=AsyncMock, return_value=5), \
+         patch("app.sync.engine.compute_metrics", new_callable=AsyncMock, return_value=1), \
+         patch("app.sync.engine.sync_edstem_lessons", new_callable=AsyncMock, return_value=10) as mock_edstem, \
+         patch("app.sync.engine.EdStemClient") as mock_edstem_cls, \
+         patch("app.sync.engine.AsyncSessionLocal") as mock_session_factory:
+
+        mock_settings.edstem_configured = True
+        mock_settings.edstem_api_url = "https://edstem.org/api"
+        mock_settings.edstem_api_token = "edstem-token"
+
+        mock_edstem_client = AsyncMock()
+        mock_edstem_cls.return_value.__aenter__ = AsyncMock(return_value=mock_edstem_client)
+        mock_edstem_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        mock_db = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.execute = AsyncMock(return_value=AsyncMock(scalar=lambda: None, fetchall=lambda: []))
+        mock_session_factory.return_value = mock_db
+
+        result = await engine._sync_course(mock_canvas, 99999)
+
+    mock_edstem.assert_awaited_once()
+    assert result.get("edstem_lessons") == 10
+
+
+async def test_sync_course_edstem_error_does_not_block_canvas():
+    """An EdStem exception does not prevent synced_at from being stamped."""
+    engine = SyncEngine()
+    mock_canvas = AsyncMock()
+
+    with patch("app.sync.engine.settings") as mock_settings, \
+         patch("app.sync.engine.sync_enrollments", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.sync_assignments", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.sync_submissions", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.compute_metrics", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.EdStemClient") as mock_edstem_cls, \
+         patch("app.sync.engine.AsyncSessionLocal") as mock_session_factory:
+
+        mock_settings.edstem_configured = True
+        mock_settings.edstem_api_url = "https://edstem.org/api"
+        mock_settings.edstem_api_token = "edstem-token"
+
+        # EdStem client raises on entry
+        mock_edstem_cls.return_value.__aenter__ = AsyncMock(side_effect=Exception("EdStem down"))
+        mock_edstem_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        mock_db = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.execute = AsyncMock(return_value=AsyncMock(scalar=lambda: None, fetchall=lambda: []))
+        mock_session_factory.return_value = mock_db
+
+        result = await engine._sync_course(mock_canvas, 99999)
+
+    # EdStem error captured but synced_at stamped (commit was called)
+    assert "edstem_error" in result
+    mock_db.commit.assert_awaited()
+
+
+async def test_sync_course_skips_edstem_when_not_configured():
+    """When edstem_configured=False, EdStemClient is never instantiated."""
+    engine = SyncEngine()
+    mock_canvas = AsyncMock()
+
+    with patch("app.sync.engine.settings") as mock_settings, \
+         patch("app.sync.engine.sync_enrollments", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.sync_assignments", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.sync_submissions", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.compute_metrics", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.EdStemClient") as mock_edstem_cls, \
+         patch("app.sync.engine.AsyncSessionLocal") as mock_session_factory:
+
+        mock_settings.edstem_configured = False
+
+        mock_db = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.execute = AsyncMock(return_value=AsyncMock(scalar=lambda: None, fetchall=lambda: []))
+        mock_session_factory.return_value = mock_db
+
+        await engine._sync_course(mock_canvas, 99999)
+
+    mock_edstem_cls.assert_not_called()

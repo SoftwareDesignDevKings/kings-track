@@ -20,6 +20,7 @@ def _now():
 @pytest.fixture(autouse=True)
 def clean_admin_data():
     yield
+    cleanup("DELETE FROM edstem_course_mappings WHERE canvas_course_id IN (:a, :b)", {"a": COURSE_ID_A, "b": COURSE_ID_B})
     cleanup("DELETE FROM course_whitelist WHERE course_id IN (:a, :b)", {"a": COURSE_ID_A, "b": COURSE_ID_B})
     cleanup("DELETE FROM courses WHERE id IN (:a, :b)", {"a": COURSE_ID_A, "b": COURSE_ID_B})
     cleanup("DELETE FROM app_users WHERE email = :e", {"e": TEST_EMAIL})
@@ -118,17 +119,23 @@ def test_add_to_whitelist(app_client):
     _insert_course(COURSE_ID_A, "Course Alpha")
     resp = app_client.post("/api/admin/whitelist", json={"course_id": COURSE_ID_A})
     assert resp.status_code == 201
-    assert resp.json()["course_id"] == COURSE_ID_A
+    data = resp.json()
+    assert data["course_id"] == COURSE_ID_A
+    assert "edstem_matched" in data  # field always present, None when no match
 
     whitelist = app_client.get("/api/admin/whitelist").json()
     assert any(w["course_id"] == COURSE_ID_A for w in whitelist)
 
 
-def test_add_to_whitelist_duplicate_returns_409(app_client):
+def test_add_to_whitelist_duplicate_upserts(app_client):
     _insert_course(COURSE_ID_A, "Course Alpha")
-    app_client.post("/api/admin/whitelist", json={"course_id": COURSE_ID_A})
-    resp = app_client.post("/api/admin/whitelist", json={"course_id": COURSE_ID_A})
-    assert resp.status_code == 409
+    app_client.post("/api/admin/whitelist", json={"course_id": COURSE_ID_A, "name": "Course Alpha", "course_code": f"CODE{COURSE_ID_A}"})
+    resp = app_client.post("/api/admin/whitelist", json={"course_id": COURSE_ID_A, "name": "Course Alpha Updated", "course_code": f"CODE{COURSE_ID_A}"})
+    assert resp.status_code == 201
+    whitelist = app_client.get("/api/admin/whitelist").json()
+    entries = [w for w in whitelist if w["course_id"] == COURSE_ID_A]
+    assert len(entries) == 1
+    assert entries[0]["name"] == "Course Alpha Updated"
 
 
 def test_remove_from_whitelist(app_client):
@@ -142,14 +149,83 @@ def test_remove_from_whitelist(app_client):
     assert not any(w["course_id"] == COURSE_ID_A for w in whitelist)
 
 
-def test_whitelist_join_returns_course_name(app_client):
+def test_whitelist_stores_course_name(app_client):
     _insert_course(COURSE_ID_A, "Course Alpha")
-    app_client.post("/api/admin/whitelist", json={"course_id": COURSE_ID_A})
+    app_client.post("/api/admin/whitelist", json={"course_id": COURSE_ID_A, "name": "Course Alpha", "course_code": f"CODE{COURSE_ID_A}"})
 
     whitelist = app_client.get("/api/admin/whitelist").json()
     entry = next(w for w in whitelist if w["course_id"] == COURSE_ID_A)
     assert entry["name"] == "Course Alpha"
     assert entry["course_code"] == f"CODE{COURSE_ID_A}"
+
+
+def test_add_to_whitelist_auto_matches_edstem(app_client):
+    """When EdStem is configured and a course_code matches, a mapping is created automatically."""
+    from unittest.mock import patch, AsyncMock, MagicMock
+
+    _insert_course(COURSE_ID_A, "Software Engineering 2026")
+
+    mock_edstem_courses = [
+        {"course": {"id": 99001, "code": f"CODE{COURSE_ID_A}", "name": "SE EdStem 2026"}, "role": {}},
+        {"course": {"id": 99002, "code": "OTHER_COURSE", "name": "Other"}, "role": {}},
+    ]
+    mock_edstem = AsyncMock()
+    mock_edstem.get_user_courses = AsyncMock(return_value=mock_edstem_courses)
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_edstem)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.api.routes.admin.settings") as mock_settings, \
+         patch("app.api.routes.admin.EdStemClient", return_value=mock_client):
+        mock_settings.edstem_configured = True
+        mock_settings.edstem_api_url = "https://edstem.org/api"
+        mock_settings.edstem_api_token = "token"
+
+        resp = app_client.post("/api/admin/whitelist", json={
+            "course_id": COURSE_ID_A,
+            "name": "Software Engineering 2026",
+            "course_code": f"CODE{COURSE_ID_A}",
+        })
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["edstem_matched"] is not None
+    assert data["edstem_matched"]["edstem_course_id"] == 99001
+    assert data["edstem_matched"]["edstem_course_name"] == "SE EdStem 2026"
+
+    # Mapping should be persisted
+    mappings = app_client.get("/api/admin/edstem-mappings").json()
+    assert any(m["canvas_course_id"] == COURSE_ID_A and m["edstem_course_id"] == 99001 for m in mappings)
+
+
+def test_add_to_whitelist_no_edstem_match(app_client):
+    """When course_code has no EdStem match, edstem_matched is None and whitelist add still succeeds."""
+    from unittest.mock import patch, AsyncMock, MagicMock
+
+    _insert_course(COURSE_ID_A, "Course Alpha")
+
+    mock_edstem = AsyncMock()
+    mock_edstem.get_user_courses = AsyncMock(return_value=[
+        {"course": {"id": 99001, "code": "COMPLETELY_DIFFERENT", "name": "Other"}, "role": {}},
+    ])
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_edstem)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.api.routes.admin.settings") as mock_settings, \
+         patch("app.api.routes.admin.EdStemClient", return_value=mock_client):
+        mock_settings.edstem_configured = True
+        mock_settings.edstem_api_url = "https://edstem.org/api"
+        mock_settings.edstem_api_token = "token"
+
+        resp = app_client.post("/api/admin/whitelist", json={
+            "course_id": COURSE_ID_A,
+            "name": "Course Alpha",
+            "course_code": f"CODE{COURSE_ID_A}",
+        })
+
+    assert resp.status_code == 201
+    assert resp.json()["edstem_matched"] is None
 
 
 def test_list_courses_excludes_non_whitelisted_when_whitelist_active(app_client):
