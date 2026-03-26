@@ -86,8 +86,12 @@ class SyncEngine:
                         results["courses"] = {"status": "error", "error": str(exc)}
                         return results  # Can't proceed without courses
 
-                    # 2. Fetch course IDs from DB, respecting whitelist
-                    whitelist = settings.course_whitelist
+                    # 2. Fetch course IDs — prefer DB whitelist, fall back to env var
+                    whitelist_rows = await db.execute(
+                        text("SELECT course_id FROM course_whitelist")
+                    )
+                    whitelist = [r[0] for r in whitelist_rows.fetchall()]
+
                     if whitelist:
                         rows = await db.execute(
                             text("SELECT id FROM courses WHERE workflow_state = 'available' AND id = ANY(:ids)"),

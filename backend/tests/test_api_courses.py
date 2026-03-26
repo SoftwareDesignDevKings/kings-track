@@ -3,7 +3,6 @@ Tests for GET /api/courses and GET /api/courses/{id}.
 """
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import patch
 from tests.conftest import seed, cleanup
 
 
@@ -63,12 +62,12 @@ def test_get_course_found(app_client):
 
 
 def test_list_courses_filters_by_whitelist(app_client):
-    """When whitelist is active, only whitelisted courses appear."""
+    """When DB whitelist is active, only whitelisted courses appear."""
     _insert_course(4001, "Whitelisted Course")
     _insert_course(4002, "Excluded Course")
-    with patch("app.api.routes.courses.settings") as mock_settings:
-        mock_settings.course_whitelist = [4001]
-        resp = app_client.get("/api/courses")
+    seed("INSERT INTO course_whitelist (course_id) VALUES (:id) ON CONFLICT DO NOTHING", {"id": 4001})
+    resp = app_client.get("/api/courses")
+    cleanup("DELETE FROM course_whitelist WHERE course_id IN (4001, 4002)")
     assert resp.status_code == 200
     ids = [c["id"] for c in resp.json()]
     assert 4001 in ids
