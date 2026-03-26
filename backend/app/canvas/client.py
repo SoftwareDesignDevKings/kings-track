@@ -142,7 +142,7 @@ class CanvasClient:
             "type[]": "StudentEnrollment",
             "state[]": "active",
             "per_page": 100,
-            "include[]": ["grades"],
+            "include[]": ["grades", "email"],
         }
         if since:
             params["updated_after"] = since

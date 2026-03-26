@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useParams, Link, Navigate } from 'react-router-dom'
 import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
+import EdStemLessonTable from '../components/EdStemLessonTable'
 import Placeholder from '../components/Placeholder'
-import { useCourseMatrix } from '../services/api'
+import { useCourseMatrix, useEdStemMatrix } from '../services/api'
 
 type TabId = 'activities' | 'engagement' | 'at_risk' | 'edstem' | 'gradeo'
 
@@ -26,6 +27,7 @@ export default function CourseDetail() {
   const [activeTab, setActiveTab] = useState<TabId>('activities')
 
   const { data: matrix, isLoading, error } = useCourseMatrix(id)
+  const { data: edStemMatrix, isLoading: edStemLoading, error: edStemError } = useEdStemMatrix(id)
 
   if (!courseId || isNaN(id)) {
     return <Navigate to="/" replace />
@@ -111,7 +113,7 @@ export default function CourseDetail() {
               `}
             >
               {tab.label}
-              {tab.id !== 'activities' && (
+              {tab.id !== 'activities' && tab.id !== 'edstem' && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-400 rounded-full leading-none">
                   Soon
                 </span>
@@ -158,11 +160,29 @@ export default function CourseDetail() {
         )}
 
         {activeTab === 'edstem' && (
-          <Placeholder
-            title="EdStem integration coming soon"
-            description="Discussion participation, thread contributions, and response quality from EdStem will appear here once the API is connected."
-            phase="Phase 2"
-          />
+          <>
+            {edStemLoading && (
+              <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
+                <div className="h-10 bg-slate-100 border-b border-slate-200" />
+                {[1,2,3,4,5].map(i => (
+                  <div key={i} className="h-10 border-b border-slate-100 bg-white" />
+                ))}
+              </div>
+            )}
+            {edStemError && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
+                Failed to load EdStem data. Make sure the course has been synced.
+              </div>
+            )}
+            {edStemMatrix && !edStemMatrix.mapped && (
+              <Placeholder
+                title="No EdStem course linked"
+                description="Link this Canvas course to an EdStem course in Admin settings to see lesson progress here."
+                phase="Phase 2"
+              />
+            )}
+            {edStemMatrix?.mapped && <EdStemLessonTable matrix={edStemMatrix} />}
+          </>
         )}
 
         {activeTab === 'gradeo' && (

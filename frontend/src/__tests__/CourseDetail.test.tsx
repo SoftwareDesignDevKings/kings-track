@@ -7,6 +7,7 @@ import type { CourseMatrix } from '../types'
 
 vi.mock('../services/api', () => ({
   useCourseMatrix: vi.fn(),
+  useEdStemMatrix: vi.fn(),
   useSyncStatus: vi.fn(() => ({ data: { is_running: false, logs: [] } })),
   useTriggerSync: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useCurrentUser: vi.fn(() => ({ data: { email: 'test@example.com', role: 'admin' } })),
@@ -17,7 +18,7 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useParams: () => ({ courseId: '9001' }) }
 })
 
-import { useCourseMatrix } from '../services/api'
+import { useCourseMatrix, useEdStemMatrix } from '../services/api'
 
 const mockMatrix: CourseMatrix = {
   course_id: 9001,
@@ -46,7 +47,13 @@ const mockMatrix: CourseMatrix = {
   ],
 }
 
+const defaultEdStemMatrix = { mapped: false }
+
 describe('CourseDetail', () => {
+  beforeEach(() => {
+    vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: false, error: null, data: defaultEdStemMatrix } as any)
+  })
+
   it('shows loading skeleton while data is fetching', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: true, error: null, data: undefined } as any)
     renderWithProviders(<CourseDetail />)
@@ -85,6 +92,51 @@ describe('CourseDetail', () => {
   it('shows the activity table on the default activities tab', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />)
+    expect(screen.getByText('Alice Smith')).toBeInTheDocument()
+  })
+
+  it('EdStem tab does not have a "Soon" badge', () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    renderWithProviders(<CourseDetail />)
+    const edStemTab = screen.getByRole('button', { name: /^EdStem$/i })
+    expect(edStemTab.querySelector('.bg-slate-100')).toBeNull()
+  })
+
+  it('shows loading skeleton on EdStem tab while loading', async () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: true, error: null, data: undefined } as any)
+    const user = userEvent.setup()
+    renderWithProviders(<CourseDetail />)
+    await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
+    expect(document.querySelector('.animate-pulse')).toBeTruthy()
+  })
+
+  it('shows not-mapped placeholder on EdStem tab when course is not mapped', async () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: false, error: null, data: { mapped: false } } as any)
+    const user = userEvent.setup()
+    renderWithProviders(<CourseDetail />)
+    await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
+    expect(screen.getByText(/No EdStem course linked/i)).toBeInTheDocument()
+  })
+
+  it('shows EdStemLessonTable on EdStem tab when mapped', async () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useEdStemMatrix).mockReturnValue({
+      isLoading: false,
+      error: null,
+      data: {
+        mapped: true,
+        edstem_course_id: 28555,
+        edstem_course_name: 'SE 2026',
+        modules: [{ name: 'Module 1', lessons: [{ id: 1, title: 'SQL Basics', is_interactive: false }] }],
+        students: [{ id: 1, name: 'Alice Smith', sortable_name: 'Smith, Alice', completion_rate: 0.5, progress: { '1': { status: 'completed', completed_at: null } } }],
+      },
+    } as any)
+    const user = userEvent.setup()
+    renderWithProviders(<CourseDetail />)
+    await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
+    expect(screen.getByText('Module 1')).toBeInTheDocument()
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
   })
 })

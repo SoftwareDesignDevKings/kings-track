@@ -96,6 +96,7 @@ async def test_full_sync_only_syncs_whitelisted_courses():
         mock_settings.canvas_configured = True
         mock_settings.canvas_api_url = "https://canvas.test"
         mock_settings.canvas_api_token = "token"
+        mock_settings.edstem_configured = False  # skip EdStem in this test
 
         mock_canvas = AsyncMock()
         mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_canvas)

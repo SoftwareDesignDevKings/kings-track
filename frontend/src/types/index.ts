@@ -103,4 +103,57 @@ export interface AvailableCourse {
 export interface HealthResponse {
   status: string
   canvas_configured: boolean
+  edstem_configured: boolean
+}
+
+// ─── EdStem lesson matrix ─────────────────────────────────────────────────────
+
+export type EdStemLessonStatus = 'completed' | 'viewed' | 'not_started'
+
+export interface EdStemLesson {
+  id: number
+  title: string
+  is_interactive: boolean
+}
+
+export interface EdStemModule {
+  name: string
+  lessons: EdStemLesson[]
+}
+
+export interface EdStemStudentProgress {
+  status: EdStemLessonStatus
+  completed_at: string | null
+}
+
+export interface EdStemStudentRow {
+  id: number
+  name: string
+  sortable_name: string | null
+  completion_rate: number | null
+  progress: Record<string, EdStemStudentProgress>
+}
+
+export interface EdStemMatrix {
+  mapped: boolean
+  edstem_course_id?: number
+  edstem_course_name?: string
+  modules?: EdStemModule[]
+  students?: EdStemStudentRow[]
+}
+
+// ─── EdStem admin ─────────────────────────────────────────────────────────────
+
+export interface EdStemCourseMapping {
+  canvas_course_id: number
+  canvas_course_name: string
+  edstem_course_id: number
+  edstem_course_name: string
+  created_at: string | null
+}
+
+export interface EdStemAvailableCourse {
+  id: number
+  name: string
+  code: string
 }

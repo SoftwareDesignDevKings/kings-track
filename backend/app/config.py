@@ -6,6 +6,8 @@ class Settings(BaseSettings):
 
     canvas_api_url: str = ""
     canvas_api_token: str = ""
+    edstem_api_url: str = "https://edstem.org/api"
+    edstem_api_token: str = ""
     database_url: str = "postgresql+asyncpg://kings:kings@db:5432/kings_analytics"
     sync_interval_hours: int = 6
     incremental_sync_interval_minutes: int = 30
@@ -22,6 +24,10 @@ class Settings(BaseSettings):
     @property
     def canvas_configured(self) -> bool:
         return bool(self.canvas_api_url and self.canvas_api_token)
+
+    @property
+    def edstem_configured(self) -> bool:
+        return bool(self.edstem_api_token)
 
     @property
     def local_auth_enabled(self) -> bool:
