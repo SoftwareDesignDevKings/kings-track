@@ -97,12 +97,17 @@ def app_client():
     from fastapi.testclient import TestClient
     from app.main import app
     from app.db import get_db
+    from app.api.deps import require_auth
 
     async def override_get_db():
         async with _TestSessionLocal() as session:
             yield session
 
+    def override_require_auth():
+        return {"sub": "test-user"}
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[require_auth] = override_require_auth
 
     with patch("app.sync.engine.sync_engine.start_scheduler"), \
          patch("app.sync.engine.sync_engine.stop_scheduler"), \
@@ -113,6 +118,7 @@ def app_client():
             yield client
 
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(require_auth, None)
 
 
 @pytest.fixture
