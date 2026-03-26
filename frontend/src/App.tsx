@@ -1,13 +1,16 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Overview from './pages/Overview'
 import CourseDetail from './pages/CourseDetail'
+import Login from './pages/Login'
+import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Overview />} />
-        <Route path="/courses/:courseId" element={<CourseDetail />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
+        <Route path="/courses/:courseId" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
       </Routes>
     </BrowserRouter>
   )

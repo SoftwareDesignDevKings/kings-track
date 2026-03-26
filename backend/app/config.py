@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
     # Comma-separated Canvas course IDs to sync. If empty, all teacher courses are synced.
     canvas_course_whitelist: str = ""
+    supabase_jwt_secret: str = ""
 
     @property
     def cors_origins_list(self) -> list[str]:
