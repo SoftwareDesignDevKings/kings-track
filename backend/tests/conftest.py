@@ -118,7 +118,6 @@ def app_client():
          patch("app.api.routes.sync.AsyncSessionLocal", _TestSessionLocal):
         with TestClient(app) as client:
             yield client
-
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(require_auth, None)
     app.dependency_overrides.pop(require_admin, None)

@@ -43,6 +43,10 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    environment:
+      VITE_AUTH_MODE: ${AUTH_MODE:-local}
+      VITE_LOCAL_DEV_USER_EMAIL: ${LOCAL_DEV_USER_EMAIL:-admin@local.dev}
+      VITE_LOCAL_DEV_USER_ROLE: ${LOCAL_DEV_USER_ROLE:-admin}
     ports:
       - "5173:5173"
     volumes:

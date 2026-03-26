@@ -8,8 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import get_db
 
-_bearer = HTTPBearer()
-
 # Lazily initialised — created on first request so startup doesn't fail
 # if SUPABASE_URL is not yet set in local dev.
 _jwks_client: PyJWKClient | None = None
@@ -42,15 +40,43 @@ def _verify_jwt(token: str) -> dict:
         )
 
 
+async def _resolve_local_dev_user(db: AsyncSession) -> dict:
+    result = await db.execute(
+        text("SELECT id, email, role, created_at FROM app_users WHERE email = :email"),
+        {"email": settings.local_dev_user_email},
+    )
+    row = result.fetchone()
+
+    if row:
+        return {"id": row[0], "email": row[1], "role": row[2], "created_at": row[3]}
+
+    return {
+        "id": 0,
+        "email": settings.local_dev_user_email,
+        "role": settings.local_dev_user_role,
+        "created_at": None,
+    }
+
+
 async def require_auth(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
     Verify the Supabase JWT and check the user exists in app_users.
-    Returns the app_user row as a dict with keys: email, role.
+    Returns the app_user row as a dict with keys: id, email, role, created_at.
     Raises 401 if the token is invalid, 403 if the user is not registered.
     """
+    if settings.local_auth_enabled:
+        return await _resolve_local_dev_user(db)
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     payload = _verify_jwt(credentials.credentials)
     email = payload.get("email")
 
@@ -58,7 +84,7 @@ async def require_auth(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing email")
 
     result = await db.execute(
-        text("SELECT email, role FROM app_users WHERE email = :email"),
+        text("SELECT id, email, role, created_at FROM app_users WHERE email = :email"),
         {"email": email},
     )
     row = result.fetchone()
@@ -69,7 +95,7 @@ async def require_auth(
             detail="User not authorised — contact an administrator",
         )
 
-    return {"email": row[0], "role": row[1]}
+    return {"id": row[0], "email": row[1], "role": row[2], "created_at": row[3]}
 
 
 async def require_admin(

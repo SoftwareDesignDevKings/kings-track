@@ -23,3 +23,5 @@ def test_canvas_configured_only_url():
 def test_canvas_configured_both_set():
     s = make_settings(canvas_api_url="https://canvas.test", canvas_api_token="token123")
     assert s.canvas_configured is True
+
+

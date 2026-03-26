@@ -1,12 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Course, CourseMatrix, SyncStatus, HealthResponse, AppUser, WhitelistedCourse, AvailableCourse } from '../types'
-import { supabase } from '../lib/supabase'
+import { getAccessToken } from '../lib/auth'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 
 async function fetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
-  const { data } = await supabase.auth.getSession()
-  const token = data.session?.access_token
+  const token = await getAccessToken()
 
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -78,14 +77,7 @@ export function useTriggerSync() {
 export function useCurrentUser() {
   return useQuery<AppUser>({
     queryKey: ['current-user'],
-    queryFn: async () => {
-      const { data } = await supabase.auth.getSession()
-      const email = data.session?.user?.email
-      const result = await fetchJSON<AppUser[]>('/admin/users')
-      const user = result.find(u => u.email === email)
-      if (!user) throw new Error('User not found')
-      return user
-    },
+    queryFn: () => fetchJSON<AppUser>('/auth/me'),
     staleTime: 300_000,
     retry: false,
   })
@@ -142,12 +134,32 @@ export function useAddToWhitelist() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (courseId: number) =>
-      fetchJSON<{ course_id: number }>('/admin/whitelist', {
+      fetchJSON('/admin/whitelist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ course_id: courseId }),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] }),
+    onMutate: async (courseId: number) => {
+      await queryClient.cancelQueries({ queryKey: ['admin-whitelist'] })
+      const prev = queryClient.getQueryData<WhitelistedCourse[]>(['admin-whitelist'])
+      const available = queryClient.getQueryData<AvailableCourse[]>(['admin-whitelist-available'])
+      const course = available?.find(c => c.id === courseId)
+      if (course) {
+        queryClient.setQueryData<WhitelistedCourse[]>(['admin-whitelist'], old => [
+          ...(old ?? []),
+          { course_id: courseId, name: course.name, course_code: course.course_code, added_at: null },
+        ])
+      }
+      return { prev }
+    },
+    onError: (_err, _courseId, ctx) => {
+      if (ctx?.prev !== undefined) queryClient.setQueryData(['admin-whitelist'], ctx.prev)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] })
+      queryClient.invalidateQueries({ queryKey: ['admin-whitelist-available'] })
+      queryClient.invalidateQueries({ queryKey: ['courses'] })
+    },
   })
 }
 
@@ -156,6 +168,21 @@ export function useRemoveFromWhitelist() {
   return useMutation({
     mutationFn: (courseId: number) =>
       fetchJSON<void>(`/admin/whitelist/${courseId}`, { method: 'DELETE' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] }),
+    onMutate: async (courseId: number) => {
+      await queryClient.cancelQueries({ queryKey: ['admin-whitelist'] })
+      const prev = queryClient.getQueryData<WhitelistedCourse[]>(['admin-whitelist'])
+      queryClient.setQueryData<WhitelistedCourse[]>(['admin-whitelist'], old =>
+        (old ?? []).filter(w => w.course_id !== courseId)
+      )
+      return { prev }
+    },
+    onError: (_err, _courseId, ctx) => {
+      if (ctx?.prev !== undefined) queryClient.setQueryData(['admin-whitelist'], ctx.prev)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] })
+      queryClient.invalidateQueries({ queryKey: ['admin-whitelist-available'] })
+      queryClient.invalidateQueries({ queryKey: ['courses'] })
+    },
   })
 }

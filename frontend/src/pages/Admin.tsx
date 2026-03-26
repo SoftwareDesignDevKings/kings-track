@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Header from '../components/Header'
 import {
   useAdminUsers,
   useAddUser,
@@ -12,7 +13,7 @@ import {
 export default function Admin() {
   const { data: users = [], isLoading: usersLoading } = useAdminUsers()
   const { data: whitelist = [], isLoading: whitelistLoading } = useWhitelist()
-  const { data: available = [] } = useAvailableCourses()
+  const { data: available = [], isLoading: availableLoading } = useAvailableCourses()
 
   const addUser = useAddUser()
   const removeUser = useRemoveUser()
@@ -21,9 +22,18 @@ export default function Admin() {
 
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState<'admin' | 'teacher'>('teacher')
+  const [courseSearch, setCourseSearch] = useState('')
 
   const whitelistedIds = new Set(whitelist.map(w => w.course_id))
   const notWhitelisted = available.filter(c => !whitelistedIds.has(c.id))
+
+  const searchLower = courseSearch.toLowerCase()
+  const filteredWhitelist = whitelist.filter(
+    w => w.name.toLowerCase().includes(searchLower) || (w.course_code ?? '').toLowerCase().includes(searchLower)
+  )
+  const filteredAvailable = notWhitelisted.filter(
+    c => c.name.toLowerCase().includes(searchLower) || (c.course_code ?? '').toLowerCase().includes(searchLower)
+  )
 
   function handleAddUser(e: React.FormEvent) {
     e.preventDefault()
@@ -35,150 +45,189 @@ export default function Admin() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-10 space-y-12">
-      <h1 className="text-2xl font-semibold text-slate-900">Admin Settings</h1>
+    <div className="min-h-screen bg-slate-50">
+      <Header />
 
-      {/* ── Users ─────────────────────────────────────────────────────── */}
-      <section className="space-y-4">
-        <h2 className="text-lg font-medium text-slate-800">Users</h2>
+      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-slate-900">Settings</h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Manage users and course visibility.
+          </p>
+        </div>
 
-        {usersLoading ? (
-          <p className="text-sm text-slate-500">Loading…</p>
-        ) : (
-          <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
-            <thead className="bg-slate-50 text-slate-600 text-left">
-              <tr>
-                <th className="px-4 py-2 font-medium">Email</th>
-                <th className="px-4 py-2 font-medium">Role</th>
-                <th className="px-4 py-2 font-medium">Added</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {users.map(u => (
-                <tr key={u.email}>
-                  <td className="px-4 py-2 text-slate-800">{u.email}</td>
-                  <td className="px-4 py-2">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                        u.role === 'admin'
-                          ? 'bg-brand-100 text-brand-700'
-                          : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {u.role}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-slate-500">
-                    {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => removeUser.mutate(u.email)}
-                      className="text-red-500 hover:text-red-700 text-xs"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-
-        {/* Add user form */}
-        <form onSubmit={handleAddUser} className="flex items-center gap-3">
-          <input
-            type="email"
-            placeholder="user@example.com"
-            value={newEmail}
-            onChange={e => setNewEmail(e.target.value)}
-            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            required
-          />
-          <select
-            value={newRole}
-            onChange={e => setNewRole(e.target.value as 'admin' | 'teacher')}
-            className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            <option value="teacher">Teacher</option>
-            <option value="admin">Admin</option>
-          </select>
-          <button
-            type="submit"
-            disabled={addUser.isPending}
-            className="px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50"
-          >
-            Add User
-          </button>
-        </form>
-        {addUser.isError && (
-          <p className="text-sm text-red-600">{(addUser.error as Error).message}</p>
-        )}
-      </section>
-
-      {/* ── Course Whitelist ───────────────────────────────────────────── */}
-      <section className="space-y-4">
-        <h2 className="text-lg font-medium text-slate-800">Course Whitelist</h2>
-        <p className="text-sm text-slate-500">
-          When the whitelist is empty all synced courses are visible. Add courses here to restrict access.
-        </p>
-
-        {whitelistLoading ? (
-          <p className="text-sm text-slate-500">Loading…</p>
-        ) : whitelist.length === 0 ? (
-          <p className="text-sm text-slate-500 italic">No courses whitelisted — all courses are visible.</p>
-        ) : (
-          <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
-            <thead className="bg-slate-50 text-slate-600 text-left">
-              <tr>
-                <th className="px-4 py-2 font-medium">Course</th>
-                <th className="px-4 py-2 font-medium">Code</th>
-                <th className="px-4 py-2 font-medium">Added</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {whitelist.map(w => (
-                <tr key={w.course_id}>
-                  <td className="px-4 py-2 text-slate-800">{w.name}</td>
-                  <td className="px-4 py-2 text-slate-500">{w.course_code ?? '—'}</td>
-                  <td className="px-4 py-2 text-slate-500">
-                    {w.added_at ? new Date(w.added_at).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => removeFromWhitelist.mutate(w.course_id)}
-                      className="text-red-500 hover:text-red-700 text-xs"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-
-        {notWhitelisted.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-slate-700">Add a course:</p>
-            <div className="flex flex-wrap gap-2">
-              {notWhitelisted.map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => addToWhitelist.mutate(c.id)}
-                  disabled={addToWhitelist.isPending}
-                  className="px-3 py-1.5 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {c.name}
-                  {c.course_code ? ` (${c.course_code})` : ''}
-                </button>
-              ))}
+        <div className="space-y-8">
+          {/* ── Users ──────────────────────────────────────────────── */}
+          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-900">Users</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Control who can access the dashboard.</p>
             </div>
-          </div>
-        )}
-      </section>
+
+            {usersLoading ? (
+              <div className="px-5 py-8 text-sm text-slate-500 text-center">Loading…</div>
+            ) : users.length === 0 ? (
+              <div className="px-5 py-8 text-sm text-slate-400 text-center">No users yet.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-[640px] w-full text-sm">
+                  <thead className="bg-slate-50/80 text-slate-500 text-left text-xs uppercase tracking-wider">
+                    <tr>
+                      <th className="px-5 py-2.5 font-medium">Email</th>
+                      <th className="px-5 py-2.5 font-medium">Role</th>
+                      <th className="px-5 py-2.5 font-medium">Added</th>
+                      <th className="px-5 py-2.5" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {users.map(u => (
+                      <tr key={u.email} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-3 text-slate-800">{u.email}</td>
+                        <td className="px-5 py-3">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                              u.role === 'admin'
+                                ? 'bg-brand-100 text-brand-700'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {u.role}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-slate-500">
+                          {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          <button
+                            onClick={() => removeUser.mutate(u.email)}
+                            className="text-red-500 hover:text-red-700 text-xs font-medium"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="px-5 py-4 border-t border-slate-100 bg-slate-50/50">
+              <form onSubmit={handleAddUser} className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <input
+                  type="email"
+                  placeholder="user@example.com"
+                  value={newEmail}
+                  onChange={e => setNewEmail(e.target.value)}
+                  className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  required
+                />
+                <select
+                  value={newRole}
+                  onChange={e => setNewRole(e.target.value as 'admin' | 'teacher')}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 sm:w-36"
+                >
+                  <option value="teacher">Teacher</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={addUser.isPending}
+                  className="px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50"
+                >
+                  Add User
+                </button>
+              </form>
+              {addUser.isError && (
+                <p className="text-sm text-red-600 mt-2">{(addUser.error as Error).message}</p>
+              )}
+            </div>
+          </section>
+
+          {/* ── Course Whitelist ───────────────────────────────────── */}
+          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <h3 className="text-sm font-semibold text-slate-900 flex-1">Course Whitelist</h3>
+                <input
+                  type="search"
+                  placeholder="Search courses…"
+                  value={courseSearch}
+                  onChange={e => setCourseSearch(e.target.value)}
+                  className="sm:w-56 border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+            </div>
+
+            {(whitelistLoading || availableLoading) ? (
+              <div className="px-5 py-8 text-sm text-slate-500 text-center">Loading…</div>
+            ) : available.length === 0 ? (
+              <div className="px-5 py-8 text-center text-sm text-slate-400">No courses synced yet. Run a sync first.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+
+                {/* Left: Whitelisted */}
+                <div className="flex flex-col">
+                  <div className="px-4 py-2.5 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Whitelisted</span>
+                    <span className="text-xs text-slate-400">{filteredWhitelist.length}</span>
+                  </div>
+                  <div className="overflow-y-auto max-h-72 divide-y divide-slate-100">
+                    {filteredWhitelist.length === 0 ? (
+                      <p className="px-4 py-6 text-xs text-slate-400 text-center">
+                        {courseSearch ? 'No matches' : 'No courses whitelisted yet'}
+                      </p>
+                    ) : filteredWhitelist.map(w => (
+                      <div key={w.course_id} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 transition-colors">
+                        <span className="flex-1 min-w-0 text-sm text-slate-800 truncate">
+                          {w.name}
+                          {w.course_code && <span className="text-slate-400 ml-1.5">· {w.course_code}</span>}
+                        </span>
+                        <button
+                          onClick={() => removeFromWhitelist.mutate(w.course_id)}
+                          className="text-xs text-red-500 hover:text-red-700 font-medium shrink-0"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right: Available to add */}
+                <div className="flex flex-col">
+                  <div className="px-4 py-2.5 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">All Courses</span>
+                    <span className="text-xs text-slate-400">{filteredAvailable.length}</span>
+                  </div>
+                  <div className="overflow-y-auto max-h-72 divide-y divide-slate-100">
+                    {filteredAvailable.length === 0 ? (
+                      <p className="px-4 py-6 text-xs text-slate-400 text-center">
+                        {courseSearch ? 'No matches' : 'All courses are whitelisted'}
+                      </p>
+                    ) : filteredAvailable.map(c => (
+                      <div key={c.id} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 transition-colors">
+                        <span className="flex-1 min-w-0 text-sm text-slate-500 truncate">
+                          {c.name}
+                          {c.course_code && <span className="text-slate-400 ml-1.5">· {c.course_code}</span>}
+                        </span>
+                        <button
+                          onClick={() => addToWhitelist.mutate(c.id)}
+                          disabled={addToWhitelist.isPending}
+                          className="text-xs text-brand-600 hover:text-brand-800 font-medium disabled:opacity-50 shrink-0"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            )}
+          </section>
+        </div>
+      </main>
     </div>
   )
 }
