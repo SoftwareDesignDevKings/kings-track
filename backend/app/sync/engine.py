@@ -90,8 +90,7 @@ class SyncEngine:
                     whitelist_rows = await db.execute(
                         text("SELECT course_id FROM course_whitelist")
                     )
-                    db_whitelist = [r[0] for r in whitelist_rows.fetchall()]
-                    whitelist = db_whitelist or settings.course_whitelist
+                    whitelist = [r[0] for r in whitelist_rows.fetchall()]
 
                     if whitelist:
                         rows = await db.execute(

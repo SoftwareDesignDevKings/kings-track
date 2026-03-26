@@ -115,9 +115,7 @@ def app_client():
 
     with patch("app.sync.engine.sync_engine.start_scheduler"), \
          patch("app.sync.engine.sync_engine.stop_scheduler"), \
-         patch("app.api.routes.sync.AsyncSessionLocal", _TestSessionLocal), \
-         patch("app.api.routes.courses.settings") as mock_settings:
-        mock_settings.course_whitelist = []
+         patch("app.api.routes.sync.AsyncSessionLocal", _TestSessionLocal):
         with TestClient(app) as client:
             yield client
 

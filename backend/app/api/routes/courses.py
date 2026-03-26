@@ -3,7 +3,6 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.config import settings
 from app.api.deps import require_auth
 
 router = APIRouter(prefix="/courses", tags=["courses"], dependencies=[Depends(require_auth)])
@@ -30,8 +29,7 @@ def _submission_status(workflow_state: str | None, score, excused: bool | None) 
 async def list_courses(db: AsyncSession = Depends(get_db)):
     """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
     wl_rows = await db.execute(text("SELECT course_id FROM course_whitelist"))
-    db_whitelist = [r[0] for r in wl_rows.fetchall()]
-    whitelist = db_whitelist or settings.course_whitelist
+    whitelist = [r[0] for r in wl_rows.fetchall()]
     base_query = """
         SELECT
             c.id,
