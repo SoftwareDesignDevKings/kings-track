@@ -8,6 +8,7 @@ vi.mock('../services/api', () => ({
   useHealth: vi.fn(),
   useSyncStatus: vi.fn(() => ({ data: { is_running: false, logs: [] } })),
   useTriggerSync: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useCurrentUser: vi.fn(() => ({ data: { email: 'test@example.com', role: 'admin' } })),
 }))
 
 import { useCourses, useHealth } from '../services/api'

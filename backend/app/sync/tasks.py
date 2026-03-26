@@ -10,7 +10,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.canvas.client import CanvasClient
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +27,12 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
-async def sync_courses(canvas: CanvasClient, db: AsyncSession) -> int:
-    """Fetch and upsert courses. If a whitelist is configured, only those IDs are stored."""
+async def sync_courses(canvas: CanvasClient, db: AsyncSession, whitelist_ids: list[int] | None = None) -> int:
+    """Fetch and upsert courses from Canvas, filtered to whitelist IDs."""
     courses = await canvas.list_courses()
-    whitelist = settings.course_whitelist
-    if whitelist:
-        all_count = len(courses)
-        courses = [c for c in courses if c["id"] in whitelist]
-        logger.info("Whitelist active — syncing %d of %d available courses", len(courses), all_count)
+    allowed_ids = set(whitelist_ids or [])
+    if allowed_ids:
+        courses = [c for c in courses if int(c["id"]) in allowed_ids]
     now = _now()
 
     for course in courses:

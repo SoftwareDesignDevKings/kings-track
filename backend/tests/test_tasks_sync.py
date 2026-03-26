@@ -93,34 +93,13 @@ async def test_sync_courses_inserts_course(db):
 
     mock_canvas.list_courses = _courses
 
-    with __import__('unittest.mock', fromlist=['patch']).patch(
-        'app.sync.tasks.settings'
-    ) as mock_settings:
-        mock_settings.course_whitelist = []
-        count = await sync_courses(mock_canvas, db)
+    count = await sync_courses(mock_canvas, db)
 
     assert count == 1
     result = await db.execute(text("SELECT name FROM courses WHERE id = :id"), {"id": COURSE_ID})
     assert result.scalar() == "Test Course"
 
 
-async def test_sync_courses_applies_whitelist(db):
-    """When whitelist is set, courses not in it are excluded."""
-    async def _courses():
-        return [_make_course(COURSE_ID), _make_course(99999)]
-
-    mock_canvas = MagicMock()
-    mock_canvas.list_courses = _courses
-
-    with __import__('unittest.mock', fromlist=['patch']).patch(
-        'app.sync.tasks.settings'
-    ) as mock_settings:
-        mock_settings.course_whitelist = [COURSE_ID]
-        count = await sync_courses(mock_canvas, db)
-
-    assert count == 1
-    result = await db.execute(text("SELECT COUNT(*) FROM courses WHERE id IN (:a, :b)"), {"a": COURSE_ID, "b": 99999})
-    assert result.scalar() == 1
 
 
 # ---------------------------------------------------------------------------

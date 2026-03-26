@@ -9,6 +9,7 @@ const mockMutate = vi.fn()
 vi.mock('../services/api', () => ({
   useSyncStatus: vi.fn(),
   useTriggerSync: vi.fn(() => ({ mutate: mockMutate, isPending: false })),
+  useCurrentUser: vi.fn(() => ({ data: { email: 'test@example.com', role: 'admin' } })),
 }))
 
 import { useSyncStatus } from '../services/api'

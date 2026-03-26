@@ -76,6 +76,28 @@ export interface SyncStatus {
   logs: SyncLogEntry[]
 }
 
+// ─── Admin ───────────────────────────────────────────────────────────────────
+
+export interface AppUser {
+  id: number
+  email: string
+  role: 'admin' | 'teacher'
+  created_at: string | null
+}
+
+export interface WhitelistedCourse {
+  course_id: number
+  name: string
+  course_code: string | null
+  added_at: string | null
+}
+
+export interface AvailableCourse {
+  id: number
+  name: string
+  course_code: string | null
+}
+
 // ─── Health ──────────────────────────────────────────────────────────────────
 
 export interface HealthResponse {
