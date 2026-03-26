@@ -1,10 +1,20 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSyncStatus, useTriggerSync, useCurrentUser } from '../services/api'
+import { signOut, isLocalAuth } from '../lib/auth'
 
 export default function Header() {
   const { data: syncStatus } = useSyncStatus()
   const triggerSync = useTriggerSync()
   const { data: currentUser } = useCurrentUser()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  const handleLogout = async () => {
+    await signOut()
+    queryClient.clear()
+    navigate('/login')
+  }
 
   const isRunning = syncStatus?.is_running ?? false
   const lastSync = syncStatus?.logs?.find(l => l.status === 'completed')?.completed_at
@@ -75,6 +85,15 @@ export default function Header() {
             >
               {isRunning ? 'Syncing…' : 'Sync Now'}
             </button>
+
+            {!isLocalAuth && (
+              <button
+                onClick={handleLogout}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-400 transition-colors"
+              >
+                Log Out
+              </button>
+            )}
           </div>
         </div>
       </div>
