@@ -71,8 +71,24 @@ export interface SyncLogEntry {
   error_message: string | null
 }
 
+export interface SyncProgress {
+  sync_type: string
+  started_at: string
+  phase: string
+  current_course_id: number | null
+  current_step: string | null
+  total_courses: number
+  completed_courses: number
+  pending_course_ids: number[]
+  completed_course_ids: number[]
+  total_steps: number | null
+  completed_steps: number
+  includes_edstem: boolean
+}
+
 export interface SyncStatus {
   is_running: boolean
+  progress: SyncProgress | null
   logs: SyncLogEntry[]
 }
 
