@@ -97,17 +97,19 @@ async def test_full_sync_writes_sync_log_on_completion():
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
 
-        # First call: get_effective_whitelist returns one course ID
-        # Second call: get available course IDs from DB — returns that same course
+        # Mock execute to return appropriate results based on call order
+        # Each AsyncSessionLocal() call gets its own mock_db, so execute
+        # is called multiple times across sessions
         whitelist_result = AsyncMock()
         whitelist_result.fetchall = lambda: [(99999,)]
         course_ids_result = AsyncMock()
         course_ids_result.fetchall = lambda: [(99999,)]
-        # Subsequent calls (sync_log insert) return a scalar
         log_result = AsyncMock()
         log_result.scalar = lambda: 1
 
-        mock_db.execute = AsyncMock(side_effect=[whitelist_result, course_ids_result, log_result])
+        mock_db.execute = AsyncMock(side_effect=[
+            whitelist_result, course_ids_result, log_result, log_result,
+        ])
         mock_session_factory.return_value = mock_db
 
         result = await engine.full_sync()

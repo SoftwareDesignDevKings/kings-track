@@ -14,7 +14,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    sync_engine.start_scheduler(interval_hours=settings.sync_interval_hours)
+    sync_engine.start_scheduler(
+        interval_hours=settings.sync_interval_hours,
+        incremental_interval_minutes=settings.incremental_sync_interval_minutes,
+    )
     yield
     # Shutdown
     sync_engine.stop_scheduler()

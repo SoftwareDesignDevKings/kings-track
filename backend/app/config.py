@@ -7,7 +7,8 @@ class Settings(BaseSettings):
     canvas_api_url: str = ""
     canvas_api_token: str = ""
     database_url: str = "postgresql+asyncpg://kings:kings@db:5432/kings_analytics"
-    sync_interval_hours: int = 24
+    sync_interval_hours: int = 6
+    incremental_sync_interval_minutes: int = 30
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
     auth_mode: str = "local"
     local_dev_user_email: str = "admin@local.dev"

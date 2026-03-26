@@ -8,6 +8,8 @@ import {
   useAvailableCourses,
   useAddToWhitelist,
   useRemoveFromWhitelist,
+  useSyncStatus,
+  useTriggerSync,
 } from '../services/api'
 
 export default function Admin() {
@@ -19,6 +21,23 @@ export default function Admin() {
   const removeUser = useRemoveUser()
   const addToWhitelist = useAddToWhitelist()
   const removeFromWhitelist = useRemoveFromWhitelist()
+  const { data: syncStatus } = useSyncStatus()
+  const triggerSync = useTriggerSync()
+
+  const isRunning = syncStatus?.is_running ?? false
+  const lastSync = syncStatus?.logs?.find(l => l.status === 'completed')?.completed_at
+
+  const formatLastSync = (iso: string | null | undefined) => {
+    if (!iso) return 'Never'
+    const d = new Date(iso)
+    const now = new Date()
+    const diffMins = Math.floor((now.getTime() - d.getTime()) / 60000)
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    return d.toLocaleDateString()
+  }
 
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState<'admin' | 'teacher'>('teacher')
@@ -57,6 +76,42 @@ export default function Admin() {
         </div>
 
         <div className="space-y-8">
+          {/* ── Data Sync ──────────────────────────────────────────── */}
+          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-900">Data Sync</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Canvas data syncs automatically. Incremental updates run every 30 minutes, with a full sync every 6 hours.
+              </p>
+            </div>
+
+            <div className="px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {isRunning ? (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    <span className="text-sm text-slate-600">Syncing…</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span className="text-sm text-slate-600">
+                      Last sync: {formatLastSync(lastSync)}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={() => triggerSync.mutate()}
+                disabled={isRunning || triggerSync.isPending}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isRunning ? 'Syncing…' : 'Sync Now'}
+              </button>
+            </div>
+          </section>
+
           {/* ── Users ──────────────────────────────────────────────── */}
           <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100">

@@ -136,16 +136,19 @@ class CanvasClient:
             courses.append(course)
         return courses
 
-    def list_enrollments(self, course_id: int) -> AsyncIterator[dict]:
+    def list_enrollments(self, course_id: int, since: str | None = None) -> AsyncIterator[dict]:
         """Yield active student enrollments including grade data."""
+        params: dict[str, Any] = {
+            "type[]": "StudentEnrollment",
+            "state[]": "active",
+            "per_page": 100,
+            "include[]": ["grades"],
+        }
+        if since:
+            params["updated_after"] = since
         return self.get_paginated(
             f"/api/v1/courses/{course_id}/enrollments",
-            params={
-                "type[]": "StudentEnrollment",
-                "state[]": "active",
-                "per_page": 100,
-                "include[]": ["grades"],
-            },
+            params=params,
         )
 
     def list_assignments(self, course_id: int) -> AsyncIterator[dict]:
@@ -169,16 +172,19 @@ class CanvasClient:
             groups.append(group)
         return groups
 
-    def list_submissions(self, course_id: int) -> AsyncIterator[dict]:
+    def list_submissions(self, course_id: int, since: str | None = None) -> AsyncIterator[dict]:
         """
         Yield all student submissions for all assignments in a course.
         Uses the bulk endpoint to minimise API calls.
         """
+        params: dict[str, Any] = {
+            "student_ids[]": "all",
+            "per_page": 100,
+            "include[]": ["assignment"],
+        }
+        if since:
+            params["submitted_since"] = since
         return self.get_paginated(
             f"/api/v1/courses/{course_id}/students/submissions",
-            params={
-                "student_ids[]": "all",
-                "per_page": 100,
-                "include[]": ["assignment"],
-            },
+            params=params,
         )
