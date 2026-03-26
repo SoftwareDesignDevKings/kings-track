@@ -149,16 +149,13 @@ class SyncEngine:
                     logger.info("Whitelist is empty — nothing to sync")
                     results["courses"] = {"status": "ok", "records": 0}
                     results["skipped"] = "No courses in whitelist"
-                    return results
+                else:
+                    course_ids, sync_results = await self._sync_courses(canvas, whitelist)
+                    results.update(sync_results)
 
-                course_ids, sync_results = await self._sync_courses(canvas, whitelist)
-                results.update(sync_results)
-
-                if not course_ids:
-                    return results
-
-                for course_id in course_ids:
-                    results[str(course_id)] = await self._sync_course(canvas, course_id)
+                    if course_ids:
+                        for course_id in course_ids:
+                            results[str(course_id)] = await self._sync_course(canvas, course_id)
 
         except CanvasAPIError as exc:
             logger.error("Canvas API error during sync: %s", exc)
@@ -219,18 +216,17 @@ class SyncEngine:
 
                 if not whitelist:
                     results["skipped"] = "No courses in whitelist"
-                    return results
+                else:
+                    # Get available course IDs from DB (skip course sync)
+                    async with AsyncSessionLocal() as db:
+                        result = await db.execute(
+                            text("SELECT id FROM courses WHERE workflow_state = 'available' AND id = ANY(:ids)"),
+                            {"ids": whitelist},
+                        )
+                        course_ids = [row[0] for row in result.fetchall()]
 
-                # Get available course IDs from DB (skip course sync)
-                async with AsyncSessionLocal() as db:
-                    result = await db.execute(
-                        text("SELECT id FROM courses WHERE workflow_state = 'available' AND id = ANY(:ids)"),
-                        {"ids": whitelist},
-                    )
-                    course_ids = [row[0] for row in result.fetchall()]
-
-                for course_id in course_ids:
-                    results[str(course_id)] = await self._sync_course(canvas, course_id, since=since)
+                    for course_id in course_ids:
+                        results[str(course_id)] = await self._sync_course(canvas, course_id, since=since)
 
         except CanvasAPIError as exc:
             logger.error("Canvas API error during incremental sync: %s", exc)
