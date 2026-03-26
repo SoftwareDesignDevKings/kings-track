@@ -125,14 +125,15 @@ export default function EdStemLessonTable({ matrix }: Props) {
             {allLessons.map(lesson => (
               <th
                 key={lesson.id}
-                className="border-r border-slate-100 last:border-r-slate-200"
-                style={{ height: '130px', width: '36px', minWidth: '36px', maxWidth: '36px', verticalAlign: 'bottom', padding: '8px 4px' }}
+                className="h-[130px] w-11 min-w-11 max-w-11 border-r border-slate-100 px-0 py-0 align-bottom last:border-r-slate-200"
                 title={lesson.title + (lesson.is_interactive ? ' (interactive)' : '')}
               >
-                <div style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', overflow: 'hidden', maxHeight: '120px', textOverflow: 'ellipsis' }}
-                  className={`text-xs font-medium mx-auto ${lesson.is_interactive ? 'text-brand-500' : 'text-slate-500'}`}
-                >
-                  {lesson.title}
+                <div className="flex h-full w-full items-end justify-center px-1 pb-2">
+                  <span
+                    className={`block max-h-[112px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-xs font-medium leading-tight [transform:rotate(180deg)] [writing-mode:vertical-rl] ${lesson.is_interactive ? 'text-brand-500' : 'text-slate-500'}`}
+                  >
+                    {lesson.title}
+                  </span>
                 </div>
               </th>
             ))}

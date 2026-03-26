@@ -57,8 +57,8 @@ export function useSyncStatus() {
   return useQuery<SyncStatus>({
     queryKey: ['sync-status'],
     queryFn: () => fetchJSON<SyncStatus>('/sync/status'),
-    refetchInterval: 5_000,
-    staleTime: 3_000,
+    refetchInterval: query => query.state.data?.is_running ? 1_000 : 4_000,
+    staleTime: 0,
   })
 }
 
@@ -69,6 +69,37 @@ export function useTriggerSync() {
       fetchJSON<{ status: string; message: string }>('/sync/trigger', {
         method: 'POST',
       }),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['sync-status'] })
+      const previous = queryClient.getQueryData<SyncStatus>(['sync-status'])
+      const startedAt = new Date().toISOString()
+
+      queryClient.setQueryData<SyncStatus>(['sync-status'], old => ({
+        is_running: true,
+        progress: old?.progress ?? {
+          sync_type: 'full',
+          started_at: startedAt,
+          phase: 'Preparing sync',
+          current_course_id: null,
+          current_step: null,
+          total_courses: 0,
+          completed_courses: 0,
+          pending_course_ids: [],
+          completed_course_ids: [],
+          total_steps: null,
+          completed_steps: 0,
+          includes_edstem: false,
+        },
+        logs: old?.logs ?? [],
+      }))
+
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['sync-status'], context.previous)
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
       queryClient.invalidateQueries({ queryKey: ['courses'] })

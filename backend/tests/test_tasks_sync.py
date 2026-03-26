@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from sqlalchemy import text
 
-from app.sync.tasks import sync_courses, sync_enrollments, sync_assignments, compute_metrics
+from app.sync.tasks import sync_courses, sync_enrollments, sync_assignments, sync_submissions, compute_metrics
 from tests.conftest import seed, cleanup
 
 COURSE_ID = 44400
@@ -65,6 +65,23 @@ def _make_assignment(assignment_id=55500):
         "position": 1,
         "workflow_state": "published",
         "submission_types": ["online_text_entry"],
+    }
+
+
+def _make_submission(submission_id=66600, assignment_id=55500, user_id=USER_ID):
+    return {
+        "id": submission_id,
+        "assignment_id": assignment_id,
+        "user_id": user_id,
+        "score": 8.0,
+        "grade": "B",
+        "workflow_state": "graded",
+        "submitted_at": "2026-01-01T10:00:00Z",
+        "graded_at": "2026-01-01T11:00:00Z",
+        "late": False,
+        "missing": False,
+        "excused": False,
+        "attempt": 2,
     }
 
 
@@ -171,6 +188,63 @@ async def test_sync_assignments_inserts_assignment(db):
         text("SELECT assignment_group_name FROM assignments WHERE id = 55500")
     )
     assert result.scalar() == "Classwork"
+
+
+# ---------------------------------------------------------------------------
+# sync_submissions
+# ---------------------------------------------------------------------------
+
+async def test_sync_submissions_inserts_batch_and_skips_unused_fields(db):
+    now = datetime.now(timezone.utc).isoformat()
+    seed(
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
+        {"id": COURSE_ID, "now": now},
+    )
+    seed(
+        "INSERT INTO users (id, name, sis_id) VALUES (:id, 'S', :sis) ON CONFLICT (id) DO NOTHING",
+        {"id": USER_ID, "sis": str(USER_ID)},
+    )
+    seed(
+        "INSERT INTO enrollments (id, course_id, user_id, role, enrollment_state) VALUES (:id, :cid, :uid, 'StudentEnrollment', 'active') ON CONFLICT (id) DO NOTHING",
+        {"id": ENROLLMENT_ID, "cid": COURSE_ID, "uid": USER_ID},
+    )
+    seed(
+        "INSERT INTO assignments (id, course_id, name, workflow_state) VALUES (55500, :cid, 'A0', 'published') ON CONFLICT (id) DO NOTHING",
+        {"cid": COURSE_ID},
+    )
+    seed(
+        "INSERT INTO assignments (id, course_id, name, workflow_state) VALUES (55501, :cid, 'A1', 'published') ON CONFLICT (id) DO NOTHING",
+        {"cid": COURSE_ID},
+    )
+
+    mock_canvas = MagicMock()
+    mock_canvas.list_submissions.return_value = _async_gen([
+        _make_submission(66600, 55500),
+        _make_submission(66601, 55501),
+    ])
+
+    count = await sync_submissions(mock_canvas, db, COURSE_ID)
+
+    assert count == 2
+    result = await db.execute(
+        text("""
+            SELECT score, workflow_state, late, missing, excused, grade, submitted_at, graded_at, attempt
+            FROM submissions
+            WHERE assignment_id = 55500 AND user_id = :uid
+        """),
+        {"uid": USER_ID},
+    )
+    row = result.fetchone()
+    assert row is not None
+    assert row[0] == 8.0
+    assert row[1] == "graded"
+    assert row[2] is False
+    assert row[3] is False
+    assert row[4] is False
+    assert row[5] is None
+    assert row[6] is None
+    assert row[7] is None
+    assert row[8] is None
 
 
 # ---------------------------------------------------------------------------

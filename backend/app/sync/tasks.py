@@ -7,11 +7,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.canvas.client import CanvasClient
+from app.models.submission import Submission
 
 logger = logging.getLogger(__name__)
+SUBMISSION_BATCH_SIZE = 500
 
 
 def _now() -> datetime:
@@ -222,6 +225,7 @@ async def sync_submissions(
     """
     count = 0
     now = _now()
+    batch: list[dict[str, Any]] = []
 
     # Load enrolled student IDs to skip submissions for users not in our DB
     result = await db.execute(
@@ -230,6 +234,28 @@ async def sync_submissions(
     )
     enrolled_user_ids = {row[0] for row in result}
 
+    async def flush_batch():
+        nonlocal batch
+        if not batch:
+            return
+
+        stmt = pg_insert(Submission).values(batch)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["assignment_id", "user_id"],
+            set_={
+                "id": stmt.excluded.id,
+                "course_id": stmt.excluded.course_id,
+                "score": stmt.excluded.score,
+                "workflow_state": stmt.excluded.workflow_state,
+                "late": stmt.excluded.late,
+                "missing": stmt.excluded.missing,
+                "excused": stmt.excluded.excused,
+                "synced_at": stmt.excluded.synced_at,
+            },
+        )
+        await db.execute(stmt)
+        batch = []
+
     async for submission in canvas.list_submissions(course_id, since=since):
         user_id = submission.get("user_id")
         assignment_id = submission.get("assignment_id")
@@ -237,46 +263,25 @@ async def sync_submissions(
         if not user_id or not assignment_id or user_id not in enrolled_user_ids:
             continue
 
-        await db.execute(
-            text("""
-                INSERT INTO submissions (id, assignment_id, user_id, course_id, score, grade,
-                    workflow_state, submitted_at, graded_at, late, missing, excused, attempt, synced_at)
-                VALUES (:id, :assignment_id, :user_id, :course_id, :score, :grade,
-                    :workflow_state, :submitted_at, :graded_at, :late, :missing, :excused, :attempt, :synced_at)
-                ON CONFLICT (assignment_id, user_id) DO UPDATE SET
-                    score = EXCLUDED.score,
-                    grade = EXCLUDED.grade,
-                    workflow_state = EXCLUDED.workflow_state,
-                    submitted_at = EXCLUDED.submitted_at,
-                    graded_at = EXCLUDED.graded_at,
-                    late = EXCLUDED.late,
-                    missing = EXCLUDED.missing,
-                    excused = EXCLUDED.excused,
-                    attempt = EXCLUDED.attempt,
-                    synced_at = EXCLUDED.synced_at
-            """),
-            {
-                "id": submission.get("id"),
-                "assignment_id": assignment_id,
-                "user_id": user_id,
-                "course_id": course_id,
-                "score": submission.get("score"),
-                "grade": submission.get("grade"),
-                "workflow_state": submission.get("workflow_state"),
-                "submitted_at": _parse_dt(submission.get("submitted_at")),
-                "graded_at": _parse_dt(submission.get("graded_at")),
-                "late": bool(submission.get("late", False)),
-                "missing": bool(submission.get("missing", False)),
-                "excused": submission.get("excused"),
-                "attempt": submission.get("attempt"),
-                "synced_at": now,
-            },
-        )
+        batch.append({
+            "id": submission.get("id"),
+            "assignment_id": assignment_id,
+            "user_id": user_id,
+            "course_id": course_id,
+            "score": submission.get("score"),
+            "workflow_state": submission.get("workflow_state"),
+            "late": bool(submission.get("late", False)),
+            "missing": bool(submission.get("missing", False)),
+            "excused": submission.get("excused"),
+            "synced_at": now,
+        })
 
         count += 1
-        if count % 100 == 0:
-            await db.commit()  # Commit each page's worth of records
+        if len(batch) >= SUBMISSION_BATCH_SIZE:
+            await flush_batch()
+            await db.commit()
 
+    await flush_batch()
     await db.commit()
     return count
 

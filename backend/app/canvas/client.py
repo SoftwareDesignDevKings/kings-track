@@ -180,7 +180,6 @@ class CanvasClient:
         params: dict[str, Any] = {
             "student_ids[]": "all",
             "per_page": 100,
-            "include[]": ["assignment"],
         }
         if since:
             params["submitted_since"] = since

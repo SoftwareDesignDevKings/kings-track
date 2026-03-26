@@ -3,6 +3,7 @@ Sync engine — orchestrates full and incremental Canvas data sync into local da
 Processes one course at a time to keep memory usage within 256MB Fly.io limit.
 """
 import asyncio
+import inspect
 import logging
 from datetime import datetime, timezone
 
@@ -44,7 +45,10 @@ async def _log_sync(db, entity_type: str, course_id: int | None, status: str, re
         },
     )
     await db.commit()
-    return result.scalar()
+    scalar = result.scalar()
+    if inspect.isawaitable(scalar):
+        scalar = await scalar
+    return scalar
 
 
 class SyncEngine:
@@ -52,10 +56,70 @@ class SyncEngine:
         self._running = False
         self._task: asyncio.Task | None = None
         self._last_full_sync_at: datetime | None = None
+        self._progress: dict | None = None
 
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def progress(self) -> dict | None:
+        if self._progress is None:
+            return None
+        return dict(self._progress)
+
+    def _reset_progress(self):
+        self._progress = None
+
+    def _begin_progress(self, sync_type: str, started_at: datetime, total_courses: int, includes_edstem: bool):
+        self._progress = {
+            "sync_type": sync_type,
+            "started_at": started_at.isoformat(),
+            "phase": "Preparing sync",
+            "current_course_id": None,
+            "current_step": None,
+            "total_courses": total_courses,
+            "completed_courses": 0,
+            "pending_course_ids": [],
+            "completed_course_ids": [],
+            "total_steps": None,
+            "completed_steps": 0,
+            "includes_edstem": includes_edstem,
+        }
+
+    def _set_course_plan(self, course_ids: list[int]):
+        if self._progress is None:
+            return
+        per_course_steps = 5 if self._progress["includes_edstem"] else 4
+        self._progress["pending_course_ids"] = list(course_ids)
+        self._progress["completed_course_ids"] = []
+        self._progress["total_courses"] = len(course_ids)
+        self._progress["completed_courses"] = 0
+        self._progress["total_steps"] = 1 + (len(course_ids) * per_course_steps)
+        self._progress["phase"] = "Syncing courses"
+        self._progress["current_step"] = "courses"
+
+    def _mark_step_started(self, step: str, course_id: int | None = None):
+        if self._progress is None:
+            return
+        self._progress["current_step"] = step
+        self._progress["current_course_id"] = course_id
+        self._progress["phase"] = "Syncing courses" if course_id is None else f"Syncing course {course_id}"
+
+    def _mark_step_completed(self):
+        if self._progress is None:
+            return
+        self._progress["completed_steps"] += 1
+
+    def _mark_course_complete(self, course_id: int):
+        if self._progress is None:
+            return
+        self._mark_step_started("course_complete", course_id)
+        if course_id in self._progress["pending_course_ids"]:
+            self._progress["pending_course_ids"] = [cid for cid in self._progress["pending_course_ids"] if cid != course_id]
+        if course_id not in self._progress["completed_course_ids"]:
+            self._progress["completed_course_ids"] = [*self._progress["completed_course_ids"], course_id]
+        self._progress["completed_courses"] = len(self._progress["completed_course_ids"])
 
     async def _sync_courses(self, canvas: CanvasClient, whitelist: list[int]) -> tuple[list[int], dict]:
         """Sync courses and return list of available course IDs and results."""
@@ -87,52 +151,67 @@ class SyncEngine:
         async with AsyncSessionLocal() as db:
             # Enrollments
             try:
+                self._mark_step_started("enrollments", course_id)
                 count = await sync_enrollments(canvas, db, course_id, since=since)
                 course_results["enrollments"] = count
+                self._mark_step_completed()
                 logger.info("  Course %d: %d enrollments", course_id, count)
             except Exception as exc:
                 logger.error("  Course %d enrollments failed: %s", course_id, exc)
                 course_results["enrollments_error"] = str(exc)
+                self._mark_step_completed()
 
             # Assignments (no incremental support in Canvas API)
             try:
+                self._mark_step_started("assignments", course_id)
                 count = await sync_assignments(canvas, db, course_id)
                 course_results["assignments"] = count
+                self._mark_step_completed()
                 logger.info("  Course %d: %d assignments", course_id, count)
             except Exception as exc:
                 logger.error("  Course %d assignments failed: %s", course_id, exc)
                 course_results["assignments_error"] = str(exc)
+                self._mark_step_completed()
 
             # Submissions
             try:
+                self._mark_step_started("submissions", course_id)
                 count = await sync_submissions(canvas, db, course_id, since=since)
                 course_results["submissions"] = count
+                self._mark_step_completed()
                 logger.info("  Course %d: %d submissions", course_id, count)
             except Exception as exc:
                 logger.error("  Course %d submissions failed: %s", course_id, exc)
                 course_results["submissions_error"] = str(exc)
+                self._mark_step_completed()
 
             # Compute metrics (DB-only, no API calls)
             try:
+                self._mark_step_started("metrics", course_id)
                 count = await compute_metrics(db, course_id)
                 course_results["metrics"] = count
+                self._mark_step_completed()
                 logger.info("  Course %d: metrics computed for %d students", course_id, count)
             except Exception as exc:
                 logger.error("  Course %d metrics failed: %s", course_id, exc)
                 course_results["metrics_error"] = str(exc)
+                self._mark_step_completed()
 
 
             # EdStem lesson progress (optional — only runs if token is configured)
             if settings.edstem_configured:
                 try:
+                    self._mark_step_started("edstem_lessons", course_id)
                     async with EdStemClient(settings.edstem_api_url, settings.edstem_api_token) as edstem:
                         count = await sync_edstem_lessons(edstem, db, course_id)
                         course_results["edstem_lessons"] = count
+                        self._mark_step_completed()
                         if count:
                             logger.info("  Course %d: %d edstem progress records", course_id, count)
                 except Exception as exc:
                     logger.error("  Course %d edstem failed: %s", course_id, exc)
                     course_results["edstem_error"] = str(exc)
+                    self._mark_step_completed()
 
 
             # Stamp synced_at now that all data for this course is complete
@@ -141,6 +220,7 @@ class SyncEngine:
                 {"id": course_id},
             )
             await db.commit()
+            self._mark_course_complete(course_id)
 
         return course_results
 
@@ -162,19 +242,24 @@ class SyncEngine:
         self._running = True
         started_at = datetime.now(timezone.utc)
         results: dict = {"sync_type": "full"}
+        self._begin_progress("full", started_at, total_courses=0, includes_edstem=settings.edstem_configured)
 
         try:
             async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
                 async with AsyncSessionLocal() as db:
                     whitelist = await get_effective_whitelist(db)
+                self._begin_progress("full", started_at, total_courses=len(whitelist), includes_edstem=settings.edstem_configured)
 
                 if not whitelist:
                     logger.info("Whitelist is empty — nothing to sync")
                     results["courses"] = {"status": "ok", "records": 0}
                     results["skipped"] = "No courses in whitelist"
                 else:
+                    self._mark_step_started("courses")
                     course_ids, sync_results = await self._sync_courses(canvas, whitelist)
                     results.update(sync_results)
+                    self._set_course_plan(course_ids)
+                    self._mark_step_completed()
 
                     if course_ids:
                         for course_id in course_ids:
@@ -207,6 +292,8 @@ class SyncEngine:
         if status == "completed":
             self._last_full_sync_at = datetime.now(timezone.utc)
 
+        self._reset_progress()
+
         return results
 
     async def incremental_sync(self) -> dict:
@@ -231,11 +318,13 @@ class SyncEngine:
         started_at = datetime.now(timezone.utc)
         since = self._last_full_sync_at.strftime("%Y-%m-%dT%H:%M:%SZ")
         results: dict = {"sync_type": "incremental", "since": since}
+        self._begin_progress("incremental", started_at, total_courses=0, includes_edstem=settings.edstem_configured)
 
         try:
             async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
                 async with AsyncSessionLocal() as db:
                     whitelist = await get_effective_whitelist(db)
+                self._begin_progress("incremental", started_at, total_courses=len(whitelist), includes_edstem=settings.edstem_configured)
 
                 if not whitelist:
                     results["skipped"] = "No courses in whitelist"
@@ -247,6 +336,9 @@ class SyncEngine:
                             {"ids": whitelist},
                         )
                         course_ids = [row[0] for row in result.fetchall()]
+                    self._set_course_plan(course_ids)
+                    self._mark_step_started("courses")
+                    self._mark_step_completed()
 
                     for course_id in course_ids:
                         results[str(course_id)] = await self._sync_course(canvas, course_id, since=since)
@@ -274,6 +366,8 @@ class SyncEngine:
         error_msg = results.get("error") or ("one or more courses failed to sync" if has_course_errors else None)
         async with AsyncSessionLocal() as db:
             await _log_sync(db, "full_sync", None, status, error=error_msg)
+
+        self._reset_progress()
 
         return results
 

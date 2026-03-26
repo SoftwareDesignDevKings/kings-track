@@ -59,5 +59,6 @@ async def sync_status():
 
     return {
         "is_running": sync_engine.is_running,
+        "progress": sync_engine.progress,
         "logs": logs,
     }
