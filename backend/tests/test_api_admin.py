@@ -85,13 +85,29 @@ def test_list_whitelist_empty(app_client):
 
 
 def test_list_whitelist_available_returns_courses_from_canvas(app_client):
-    """Available courses come from Canvas API — should return a non-empty list."""
-    resp = app_client.get("/api/admin/whitelist/available")
+    """Available courses come from Canvas API — should return a list of courses."""
+    from unittest.mock import patch, AsyncMock, MagicMock
+    mock_courses = [
+        {"id": 1, "name": "Course A", "course_code": "CA101"},
+        {"id": 2, "name": "Course B", "course_code": "CB202"},
+    ]
+    mock_canvas = AsyncMock()
+    mock_canvas.list_courses = AsyncMock(return_value=mock_courses)
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_canvas)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.api.routes.admin.settings") as mock_settings, \
+         patch("app.api.routes.admin.CanvasClient", return_value=mock_client):
+        mock_settings.canvas_configured = True
+        mock_settings.canvas_api_url = "https://canvas.test"
+        mock_settings.canvas_api_token = "token"
+        resp = app_client.get("/api/admin/whitelist/available")
+
     assert resp.status_code == 200
     data = resp.json()
-    assert isinstance(data, list)
-    assert len(data) > 0
-    assert "id" in data[0] and "name" in data[0]
+    assert len(data) == 2
+    assert data[0]["name"] == "Course A"
 
 
 # ---------------------------------------------------------------------------
