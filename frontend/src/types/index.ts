@@ -78,14 +78,7 @@ export interface SyncStatus {
 
 // ─── Health ──────────────────────────────────────────────────────────────────
 
-export interface IntegrationStatus {
-  name: string
-  enabled: boolean
-  status: string
-}
-
 export interface HealthResponse {
   status: string
   canvas_configured: boolean
-  integrations: IntegrationStatus[]
 }

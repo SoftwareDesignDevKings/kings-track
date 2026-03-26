@@ -69,9 +69,10 @@ async def sync_courses(canvas: CanvasClient, db: AsyncSession) -> int:
 
 
 async def sync_enrollments(canvas: CanvasClient, db: AsyncSession, course_id: int) -> int:
-    """Fetch and upsert active student enrollments for a course."""
+    """Fetch and upsert active student enrollments for a course, removing any that are no longer in Canvas."""
     count = 0
     now = _now()
+    seen_enrollment_ids: list[int] = []
 
     async for enrollment in canvas.list_enrollments(course_id):
         user = enrollment.get("user", {})
@@ -126,9 +127,22 @@ async def sync_enrollments(canvas: CanvasClient, db: AsyncSession, course_id: in
             },
         )
 
+        seen_enrollment_ids.append(enrollment["id"])
         count += 1
         if count % 50 == 0:
             await db.commit()  # Commit in batches
+
+    # Remove enrollments that no longer exist in Canvas for this course
+    if seen_enrollment_ids:
+        await db.execute(
+            text("DELETE FROM enrollments WHERE course_id = :course_id AND id != ALL(:seen_ids)"),
+            {"course_id": course_id, "seen_ids": seen_enrollment_ids},
+        )
+    else:
+        await db.execute(
+            text("DELETE FROM enrollments WHERE course_id = :course_id"),
+            {"course_id": course_id},
+        )
 
     await db.commit()
     return count
