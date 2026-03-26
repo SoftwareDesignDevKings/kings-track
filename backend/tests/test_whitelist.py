@@ -110,9 +110,10 @@ async def test_full_sync_only_syncs_whitelisted_courses():
         whitelist_result.fetchall = lambda: [(COURSE_ID,)]
         course_ids_result = AsyncMock()
         course_ids_result.fetchall = lambda: [(COURSE_ID,)]
+        update_synced_at_result = AsyncMock()
         log_result = AsyncMock()
         log_result.scalar = lambda: 1
-        mock_db.execute = AsyncMock(side_effect=[whitelist_result, course_ids_result, log_result])
+        mock_db.execute = AsyncMock(side_effect=[whitelist_result, course_ids_result, update_synced_at_result, log_result])
         mock_session_factory.return_value = mock_db
 
         result = await engine.full_sync()
