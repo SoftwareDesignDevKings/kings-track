@@ -43,6 +43,13 @@ export async function signIn() {
   })
 }
 
+export async function signOut() {
+  if (isLocalAuth) return
+
+  const { supabase } = await import('./supabase')
+  await supabase.auth.signOut()
+}
+
 export async function subscribeToAuthChanges(callback: (email: string | null) => void): Promise<() => void> {
   if (isLocalAuth) {
     callback((import.meta.env.VITE_LOCAL_DEV_USER_EMAIL as string | undefined) || 'admin@local.dev')
