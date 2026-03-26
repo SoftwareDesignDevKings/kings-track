@@ -62,38 +62,8 @@ def _dsn() -> str:
     return _sync_db_url()
 
 
-def _normalize_seed_sql(sql: str) -> str:
-    if sql.startswith("INSERT INTO courses") and "total_students" not in sql:
-        sql = sql.replace(
-            "(id, name, course_code, workflow_state, synced_at)",
-            "(id, name, course_code, workflow_state, synced_at, total_students)",
-        )
-        sql = sql.replace(
-            "(id, name, workflow_state, synced_at)",
-            "(id, name, workflow_state, synced_at, total_students)",
-        )
-        sql = sql.replace(
-            "VALUES (:id, :name, :code, 'available', :synced_at)",
-            "VALUES (:id, :name, :code, 'available', :synced_at, 0)",
-        )
-        sql = sql.replace(
-            "VALUES (:id, 'C', 'available', :now)",
-            "VALUES (:id, 'C', 'available', :now, 0)",
-        )
-        sql = sql.replace(
-            "VALUES (:id, 'Test', 'available', :now)",
-            "VALUES (:id, 'Test', 'available', :now, 0)",
-        )
-        sql = sql.replace(
-            "VALUES (:id, 'SE 2026', '11SENX', 'available', :now)",
-            "VALUES (:id, 'SE 2026', '11SENX', 'available', :now, 0)",
-        )
-    return sql
-
-
 def _sync_exec(sql: str, params: dict = None):
     """Execute raw SQL via psycopg2, translating :name → %(name)s params."""
-    sql = _normalize_seed_sql(sql)
     psycopg2_sql = re.sub(r":([a-zA-Z_][a-zA-Z0-9_]*)", r"%(\1)s", sql)
     conn = psycopg2.connect(_dsn())
     conn.autocommit = True

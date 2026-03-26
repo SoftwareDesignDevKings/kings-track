@@ -130,7 +130,7 @@ async def test_sync_courses_applies_whitelist(db):
 async def test_sync_enrollments_inserts_user_and_enrollment(db):
     now = datetime.now(timezone.utc).isoformat()
     seed(
-        "INSERT INTO courses (id, name, workflow_state, synced_at) VALUES (:id, 'C', 'available', :now) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
         {"id": COURSE_ID, "now": now},
     )
 
@@ -152,7 +152,7 @@ async def test_sync_enrollments_inserts_user_and_enrollment(db):
 async def test_sync_enrollments_stores_grades(db):
     now = datetime.now(timezone.utc).isoformat()
     seed(
-        "INSERT INTO courses (id, name, workflow_state, synced_at) VALUES (:id, 'C', 'available', :now) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
         {"id": COURSE_ID, "now": now},
     )
 
@@ -174,7 +174,7 @@ async def test_sync_enrollments_stores_grades(db):
 async def test_sync_assignments_inserts_assignment(db):
     now = datetime.now(timezone.utc).isoformat()
     seed(
-        "INSERT INTO courses (id, name, workflow_state, synced_at) VALUES (:id, 'C', 'available', :now) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
         {"id": COURSE_ID, "now": now},
     )
 
@@ -201,7 +201,7 @@ async def test_sync_assignments_inserts_assignment(db):
 async def test_compute_metrics_writes_completion_rate(db):
     now = datetime.now(timezone.utc).isoformat()
     seed(
-        "INSERT INTO courses (id, name, workflow_state, synced_at) VALUES (:id, 'C', 'available', :now) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
         {"id": COURSE_ID, "now": now},
     )
     seed(

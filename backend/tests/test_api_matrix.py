@@ -17,7 +17,7 @@ GROUP_NAME = "Classwork - Unit 1"
 def matrix_data():
     """Seed and tear down all test data around each test."""
     now = datetime.now(timezone.utc).isoformat()
-    seed("INSERT INTO courses (id, name, course_code, workflow_state, synced_at) VALUES (:id, 'SE 2026', '11SENX', 'available', :now) ON CONFLICT (id) DO NOTHING", {"id": COURSE_ID, "now": now})
+    seed("INSERT INTO courses (id, name, course_code, workflow_state, synced_at, total_students) VALUES (:id, 'SE 2026', '11SENX', 'available', :now, 0) ON CONFLICT (id) DO NOTHING", {"id": COURSE_ID, "now": now})
     seed("INSERT INTO users (id, name, sortable_name, sis_id) VALUES (:id, 'Alice Smith', 'Smith, Alice', 'alice') ON CONFLICT (id) DO NOTHING", {"id": USER_ID})
     seed("INSERT INTO enrollments (id, course_id, user_id, role, enrollment_state) VALUES (:id, :cid, :uid, 'StudentEnrollment', 'active') ON CONFLICT (id) DO NOTHING", {"id": ENROLLMENT_ID, "cid": COURSE_ID, "uid": USER_ID})
     seed("INSERT INTO assignments (id, course_id, name, assignment_group_name, assignment_group_id, workflow_state, position) VALUES (:id, :cid, 'Task 1', :group, 10, 'published', 1) ON CONFLICT (id) DO NOTHING", {"id": ASSIGNMENT_1_ID, "cid": COURSE_ID, "group": GROUP_NAME})

@@ -18,8 +18,8 @@ def clean_courses():
 def _insert_course(course_id: int, name: str = "Test Course"):
     now = datetime.now(timezone.utc).isoformat()
     seed(
-        "INSERT INTO courses (id, name, course_code, workflow_state, synced_at) "
-        "VALUES (:id, :name, :code, 'available', :synced_at) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO courses (id, name, course_code, workflow_state, synced_at, total_students) "
+        "VALUES (:id, :name, :code, 'available', :synced_at, 0) ON CONFLICT (id) DO NOTHING",
         {"id": course_id, "name": name, "code": f"CODE{course_id}", "synced_at": now},
     )
 
