@@ -30,7 +30,9 @@ def test_get_course_not_found(app_client):
 
 def test_list_courses_returns_seeded_course(app_client):
     _insert_course(1001, "Software Engineering 2026")
+    seed("INSERT INTO course_whitelist (course_id) VALUES (:id) ON CONFLICT DO NOTHING", {"id": 1001})
     resp = app_client.get("/api/courses")
+    cleanup("DELETE FROM course_whitelist WHERE course_id = 1001")
     assert resp.status_code == 200
     courses = resp.json()
     ids = [c["id"] for c in courses]
@@ -40,14 +42,12 @@ def test_list_courses_returns_seeded_course(app_client):
     assert course["course_code"] == "CODE1001"
 
 
-def test_list_courses_returns_all_when_no_whitelist(app_client):
+def test_list_courses_returns_empty_when_no_whitelist(app_client):
     _insert_course(2001, "Course A")
     _insert_course(2002, "Course B")
     resp = app_client.get("/api/courses")
     assert resp.status_code == 200
-    ids = [c["id"] for c in resp.json()]
-    assert 2001 in ids
-    assert 2002 in ids
+    assert resp.json() == []
 
 
 def test_get_course_found(app_client):

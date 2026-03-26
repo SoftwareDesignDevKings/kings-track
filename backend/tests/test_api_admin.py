@@ -84,12 +84,14 @@ def test_list_whitelist_empty(app_client):
     assert isinstance(resp.json(), list)
 
 
-def test_list_whitelist_available_returns_synced_courses(app_client):
-    _insert_course(COURSE_ID_A, "Course Alpha")
+def test_list_whitelist_available_returns_courses_from_canvas(app_client):
+    """Available courses come from Canvas API — should return a non-empty list."""
     resp = app_client.get("/api/admin/whitelist/available")
     assert resp.status_code == 200
-    ids = [c["id"] for c in resp.json()]
-    assert COURSE_ID_A in ids
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) > 0
+    assert "id" in data[0] and "name" in data[0]
 
 
 # ---------------------------------------------------------------------------
