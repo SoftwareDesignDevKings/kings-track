@@ -1,4 +1,3 @@
-import httpx
 import jwt
 from jwt import PyJWKClient, PyJWKClientError
 from fastapi import Depends, HTTPException, status
@@ -33,7 +32,7 @@ def require_auth(
             token,
             signing_key.key,
             algorithms=["RS256", "ES256"],
-            options={"verify_aud": False},
+            audience="authenticated",
         )
     except (PyJWKClientError, jwt.PyJWTError, Exception):
         raise HTTPException(
