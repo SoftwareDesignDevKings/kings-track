@@ -66,8 +66,9 @@ export function useTriggerSync() {
         method: 'POST',
       }),
     onSuccess: () => {
-      // Invalidate everything — data will be refreshed when sync completes
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
+      queryClient.invalidateQueries({ queryKey: ['courses'] })
+      queryClient.invalidateQueries({ queryKey: ['matrix'] })
     },
   })
 }

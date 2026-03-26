@@ -159,9 +159,16 @@ class SyncEngine:
         logger.info("Sync completed in %.1fs", elapsed)
 
         # Write a single completion entry so the UI can show "last sync" time
-        status = "error" if "error" in results else "completed"
+        has_course_errors = any(
+            key.endswith("_error")
+            for course_results in results.values()
+            if isinstance(course_results, dict)
+            for key in course_results
+        )
+        status = "error" if ("error" in results or has_course_errors) else "completed"
+        error_msg = results.get("error") or ("one or more courses failed to sync" if has_course_errors else None)
         async with AsyncSessionLocal() as db:
-            await _log_sync(db, "full_sync", None, status, error=results.get("error"))
+            await _log_sync(db, "full_sync", None, status, error=error_msg)
 
         return results
 
