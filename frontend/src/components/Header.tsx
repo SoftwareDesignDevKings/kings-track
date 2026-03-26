@@ -1,8 +1,10 @@
-import { useSyncStatus, useTriggerSync } from '../services/api'
+import { Link } from 'react-router-dom'
+import { useSyncStatus, useTriggerSync, useCurrentUser } from '../services/api'
 
 export default function Header() {
   const { data: syncStatus } = useSyncStatus()
   const triggerSync = useTriggerSync()
+  const { data: currentUser } = useCurrentUser()
 
   const isRunning = syncStatus?.is_running ?? false
   const lastSync = syncStatus?.logs?.find(l => l.status === 'completed')?.completed_at
@@ -33,7 +35,7 @@ export default function Header() {
           </div>
         </div>
 
-        {/* Sync controls */}
+        {/* Right side */}
         <div className="flex items-center gap-4">
           {/* Sync status indicator */}
           <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -49,6 +51,16 @@ export default function Header() {
               </>
             )}
           </div>
+
+          {/* Admin link */}
+          {currentUser?.role === 'admin' && (
+            <Link
+              to="/admin"
+              className="text-sm text-slate-500 hover:text-slate-900 transition-colors"
+            >
+              Settings
+            </Link>
+          )}
 
           {/* Sync button */}
           <button
