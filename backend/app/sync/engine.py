@@ -119,6 +119,13 @@ class SyncEngine:
                 logger.error("  Course %d metrics failed: %s", course_id, exc)
                 course_results["metrics_error"] = str(exc)
 
+            # Stamp synced_at now that all data for this course is complete
+            await db.execute(
+                text("UPDATE courses SET synced_at = NOW() WHERE id = :id"),
+                {"id": course_id},
+            )
+            await db.commit()
+
         return course_results
 
     async def full_sync(self) -> dict:
