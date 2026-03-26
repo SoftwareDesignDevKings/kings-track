@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.integrations import INTEGRATIONS
 from app.api.routes import auth, courses, sync, admin
 from app.sync.engine import sync_engine
 
@@ -45,8 +44,4 @@ app.include_router(auth.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    return {
-        "status": "ok",
-        "canvas_configured": settings.canvas_configured,
-        "integrations": [i.status() for i in INTEGRATIONS],
-    }
+    return {"status": "ok", "canvas_configured": settings.canvas_configured}
