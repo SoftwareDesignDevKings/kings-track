@@ -65,13 +65,13 @@ async def sync_courses(canvas: CanvasClient, db: AsyncSession, whitelist_ids: li
     return len(courses)
 
 
-async def sync_enrollments(canvas: CanvasClient, db: AsyncSession, course_id: int) -> int:
+async def sync_enrollments(canvas: CanvasClient, db: AsyncSession, course_id: int, since: str | None = None) -> int:
     """Fetch and upsert active student enrollments for a course, removing any that are no longer in Canvas."""
     count = 0
     now = _now()
     seen_enrollment_ids: list[int] = []
 
-    async for enrollment in canvas.list_enrollments(course_id):
+    async for enrollment in canvas.list_enrollments(course_id, since=since):
         user = enrollment.get("user", {})
         grades = enrollment.get("grades", {})
 
@@ -130,16 +130,18 @@ async def sync_enrollments(canvas: CanvasClient, db: AsyncSession, course_id: in
             await db.commit()  # Commit in batches
 
     # Remove enrollments that no longer exist in Canvas for this course
-    if seen_enrollment_ids:
-        await db.execute(
-            text("DELETE FROM enrollments WHERE course_id = :course_id AND id != ALL(:seen_ids)"),
-            {"course_id": course_id, "seen_ids": seen_enrollment_ids},
-        )
-    else:
-        await db.execute(
-            text("DELETE FROM enrollments WHERE course_id = :course_id"),
-            {"course_id": course_id},
-        )
+    # Only safe during full sync — incremental doesn't see all enrollments
+    if not since:
+        if seen_enrollment_ids:
+            await db.execute(
+                text("DELETE FROM enrollments WHERE course_id = :course_id AND id != ALL(:seen_ids)"),
+                {"course_id": course_id, "seen_ids": seen_enrollment_ids},
+            )
+        else:
+            await db.execute(
+                text("DELETE FROM enrollments WHERE course_id = :course_id"),
+                {"course_id": course_id},
+            )
 
     await db.commit()
     return count
@@ -212,6 +214,7 @@ async def sync_submissions(
     canvas: CanvasClient,
     db: AsyncSession,
     course_id: int,
+    since: str | None = None,
 ) -> int:
     """
     Fetch and upsert submissions page-by-page.
@@ -227,7 +230,7 @@ async def sync_submissions(
     )
     enrolled_user_ids = {row[0] for row in result}
 
-    async for submission in canvas.list_submissions(course_id):
+    async for submission in canvas.list_submissions(course_id, since=since):
         user_id = submission.get("user_id")
         assignment_id = submission.get("assignment_id")
 
