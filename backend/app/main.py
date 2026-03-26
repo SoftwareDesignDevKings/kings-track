@@ -44,4 +44,4 @@ app.include_router(auth.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "canvas_configured": settings.canvas_configured}
