@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.config import settings
+from app.api.deps import require_auth
 
-router = APIRouter(prefix="/courses", tags=["courses"])
+router = APIRouter(prefix="/courses", tags=["courses"], dependencies=[Depends(require_auth)])
 
 
 def _to_iso(value):
