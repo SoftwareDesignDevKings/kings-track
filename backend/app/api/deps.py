@@ -30,7 +30,7 @@ def _verify_jwt(token: str) -> dict:
             token,
             signing_key.key,
             algorithms=["RS256", "ES256"],
-            options={"verify_aud": False},
+            audience="authenticated",
         )
     except (PyJWKClientError, jwt.PyJWTError, Exception):
         raise HTTPException(
