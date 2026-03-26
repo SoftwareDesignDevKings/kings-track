@@ -1,26 +1,28 @@
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import type { Session } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase'
+import { getClientSession, isLocalAuth, subscribeToAuthChanges } from '../lib/auth'
 
 interface Props {
   children: React.ReactNode
 }
 
 export default function ProtectedRoute({ children }: Props) {
-  const [session, setSession] = useState<Session | null | undefined>(undefined)
+  const [sessionEmail, setSessionEmail] = useState<string | null | undefined>(undefined)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    getClientSession().then((data) => setSessionEmail(data.session?.user?.email ?? null))
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
+    let cleanup = () => {}
+    subscribeToAuthChanges((email) => {
+      setSessionEmail(email)
+    }).then((unsubscribe) => {
+      cleanup = unsubscribe
     })
 
-    return () => listener.subscription.unsubscribe()
+    return () => cleanup()
   }, [])
 
-  if (session === undefined) return null
-  if (!session) return <Navigate to="/login" replace />
+  if (sessionEmail === undefined) return null
+  if (!sessionEmail && !isLocalAuth) return <Navigate to="/login" replace />
   return <>{children}</>
 }

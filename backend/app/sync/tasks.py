@@ -27,9 +27,12 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
-async def sync_courses(canvas: CanvasClient, db: AsyncSession) -> int:
-    """Fetch and upsert all courses from Canvas."""
+async def sync_courses(canvas: CanvasClient, db: AsyncSession, whitelist_ids: list[int] | None = None) -> int:
+    """Fetch and upsert courses from Canvas, filtered to whitelist IDs."""
     courses = await canvas.list_courses()
+    allowed_ids = set(whitelist_ids or [])
+    if allowed_ids:
+        courses = [c for c in courses if int(c["id"]) in allowed_ids]
     now = _now()
 
     for course in courses:

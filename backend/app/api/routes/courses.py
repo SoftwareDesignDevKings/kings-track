@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.api.deps import require_auth
+from app.whitelist import get_effective_whitelist
 
 router = APIRouter(prefix="/courses", tags=["courses"], dependencies=[Depends(require_auth)])
 
@@ -28,8 +29,7 @@ def _submission_status(workflow_state: str | None, score, excused: bool | None) 
 @router.get("")
 async def list_courses(db: AsyncSession = Depends(get_db)):
     """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
-    wl_rows = await db.execute(text("SELECT course_id FROM course_whitelist"))
-    whitelist = [r[0] for r in wl_rows.fetchall()]
+    whitelist = await get_effective_whitelist(db)
     base_query = """
         SELECT
             c.id,
@@ -45,26 +45,18 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
         LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
         LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
     """
-    if whitelist:
-        statement = text(
-            base_query
-            + """
-                WHERE c.id IN :ids
-                GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
-                ORDER BY c.name
-            """
-        ).bindparams(bindparam("ids", expanding=True))
-        result = await db.execute(statement, {"ids": whitelist})
-    else:
-        result = await db.execute(
-            text(
-                base_query
-                + """
-                    GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
-                    ORDER BY c.name
-                """
-            )
-        )
+    if not whitelist:
+        return []
+
+    statement = text(
+        base_query
+        + """
+            WHERE c.id IN :ids
+            GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
+            ORDER BY c.name
+        """
+    ).bindparams(bindparam("ids", expanding=True))
+    result = await db.execute(statement, {"ids": whitelist})
     rows = result.fetchall()
 
     return [

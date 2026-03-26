@@ -44,7 +44,7 @@ export default function CourseDetail() {
     <div className="min-h-screen bg-slate-50">
       <Header />
 
-      <main className="max-w-screen-2xl mx-auto px-6 py-6">
+      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-slate-400 mb-5">
           <Link to="/" className="hover:text-brand-600 transition-colors">Courses</Link>
@@ -57,7 +57,7 @@ export default function CourseDetail() {
         </nav>
 
         {/* Course header */}
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-6">
+        <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-end">
           <div className="flex-1 min-w-0">
             {isLoading ? (
               <div className="h-7 bg-slate-200 rounded w-48 animate-pulse" />
@@ -75,7 +75,7 @@ export default function CourseDetail() {
 
           {/* Summary stats */}
           {matrix && (
-            <div className="flex items-center gap-5 text-sm shrink-0">
+            <div className="grid grid-cols-3 gap-3 text-sm shrink-0 sm:flex sm:items-center sm:gap-5">
               <div className="text-center">
                 <p className="text-lg font-bold text-slate-900">{totalStudents}</p>
                 <p className="text-xs text-slate-400">Students</p>
@@ -95,7 +95,8 @@ export default function CourseDetail() {
         </div>
 
         {/* Tab bar */}
-        <div className="flex items-center gap-1 mb-5 border-b border-slate-200">
+        <div className="mb-5 overflow-x-auto border-b border-slate-200">
+          <div className="flex min-w-max items-center gap-1">
           {TABS.map(tab => (
             <button
               key={tab.id}
@@ -110,7 +111,6 @@ export default function CourseDetail() {
               `}
             >
               {tab.label}
-              {/* "Coming soon" badge for placeholder tabs */}
               {tab.id !== 'activities' && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-400 rounded-full leading-none">
                   Soon
@@ -118,6 +118,7 @@ export default function CourseDetail() {
               )}
             </button>
           ))}
+          </div>
         </div>
 
         {/* Tab content */}

@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://kings:kings@db:5432/kings_analytics"
     sync_interval_hours: int = 24
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    auth_mode: str = "local"
+    local_dev_user_email: str = "admin@local.dev"
+    local_dev_user_role: str = "admin"
     supabase_url: str = ""
 
     @property
@@ -18,6 +21,11 @@ class Settings(BaseSettings):
     @property
     def canvas_configured(self) -> bool:
         return bool(self.canvas_api_url and self.canvas_api_token)
+
+    @property
+    def local_auth_enabled(self) -> bool:
+        return self.auth_mode.lower() == "local"
+
 
 
 settings = Settings()

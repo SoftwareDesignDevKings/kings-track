@@ -109,9 +109,11 @@ Set them in:
 ## 6. Local vs production
 
 Local development can keep using the root `.env` and `docker-compose.yml`.
+In local Docker runs, set `AUTH_MODE=local` so the app does not depend on Supabase auth and uses the configured local dev user instead.
 
 Production should use:
 
 - Render environment variables for backend runtime config
 - Vercel project settings for frontend env vars
+- `AUTH_MODE=supabase` if you want Supabase JWT auth in production
 - Supabase only as the managed Postgres host

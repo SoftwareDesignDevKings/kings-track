@@ -1,11 +1,13 @@
-import { supabase } from '../lib/supabase'
+import { Navigate } from 'react-router-dom'
+import { isLocalAuth, signIn } from '../lib/auth'
 
 export default function Login() {
+  if (isLocalAuth) {
+    return <Navigate to="/" replace />
+  }
+
   const handleGoogleSignIn = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    })
+    await signIn()
   }
 
   return (

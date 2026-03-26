@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.integrations import INTEGRATIONS
-from app.api.routes import courses, sync, admin
+from app.api.routes import auth, courses, sync, admin
 from app.sync.engine import sync_engine
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -40,6 +40,7 @@ app.add_middleware(
 app.include_router(courses.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 
 
 @app.get("/api/health")
