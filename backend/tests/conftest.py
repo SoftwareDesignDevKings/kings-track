@@ -38,8 +38,12 @@ def _sync_db_url() -> str:
     )
 
 
+from sqlalchemy import text as _text
 _schema_engine = create_engine(_sync_db_url())
-Base.metadata.drop_all(_schema_engine, checkfirst=True)
+with _schema_engine.connect() as _conn:
+    for table in reversed(Base.metadata.sorted_tables):
+        _conn.execute(_text(f"DROP TABLE IF EXISTS {table.name} CASCADE"))
+    _conn.commit()
 Base.metadata.create_all(_schema_engine)
 _schema_engine.dispose()
 

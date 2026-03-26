@@ -7,7 +7,7 @@ def test_health_returns_ok(app_client):
     data = resp.json()
     assert data["status"] == "ok"
     assert "canvas_configured" in data
-    assert "integrations" in data
+    assert "integrations" not in data
 
 
 def test_health_canvas_configured_false(app_client):
