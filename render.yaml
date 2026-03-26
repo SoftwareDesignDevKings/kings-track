@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: kings-analytics-backend
+    runtime: docker
+    plan: free
+    branch: main
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: CANVAS_API_URL
+        sync: false
+      - key: CANVAS_API_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SYNC_INTERVAL_HOURS
+        value: "24"
+      - key: CANVAS_COURSE_WHITELIST
+        value: ""

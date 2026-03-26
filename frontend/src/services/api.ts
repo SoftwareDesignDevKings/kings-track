@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Course, CourseMatrix, SyncStatus, HealthResponse } from '../types'
 
-const API_BASE = '/api'
+const apiBaseOverride =
+  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_API_BASE_URL
+const API_BASE = (apiBaseOverride || '/api').replace(/\/$/, '')
 
 async function fetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, options)
