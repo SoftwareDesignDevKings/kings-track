@@ -45,26 +45,18 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
         LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
         LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
     """
-    if whitelist:
-        statement = text(
-            base_query
-            + """
-                WHERE c.id IN :ids
-                GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
-                ORDER BY c.name
-            """
-        ).bindparams(bindparam("ids", expanding=True))
-        result = await db.execute(statement, {"ids": whitelist})
-    else:
-        result = await db.execute(
-            text(
-                base_query
-                + """
-                    GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
-                    ORDER BY c.name
-                """
-            )
-        )
+    if not whitelist:
+        return []
+
+    statement = text(
+        base_query
+        + """
+            WHERE c.id IN :ids
+            GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
+            ORDER BY c.name
+        """
+    ).bindparams(bindparam("ids", expanding=True))
+    result = await db.execute(statement, {"ids": whitelist})
     rows = result.fetchall()
 
     return [

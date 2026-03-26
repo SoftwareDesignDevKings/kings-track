@@ -3,6 +3,8 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.canvas.client import CanvasClient
+from app.config import settings
 from app.db import get_db
 from app.api.deps import require_admin
 
@@ -72,12 +74,16 @@ async def list_whitelist(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/whitelist/available")
-async def list_available_courses(db: AsyncSession = Depends(get_db)):
-    """All synced courses — so admin can pick which ones to whitelist."""
-    result = await db.execute(
-        text("SELECT id, name, course_code FROM courses ORDER BY name")
-    )
-    return [{"id": r[0], "name": r[1], "course_code": r[2]} for r in result.fetchall()]
+async def list_available_courses():
+    """Fetch all courses directly from Canvas so admin can pick which to whitelist."""
+    if not settings.canvas_configured:
+        raise HTTPException(status_code=503, detail="Canvas API not configured")
+    async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
+        courses = await canvas.list_courses()
+    return [
+        {"id": c["id"], "name": c.get("name", ""), "course_code": c.get("course_code")}
+        for c in sorted(courses, key=lambda c: c.get("name", ""))
+    ]
 
 
 class WhitelistIn(BaseModel):
