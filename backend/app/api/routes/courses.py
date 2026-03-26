@@ -28,8 +28,10 @@ def _submission_status(workflow_state: str | None, score, excused: bool | None) 
 
 @router.get("")
 async def list_courses(db: AsyncSession = Depends(get_db)):
-    """List synced courses with summary stats. Respects CANVAS_COURSE_WHITELIST if set."""
-    whitelist = settings.course_whitelist
+    """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
+    wl_rows = await db.execute(text("SELECT course_id FROM course_whitelist"))
+    db_whitelist = [r[0] for r in wl_rows.fetchall()]
+    whitelist = db_whitelist or settings.course_whitelist
     base_query = """
         SELECT
             c.id,
