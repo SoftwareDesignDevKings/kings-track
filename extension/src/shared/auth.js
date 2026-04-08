@@ -2,8 +2,11 @@
   self.KingsTrackExtension = self.KingsTrackExtension || {}
   const ext = self.KingsTrackExtension
   const AUTH_CACHE_KEY = 'kingsTrackAuthCache'
+  const BACKEND_STATUS_KEY = 'kingsTrackBackendStatus'
   const DEFAULT_AUTH_CACHE_MS = 30 * 1000
+  const DEFAULT_BACKEND_CACHE_MS = 30 * 1000
   let currentUserPromise = null
+  let backendStatusPromise = null
 
   ext.getSession = async function getSession() {
     return null
@@ -56,6 +59,23 @@
     }
   }
 
+  ext.getCachedBackendStatus = async function getCachedBackendStatus(maxAgeMs) {
+    const result = await browser.storage.local.get(BACKEND_STATUS_KEY)
+    const cache = result[BACKEND_STATUS_KEY]
+    if (!cache || !cache.checkedAt) {
+      return null
+    }
+    const age = Date.now() - Number(cache.checkedAt)
+    if (age > (typeof maxAgeMs === 'number' ? maxAgeMs : DEFAULT_BACKEND_CACHE_MS)) {
+      return null
+    }
+    return {
+      ok: Boolean(cache.ok),
+      checkedAt: Number(cache.checkedAt),
+      error: cache.error || null,
+    }
+  }
+
   ext.getCachedCurrentUser = async function getCachedCurrentUser(maxAgeMs) {
     const result = await browser.storage.local.get(AUTH_CACHE_KEY)
     const cache = result[AUTH_CACHE_KEY]
@@ -72,6 +92,44 @@
   ext.invalidateCurrentUserCache = async function invalidateCurrentUserCache() {
     currentUserPromise = null
     await browser.storage.local.remove(AUTH_CACHE_KEY)
+  }
+
+  ext.invalidateBackendStatusCache = async function invalidateBackendStatusCache() {
+    backendStatusPromise = null
+    await browser.storage.local.remove(BACKEND_STATUS_KEY)
+  }
+
+  ext.refreshBackendStatus = async function refreshBackendStatus() {
+    if (backendStatusPromise) {
+      return backendStatusPromise
+    }
+
+    backendStatusPromise = ext.fetchApi('/health')
+      .then(async () => {
+        await browser.storage.local.set({
+          [BACKEND_STATUS_KEY]: {
+            ok: true,
+            error: null,
+            checkedAt: Date.now(),
+          },
+        })
+        return { ok: true }
+      })
+      .catch(async (error) => {
+        await browser.storage.local.set({
+          [BACKEND_STATUS_KEY]: {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            checkedAt: Date.now(),
+          },
+        }).catch(() => undefined)
+        throw error
+      })
+      .finally(() => {
+        backendStatusPromise = null
+      })
+
+    return backendStatusPromise
   }
 
   ext.refreshCurrentUser = async function refreshCurrentUser() {

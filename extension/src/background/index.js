@@ -1303,14 +1303,17 @@
         getState(),
         ext.getCachedCurrentUser(5 * 60 * 1000).catch(() => null),
         ext.getCachedAuthStatus(5 * 60 * 1000).catch(() => null),
+        ext.getCachedBackendStatus(5 * 60 * 1000).catch(() => null),
       ])
-        .then(([config, state, user, authStatus]) => {
+        .then(([config, state, user, authStatus, backendStatus]) => {
+          ext.refreshBackendStatus().catch(() => null)
           ext.getCurrentUser({ maxAgeMs: 30 * 1000 }).catch(() => null)
           return {
             config,
             state,
             user,
             authStatus,
+            backendStatus,
           }
         })
     }

@@ -243,18 +243,21 @@
     }
   }
 
-  function buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode, authStatus) {
+  function buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode, authStatus, backendStatus) {
     if (!configReady) {
       return 'Add the API URL in Settings.'
     }
-    if (authStatus && authStatus.ok === false) {
-      return 'Cannot reach Kings Track with current settings.'
+    if (backendStatus && backendStatus.ok === false) {
+      return 'Cannot reach Kings Track.'
     }
     if (!apiKeySaved && !localMode) {
       return 'Add the extension key in Settings.'
     }
+    if (authStatus && authStatus.ok === false) {
+      return 'API key is not verifying.'
+    }
     if (!authReady) {
-      return apiKeySaved ? 'Checking Kings Track.' : 'Checking saved credentials.'
+      return apiKeySaved ? 'Checking API key.' : 'Checking saved credentials.'
     }
     if (!headersReady) {
       return 'Paste fresh Gradeo headers in Settings.'
@@ -276,37 +279,42 @@
     const apiKeySaved = Boolean(String(config.extensionApiKey || '').trim())
     const user = context.user || null
     const authStatus = context.authStatus || null
+    const backendStatus = context.backendStatus || null
     const localMode = Boolean(user && (user.local_auth || user.auth_source === 'local'))
     const authReady = Boolean(user)
 
     let kingsTrackTone = 'warn'
-    if (configReady && authStatus && authStatus.ok) {
+    if (configReady && backendStatus && backendStatus.ok) {
       kingsTrackTone = 'good'
-    } else if (configReady && !authStatus) {
+    } else if (configReady && !backendStatus) {
       kingsTrackTone = ''
     }
 
     updateSignalGroup(configSignals, "King's Track", kingsTrackTone)
-    updateSignalGroup(
-      authSignals,
-      'API Key',
-      configReady && (apiKeySaved || localMode) ? 'good' : 'warn',
-    )
+    let apiKeyTone = 'warn'
+    if (configReady && (apiKeySaved || localMode) && authStatus && authStatus.ok) {
+      apiKeyTone = 'good'
+    } else if (configReady && (apiKeySaved || localMode) && !authStatus) {
+      apiKeyTone = ''
+    }
+    updateSignalGroup(authSignals, 'API Key', apiKeyTone)
     updateSignalGroup(headerSignals, 'Gradeo Headers', headersReady ? 'good' : 'warn')
 
     if (!configReady && apiKeySaved) {
       authDetail.textContent = 'Key saved. Add the Kings Track URL.'
+    } else if (backendStatus && backendStatus.ok === false) {
+      authDetail.textContent = 'Kings Track is unreachable.'
     } else if (user) {
       authDetail.textContent = localMode ? 'Using local auth.' : `${user.email} · ${user.role}`
     } else if (authStatus && authStatus.ok === false) {
-      authDetail.textContent = 'Kings Track did not verify the current URL/key.'
+      authDetail.textContent = 'API key did not verify.'
     } else if (apiKeySaved) {
-      authDetail.textContent = 'Key saved. Verification pending.'
+      authDetail.textContent = 'Key saved. Checking verification.'
     } else {
       authDetail.textContent = 'Not connected.'
     }
 
-    const note = buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode, authStatus)
+    const note = buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode, authStatus, backendStatus)
     homeNote.textContent = note
     homeNote.hidden = !note
     updateActionAvailability(configReady && authReady && headersReady)

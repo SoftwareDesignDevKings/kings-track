@@ -25,6 +25,9 @@
     if (typeof ext.invalidateCurrentUserCache === 'function') {
       await ext.invalidateCurrentUserCache()
     }
+    if (typeof ext.invalidateBackendStatusCache === 'function') {
+      await ext.invalidateBackendStatusCache()
+    }
     return ext.getConfig()
   }
 })()
