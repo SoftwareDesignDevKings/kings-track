@@ -3,6 +3,61 @@
   const STATE_KEY = 'kingsTrackSyncState'
   const EXTENSION_VERSION = '0.1.0'
   const GRADEO_BASE_URL = 'https://platform.gradeo.com.au'
+  const GRADEO_FETCH_TIMEOUT_MS = 45000
+  const SLOW_REQUEST_LOG_MS = 2000
+  const LONG_IMPORT_TIMEOUT_MS = 5 * 60 * 1000
+
+  function createRequestId(prefix) {
+    if (globalThis.crypto?.randomUUID) {
+      return `${prefix}-${globalThis.crypto.randomUUID()}`
+    }
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
+  }
+
+  function stripNilValues(object) {
+    return Object.fromEntries(
+      Object.entries(object).filter(([, value]) => value != null)
+    )
+  }
+
+  function compactExamSummaryRow(row) {
+    return stripNilValues({
+      exam_name: row.exam_name,
+      gradeo_exam_id: row.gradeo_exam_id,
+      gradeo_exam_session_id: row.gradeo_exam_session_id || undefined,
+      gradeo_marking_session_id: row.gradeo_marking_session_id || undefined,
+      exam_mark: row.exam_mark,
+      marks_available: row.marks_available,
+      status: row.status,
+      answer_submitted: row.answer_submitted,
+      syllabus_id: row.syllabus_id || undefined,
+      syllabus_title: row.syllabus_title || undefined,
+      syllabus_grade: row.syllabus_grade || undefined,
+      class_average: row.class_average,
+      marking_session_id: row.marking_session_id || undefined,
+      exam_answer_sheet_id: row.exam_answer_sheet_id || undefined,
+      exam_session_start_date: row.exam_session_start_date || undefined,
+      exam_session_max_time_seconds: row.exam_session_max_time_seconds,
+      student_group_mark_average: row.student_group_mark_average,
+      bands: Array.isArray(row.bands) && row.bands.length > 0 ? row.bands : undefined,
+      outcomes: Array.isArray(row.outcomes) && row.outcomes.length > 0 ? row.outcomes : undefined,
+      topics: Array.isArray(row.topics) && row.topics.length > 0 ? row.topics : undefined,
+    })
+  }
+
+  function compactImportStudent(student) {
+    const compacted = {
+      gradeo_student_id: student.gradeo_student_id,
+      student_name: student.student_name,
+    }
+    if (Array.isArray(student.rows) && student.rows.length > 0) {
+      compacted.rows = student.rows
+    }
+    if (Array.isArray(student.exam_rows) && student.exam_rows.length > 0) {
+      compacted.exam_rows = student.exam_rows.map(compactExamSummaryRow)
+    }
+    return compacted
+  }
 
   async function setState(state) {
     await browser.storage.local.set({ [STATE_KEY]: state })
@@ -306,15 +361,43 @@
 
   async function gradeoFetchJson(ctx, path, scope) {
     const url = path.startsWith('http') ? path : `${ctx.baseUrl}${path}`
-    const response = await fetch(url, {
-      method: 'GET',
-      mode: 'cors',
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json, text/plain, */*',
-        ...ctx.headers,
-      },
+    const startedAt = Date.now()
+    await ext.logDebug('background', 'gradeo_request_started', {
+      scope: scope || 'gradeo',
+      path,
+      timeoutMs: GRADEO_FETCH_TIMEOUT_MS,
     })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      controller.abort(new Error(`Gradeo request timed out after ${GRADEO_FETCH_TIMEOUT_MS}ms`))
+    }, GRADEO_FETCH_TIMEOUT_MS)
+
+    let response
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'include',
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          ...ctx.headers,
+        },
+      })
+    } catch (error) {
+      await ext.logDebug('background', 'gradeo_request_failed', {
+        scope: scope || 'gradeo',
+        path,
+        durationMs: Date.now() - startedAt,
+        error: String(error),
+      })
+      if (controller.signal.aborted) {
+        throw new Error(`Gradeo request timed out after ${Math.round(GRADEO_FETCH_TIMEOUT_MS / 1000)}s for ${path}`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timeout)
+    }
 
     if (response.status === 401) {
       throw new Error('Gradeo API returned 401. Refresh the saved Gradeo headers and make sure you are still signed in to Gradeo.')
@@ -331,7 +414,105 @@
       throw new Error(`Gradeo API ${response.status} for ${path}`)
     }
 
+    const durationMs = Date.now() - startedAt
+    if (durationMs >= SLOW_REQUEST_LOG_MS) {
+      await ext.logDebug('background', 'gradeo_request_slow', {
+        scope: scope || 'gradeo',
+        path,
+        durationMs,
+        status: response.status,
+      })
+    } else {
+      await ext.logDebug('background', 'gradeo_request_succeeded', {
+        scope: scope || 'gradeo',
+        path,
+        durationMs,
+        status: response.status,
+      })
+    }
+
     return response.json()
+  }
+
+  function summarizeApiResult(result) {
+    if (Array.isArray(result)) {
+      return { type: 'array', count: result.length }
+    }
+    if (result && typeof result === 'object') {
+      const summary = { type: 'object', keys: Object.keys(result).slice(0, 10) }
+      if (Number.isFinite(Number(result.count))) {
+        summary.count = Number(result.count)
+      }
+      if (Number.isFinite(Number(result.processed_students))) {
+        summary.processed_students = Number(result.processed_students)
+      }
+      if (Number.isFinite(Number(result.matched_students))) {
+        summary.matched_students = Number(result.matched_students)
+      }
+      if (Number.isFinite(Number(result.imported_exams))) {
+        summary.imported_exams = Number(result.imported_exams)
+      }
+      if (Number.isFinite(Number(result.imported_classes))) {
+        summary.imported_classes = Number(result.imported_classes)
+      }
+      if (Number.isFinite(Number(result.skipped_classes))) {
+        summary.skipped_classes = Number(result.skipped_classes)
+      }
+      return summary
+    }
+    return { type: typeof result }
+  }
+
+  async function fetchKingsTrackApi(path, options, debugDetails) {
+    const startedAt = Date.now()
+    const method = options?.method || 'GET'
+    const timeoutMs = options && Number.isFinite(Number(options.timeoutMs))
+      ? Math.max(1000, Number(options.timeoutMs))
+      : null
+    const requestId = createRequestId('kt')
+    const requestOptions = {
+      ...(options || {}),
+      headers: {
+        ...(options?.headers || {}),
+        'X-Extension-Request-Id': requestId,
+      },
+    }
+    await ext.logDebug('background', 'kings_track_request_started', {
+      requestId,
+      path,
+      method,
+      timeoutMs,
+      ...(debugDetails || {}),
+    })
+    try {
+      const result = await ext.fetchApi(path, requestOptions)
+      const durationMs = Date.now() - startedAt
+      await ext.logDebug(
+        'background',
+        durationMs >= SLOW_REQUEST_LOG_MS ? 'kings_track_request_slow' : 'kings_track_request_succeeded',
+        {
+          requestId,
+          path,
+          method,
+          durationMs,
+          timeoutMs,
+          ...(debugDetails || {}),
+          result: summarizeApiResult(result),
+        },
+      )
+      return result
+    } catch (error) {
+      await ext.logDebug('background', 'kings_track_request_failed', {
+        requestId,
+        path,
+        method,
+        durationMs: Date.now() - startedAt,
+        timeoutMs,
+        ...(debugDetails || {}),
+        error: String(error),
+      })
+      throw error
+    }
   }
 
   function mapApiClass(item) {
@@ -506,12 +687,16 @@
       count: deduped.length,
       pages: diagnostics.length,
     })
-    const result = await ext.fetchApi('/admin/gradeo/student-directory', {
+    const result = await fetchKingsTrackApi('/admin/gradeo/student-directory', {
       method: 'POST',
       body: JSON.stringify({
         extension_version: EXTENSION_VERSION,
         students: deduped,
       }),
+    }, {
+      scope: 'student_directory_upload',
+      studentCount: deduped.length,
+      pages: diagnostics.length,
     })
 
     await ext.logDebug('background', 'student_directory_uploaded', {
@@ -592,12 +777,17 @@
       pages: diagnostics.length,
       source: 'api',
     })
-    const result = await ext.fetchApi('/admin/gradeo/classes', {
+    const result = await fetchKingsTrackApi('/admin/gradeo/classes', {
       method: 'POST',
       body: JSON.stringify({
         extension_version: EXTENSION_VERSION,
         classes: deduped,
       }),
+    }, {
+      scope: 'class_upload',
+      classCount: deduped.length,
+      pages: diagnostics.length,
+      source: 'api',
     })
 
     await ext.logDebug('background', 'school_groups_uploaded', {
@@ -865,12 +1055,16 @@
       totalClasses,
       className,
     })
-    const preflight = await ext.fetchApi('/admin/gradeo/imports/preflight', {
+    const preflight = await fetchKingsTrackApi('/admin/gradeo/imports/preflight', {
       method: 'POST',
       body: JSON.stringify({
         gradeo_class_id: classId,
         gradeo_class_name: className,
       }),
+    }, {
+      scope: 'import_preflight',
+      classId,
+      className,
     })
 
     if (!preflight.ready) {
@@ -957,7 +1151,20 @@
       })
     }
 
-    for (const session of candidateSessions.values()) {
+    const sessions = Array.from(candidateSessions.values())
+    for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex += 1) {
+      const session = sessions[sessionIndex]
+      const sessionExamName = [...session.studentCandidates.values()][0]?.examTitle || null
+      await setState({
+        status: 'importing_exam_sessions',
+        currentClass: classIndex,
+        totalClasses,
+        className,
+        currentExam: sessionIndex + 1,
+        totalExams: sessions.length,
+        examName: sessionExamName,
+      })
+
       const aggregate = await fetchMarkingSessionAggregate(ctx, session.markingSessionId)
       const canonicalExamId = String(aggregate?.exam?.id || '').trim()
       const canonicalExamSessionId = String(
@@ -1088,22 +1295,47 @@
     }
 
     const importStudents = Array.from(importStudentsById.values())
+    const uploadStudents = importStudents
+      .filter(student => (
+        (Array.isArray(student.rows) && student.rows.length > 0) ||
+        (Array.isArray(student.exam_rows) && student.exam_rows.length > 0)
+      ))
+      .map(compactImportStudent)
+    const requestBody = JSON.stringify({
+      gradeo_class_id: classId,
+      gradeo_class_name: className,
+      extension_version: EXTENSION_VERSION,
+      students: uploadStudents,
+    })
+    const payloadBytes = new TextEncoder().encode(requestBody).length
+    await ext.logDebug('background', 'class_import_payload_built', {
+      classId,
+      className,
+      originalStudents: importStudents.length,
+      uploadStudents: uploadStudents.length,
+      payloadBytes,
+      payloadKilobytes: Math.round(payloadBytes / 1024),
+      confirmedExams: importedExamCount,
+    })
 
     await setState({
       status: 'uploading_class',
       currentClass: classIndex,
       totalClasses,
       className,
-      students: importStudents.length,
+      students: uploadStudents.length,
+      payloadKilobytes: Math.round(payloadBytes / 1024),
     })
-    const result = await ext.fetchApi('/admin/gradeo/imports', {
+    const result = await fetchKingsTrackApi('/admin/gradeo/imports', {
       method: 'POST',
-      body: JSON.stringify({
-        gradeo_class_id: classId,
-        gradeo_class_name: className,
-        extension_version: EXTENSION_VERSION,
-        students: importStudents,
-      }),
+      timeoutMs: LONG_IMPORT_TIMEOUT_MS,
+      body: requestBody,
+    }, {
+      scope: 'class_import_upload',
+      classId,
+      className,
+      studentCount: uploadStudents.length,
+      payloadBytes,
     })
 
     await ext.logDebug('background', 'mapped_class_imported', {
@@ -1131,7 +1363,9 @@
     const ctx = await getGradeoApiContext()
 
     await setState({ status: 'loading_mappings' })
-    const mappings = await ext.fetchApi('/admin/gradeo/mappings')
+    const mappings = await fetchKingsTrackApi('/admin/gradeo/mappings', undefined, {
+      scope: 'mapping_fetch',
+    })
     if (!Array.isArray(mappings) || mappings.length === 0) {
       const blocked = { ready: false, reason: 'No Gradeo class mappings found in Kings Track.' }
       await setState({ status: 'blocked', action: 'import_mapped_classes', blocked })
@@ -1233,12 +1467,16 @@
       count: response.classes.length,
       source: source || response.source || 'dom',
     })
-    const result = await ext.fetchApi('/admin/gradeo/classes', {
+    const result = await fetchKingsTrackApi('/admin/gradeo/classes', {
       method: 'POST',
       body: JSON.stringify({
         extension_version: EXTENSION_VERSION,
         classes: response.classes,
       }),
+    }, {
+      scope: 'class_upload',
+      classCount: response.classes.length,
+      source: source || response.source || 'dom',
     })
     await ext.logDebug('background', 'school_groups_uploaded', result)
     await setState({

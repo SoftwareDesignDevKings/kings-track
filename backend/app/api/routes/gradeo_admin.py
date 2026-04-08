@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
@@ -467,6 +468,7 @@ async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
 
 @router.post("/imports/preflight")
 async def preflight_gradeo_import(body: GradeoImportPreflightIn, db: AsyncSession = Depends(get_db)):
+    started_at = perf_counter()
     try:
         preflight = await preflight_class_import(
             db,
@@ -477,6 +479,14 @@ async def preflight_gradeo_import(body: GradeoImportPreflightIn, db: AsyncSessio
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(exc))
     await db.commit()
+    logger.info(
+        "gradeo_preflight_route_complete class_id=%s class_name=%s ready=%s reason=%s duration_ms=%s",
+        body.gradeo_class_id,
+        body.gradeo_class_name,
+        preflight["ready"],
+        preflight["reason"],
+        round((perf_counter() - started_at) * 1000, 1),
+    )
     return {
         **preflight,
         "student_directory_last_synced_at": _to_iso(preflight["student_directory_last_synced_at"]),
@@ -489,6 +499,15 @@ async def create_gradeo_import(
     user: dict = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    started_at = perf_counter()
+    logger.info(
+        "gradeo_import_route_started class_id=%s class_name=%s students=%s user=%s extension_version=%s",
+        body.gradeo_class_id,
+        body.gradeo_class_name,
+        len(body.students),
+        user["email"],
+        body.extension_version,
+    )
     batch = extension_source_adapter.to_import_batch(
         gradeo_class_id=body.gradeo_class_id,
         gradeo_class_name=body.gradeo_class_name,
@@ -501,6 +520,14 @@ async def create_gradeo_import(
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(exc))
     await db.commit()
+    logger.info(
+        "gradeo_import_route_complete class_id=%s class_name=%s user=%s duration_ms=%s summary=%s",
+        body.gradeo_class_id,
+        body.gradeo_class_name,
+        user["email"],
+        round((perf_counter() - started_at) * 1000, 1),
+        summary,
+    )
     return summary
 
 

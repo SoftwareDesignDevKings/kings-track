@@ -1,14 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const csvFixture = `"Exam","Exam ID","Class name","Class average","Student","Student ID","Copyright","Question","Question ID","Question part","Question part ID","Question link","Mark","Marks available","Answer submitted?","Feedback","Marker name","Marker ID","Marking session link","Exam mark","Syllabus title","Syllabus grade","Bands","Outcomes","Topics"
 "12ENC_Cycle6","exam-1","12 encx_2026","1.6","Eamon Wong","student-1","NESA Activities","Spreadsheets","question-1","Part A","part-1","https://platform.gradeo.com.au/question/question-1","2","2","Yes","","TKS CST","marker-1","https://platform.gradeo.com.au/script/script-1","9","Enterprise Computing","12","3,4,5","EC-12-04,EC-12-08","Data Science"
 "12ENC_Cycle6","exam-1","12 encx_2026","1.6","Eamon Wong","student-1","TKS2025","Spreadsheets 2","question-2","Part B","part-2","https://platform.gradeo.com.au/question/question-2","7","8","Yes","Good work","TKS CST","marker-1","https://platform.gradeo.com.au/script/script-1","9","Enterprise Computing","12","3,4","EC-12-05","Data Science"`
 
 describe('Gradeo extension utilities', () => {
+  const originalFetch = globalThis.fetch
+
   beforeEach(() => {
     vi.resetModules()
+    vi.useRealTimers()
     ;(globalThis as any).KingsTrackExtension = {}
     document.body.innerHTML = ''
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    globalThis.fetch = originalFetch
   })
 
   it('parses Gradeo CSV rows into a student import payload', async () => {
@@ -96,5 +104,41 @@ describe('Gradeo extension utilities', () => {
     expect(result.students).toHaveLength(2)
     expect(progressEvents[0]).toMatchObject({ phase: 'exporting_student', current: 1, total: 2 })
     expect(progressEvents.at(-1)).toMatchObject({ phase: 'class_ready', current: 2, total: 2 })
+  })
+
+  it('times out a stalled backend request instead of waiting forever', async () => {
+    vi.useFakeTimers()
+    ;(globalThis as any).KingsTrackExtension = {
+      getConfig: vi.fn().mockResolvedValue({
+        apiBaseUrl: 'https://kings-track.test/api',
+        extensionApiKey: 'extension-key',
+        apiTimeoutMs: 1000,
+      }),
+    }
+
+    globalThis.fetch = vi.fn((_url: string, options?: RequestInit) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => {
+        reject(options.signal?.reason || new DOMException('Aborted', 'AbortError'))
+      }, { once: true })
+    })) as typeof fetch
+
+    await import('../../../extension/src/shared/auth.js')
+    const ext = (globalThis as any).KingsTrackExtension
+
+    const request = ext.fetchApi('/auth/me', { timeoutMs: 1000 })
+    const rejection = expect(request).rejects.toThrow(/timed out/i)
+
+    await vi.advanceTimersByTimeAsync(1100)
+
+    await rejection
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://kings-track.test/api/auth/me',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-Extension-Api-Key': 'extension-key',
+        }),
+      }),
+    )
   })
 })
