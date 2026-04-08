@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kings Track Gradeo</title>
+    <style>
+      :root {
+        --bg: #f3f0e8;
+        --panel: rgba(255, 255, 255, 0.9);
+        --panel-strong: #ffffff;
+        --text: #18332b;
+        --muted: #5a6f67;
+        --line: rgba(24, 51, 43, 0.12);
+        --accent: #0f766e;
+        --accent-strong: #0a5f59;
+        --accent-soft: rgba(15, 118, 110, 0.12);
+        --good-bg: #def7e8;
+        --good-text: #166534;
+        --warn-bg: #fff1c2;
+        --warn-text: #9a5c00;
+        --idle-bg: #e7ece8;
+        --idle-text: #52615b;
+        --shadow: 0 18px 40px rgba(24, 51, 43, 0.12);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-width: 400px;
+        max-width: 440px;
+        font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 42%),
+          linear-gradient(180deg, #f8f6f0 0%, var(--bg) 100%);
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .shell {
+        padding: 16px;
+        display: grid;
+        gap: 14px;
+      }
+
+      h1, h2, h3, p {
+        margin: 0;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 16px;
+        box-shadow: 0 10px 24px rgba(24, 51, 43, 0.08);
+        backdrop-filter: blur(10px);
+        display: grid;
+        gap: 14px;
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+      }
+
+      .card-kicker {
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #6d8178;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+
+      .card h2 {
+        font-size: 15px;
+        line-height: 1.15;
+      }
+
+      .card p,
+      .helper-text,
+      .micro-copy {
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 5px 10px;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .pill.good {
+        background: var(--good-bg);
+        color: var(--good-text);
+      }
+
+      .pill.warn {
+        background: var(--warn-bg);
+        color: var(--warn-text);
+      }
+
+      .pill.idle {
+        background: var(--idle-bg);
+        color: var(--idle-text);
+      }
+
+      .field-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        color: #25443b;
+        font-weight: 600;
+      }
+
+      .label-copy {
+        font-weight: 500;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid #cad6d0;
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.94);
+        color: var(--text);
+        transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+      }
+
+      input:focus,
+      textarea:focus {
+        outline: none;
+        border-color: rgba(15, 118, 110, 0.72);
+        box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
+      }
+
+      textarea {
+        min-height: 118px;
+        resize: vertical;
+        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+        line-height: 1.45;
+      }
+
+      .button-row,
+      .action-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .button-row.two-up {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      button {
+        border: 0;
+        border-radius: 12px;
+        padding: 11px 13px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 120ms ease, opacity 120ms ease, background-color 120ms ease;
+      }
+
+      button:hover:not(:disabled) {
+        transform: translateY(-1px);
+      }
+
+      button:disabled {
+        opacity: 0.52;
+        cursor: not-allowed;
+      }
+
+      button.primary {
+        background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+        color: white;
+      }
+
+      button.secondary {
+        background: #e6ece8;
+        color: var(--text);
+      }
+
+      .auth-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .auth-identity {
+        min-width: 0;
+        display: grid;
+        gap: 4px;
+      }
+
+      .auth-summary {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      .auth-subtle {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .workflow {
+        display: grid;
+        gap: 10px;
+      }
+
+      .workflow-steps {
+        display: grid;
+        gap: 8px;
+      }
+
+      .workflow-step {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 10px;
+        align-items: start;
+        padding: 11px 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(15, 118, 110, 0.1);
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .step-number {
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent-strong);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .step-copy strong {
+        display: block;
+        font-size: 12px;
+        color: var(--text);
+        margin-bottom: 2px;
+      }
+
+      .step-copy span {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .action-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .action-button {
+        text-align: left;
+        display: grid;
+        gap: 4px;
+        border-radius: 14px;
+        padding: 12px 13px;
+      }
+
+      .action-button small {
+        display: block;
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 1.35;
+        opacity: 0.9;
+      }
+
+      .status-panel {
+        display: grid;
+        gap: 10px;
+      }
+
+      .status-headline {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      .status-summary {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      details {
+        border: 1px solid rgba(24, 51, 43, 0.1);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 11px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .details-body {
+        padding: 0 12px 12px;
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 11px;
+        line-height: 1.5;
+        color: #335046;
+      }
+
+      .notice {
+        display: none;
+        border-radius: 14px;
+        padding: 10px 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .notice.show {
+        display: block;
+      }
+
+      .notice.good {
+        background: var(--good-bg);
+        color: var(--good-text);
+      }
+
+      .notice.warn {
+        background: var(--warn-bg);
+        color: var(--warn-text);
+      }
+
+      .logs-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div id="noticeBanner" class="notice"></div>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-kicker">Step 1</div>
+            <h2>Connection setup</h2>
+            <p>These values tell the extension how to talk to Kings Track and, when needed, Supabase.</p>
+          </div>
+          <div id="configPill" class="pill idle">Needs setup</div>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            API base URL
+            <span class="label-copy">Use your Kings Track backend API, such as `http://localhost:8000/api` or production `/api`.</span>
+            <input id="apiBaseUrl" placeholder="https://backend.example.com/api" />
+          </label>
+          <label>
+            Supabase URL
+            <span class="label-copy">Optional for local dev. Required when you want Google sign-in in the extension.</span>
+            <input id="supabaseUrl" placeholder="https://project.supabase.co" />
+          </label>
+          <label>
+            Supabase anon key
+            <span class="label-copy">Paste the anon key only. Leave blank for local-only testing.</span>
+            <input id="supabaseAnonKey" placeholder="ey..." />
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button id="saveConfig" class="secondary">Save connection settings</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-kicker">Step 2</div>
+            <h2>Authentication</h2>
+            <p>Use Google sign-in for hosted environments, or rely on local dev auth when your backend is running in local mode.</p>
+          </div>
+        </div>
+
+        <div class="auth-row">
+          <div class="auth-identity">
+            <div id="authSummary" class="auth-summary">Checking session…</div>
+            <div id="authDetail" class="auth-subtle">Verifying extension access.</div>
+          </div>
+          <div id="authPill" class="pill idle">Checking</div>
+        </div>
+
+        <div class="button-row two-up">
+          <button id="signIn" class="primary">Sign in with Google</button>
+          <button id="signOut" class="secondary">Sign out</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-kicker">Step 3</div>
+            <h2>Gradeo headers and sync workflow</h2>
+            <p>Paste a fresh copied Gradeo request once, then follow the sync order below.</p>
+          </div>
+          <div id="headersPill" class="pill idle">Headers missing</div>
+        </div>
+
+        <label>
+          Gradeo API headers
+          <span class="label-copy">Paste either raw copied request headers or a JSON object. The extension looks for the saved `Authorization` header.</span>
+          <textarea id="gradeoApiHeadersJson" placeholder='Paste a JSON object or raw copied Gradeo request headers here.'></textarea>
+        </label>
+
+        <div class="button-row">
+          <button id="saveApiHeaders" class="secondary">Save Gradeo headers</button>
+        </div>
+
+        <div class="workflow">
+          <div class="workflow-steps">
+            <div class="workflow-step">
+              <div class="step-number">1</div>
+              <div class="step-copy">
+                <strong>Sync classes</strong>
+                <span>Pull the Gradeo class list into Kings Track so mappings can be created.</span>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <div class="step-number">2</div>
+              <div class="step-copy">
+                <strong>Link classes in Kings Track</strong>
+                <span>Match Gradeo classes to Canvas courses inside the Kings Track admin screen.</span>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <div class="step-number">3</div>
+              <div class="step-copy">
+                <strong>Sync students, then import mapped classes</strong>
+                <span>Refresh the student directory before running imports so the reporting data lands cleanly.</span>
+              </div>
+            </div>
+          </div>
+
+          <p id="workflowHint" class="micro-copy">Checking what is ready…</p>
+
+          <div class="action-grid">
+            <button id="syncClasses" class="primary action-button">
+              Sync classes
+              <small>Fetch Gradeo classes into Kings Track.</small>
+            </button>
+            <button id="syncStudents" class="primary action-button">
+              Sync students
+              <small>Refresh the Gradeo student directory before importing reports.</small>
+            </button>
+            <button id="importMappedClasses" class="primary action-button">
+              Import mapped classes
+              <small>Pull reporting data for every linked Gradeo class.</small>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-kicker">Live status</div>
+            <h2>Current activity</h2>
+          </div>
+          <div id="statePill" class="pill idle">Idle</div>
+        </div>
+
+        <div class="status-panel">
+          <div id="statusHeadline" class="status-headline">Nothing running yet.</div>
+          <div id="statusSummary" class="status-summary">Once you start a sync, progress and results will appear here.</div>
+          <details>
+            <summary>Raw state details</summary>
+            <div class="details-body">
+              <pre id="stateDetails">No work running.</pre>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-kicker">Debug</div>
+            <h2>Recent extension log</h2>
+            <p>Useful when a sync fails or when you need to confirm what the extension did last.</p>
+          </div>
+        </div>
+
+        <div class="logs-actions">
+          <button id="refreshLogs" class="secondary">Refresh log</button>
+          <button id="clearLogs" class="secondary">Clear log</button>
+        </div>
+
+        <details>
+          <summary>Show debug log</summary>
+          <div class="details-body">
+            <pre id="debugLogs">No debug logs yet.</pre>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <script src="../../vendor/webextension-polyfill.js"></script>
+    <script src="../shared/config.js"></script>
+    <script src="../shared/logger.js"></script>
+    <script src="../shared/auth.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
