@@ -2,10 +2,9 @@
   "manifest_version": 3,
   "name": "Kings Track Gradeo Importer",
   "version": "0.1.0",
-  "description": "Authenticate with Kings Track and import Gradeo student-directory and reporting data.",
+  "description": "Connect to Kings Track with an extension API key and import Gradeo student-directory and reporting data.",
   "permissions": [
     "activeTab",
-    "identity",
     "storage",
     "tabs"
   ],
