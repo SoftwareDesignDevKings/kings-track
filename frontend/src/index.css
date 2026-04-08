@@ -20,6 +20,7 @@
 
 .activity-table-scroll {
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .activity-table {

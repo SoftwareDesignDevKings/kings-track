@@ -97,7 +97,7 @@ export default function CourseDetail() {
         </div>
 
         {/* Tab bar */}
-        <div className="mb-5 overflow-x-auto border-b border-slate-200">
+        <div className="mb-5 overflow-x-auto overflow-y-hidden border-b border-slate-200">
           <div className="flex min-w-max items-center gap-1">
           {TABS.map(tab => (
             <button
