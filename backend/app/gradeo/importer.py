@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import logging
 import re
+from time import perf_counter
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -141,23 +142,27 @@ def merge_exam_aggregate(existing: GradeoExamAggregate, incoming: GradeoExamAggr
     return existing
 
 
-async def upsert_gradeo_exam_definition(db: AsyncSession, aggregate: GradeoExamAggregate, now: datetime) -> None:
-    existing = await db.execute(
-        text(
-            """
-            SELECT syllabus_id
-            FROM gradeo_exam_definitions
-            WHERE gradeo_exam_id = :gradeo_exam_id
-            """
-        ),
-        {"gradeo_exam_id": aggregate.gradeo_exam_id},
-    )
-    row = existing.fetchone()
-    if row and _value_conflicts(row[0], aggregate.syllabus_id):
-        raise ValueError(
-            f"Conflicting canonical syllabus for Gradeo exam {aggregate.gradeo_exam_id}: {row[0]} vs {aggregate.syllabus_id}"
-        )
+def merge_assignment_metadata(existing: GradeoExamAggregate, incoming: GradeoExamAggregate) -> GradeoExamAggregate:
+    if existing.class_name is None and incoming.class_name is not None:
+        existing.class_name = incoming.class_name
+    if existing.class_average is None and incoming.class_average is not None:
+        existing.class_average = incoming.class_average
+    if existing.syllabus_id is None and incoming.syllabus_id is not None:
+        existing.syllabus_id = incoming.syllabus_id
+    if existing.syllabus_title is None and incoming.syllabus_title is not None:
+        existing.syllabus_title = incoming.syllabus_title
+    if existing.syllabus_grade is None and incoming.syllabus_grade is not None:
+        existing.syllabus_grade = incoming.syllabus_grade
+    if incoming.bands:
+        existing.bands = list(dict.fromkeys([*existing.bands, *incoming.bands]))
+    if incoming.outcomes:
+        existing.outcomes = list(dict.fromkeys([*existing.outcomes, *incoming.outcomes]))
+    if incoming.topics:
+        existing.topics = list(dict.fromkeys([*existing.topics, *incoming.topics]))
+    return existing
 
+
+async def upsert_gradeo_exam_definition(db: AsyncSession, aggregate: GradeoExamAggregate, now: datetime) -> None:
     await db.execute(
         text(
             """
@@ -192,22 +197,6 @@ async def upsert_gradeo_exam_definition(db: AsyncSession, aggregate: GradeoExamA
 async def upsert_gradeo_exam_session(db: AsyncSession, aggregate: GradeoExamAggregate, now: datetime) -> None:
     if not aggregate.gradeo_exam_session_id:
         return
-
-    existing = await db.execute(
-        text(
-            """
-            SELECT gradeo_exam_id
-            FROM gradeo_exam_sessions
-            WHERE gradeo_exam_session_id = :gradeo_exam_session_id
-            """
-        ),
-        {"gradeo_exam_session_id": aggregate.gradeo_exam_session_id},
-    )
-    row = existing.fetchone()
-    if row and row[0] != aggregate.gradeo_exam_id:
-        raise ValueError(
-            f"Conflicting canonical exam for Gradeo session {aggregate.gradeo_exam_session_id}: {row[0]} vs {aggregate.gradeo_exam_id}"
-        )
 
     await db.execute(
         text(
@@ -246,68 +235,6 @@ async def upsert_gradeo_class_exam_assignment(
             f"Gradeo class mismatch for marking session {aggregate.gradeo_marking_session_id}: {aggregate.gradeo_class_id} vs {batch.gradeo_class_id}"
         )
 
-    existing = await db.execute(
-        text(
-            """
-            SELECT id, gradeo_exam_id, gradeo_exam_session_id, syllabus_id
-            FROM gradeo_class_exam_assignments
-            WHERE gradeo_class_id = :gradeo_class_id
-              AND gradeo_marking_session_id = :gradeo_marking_session_id
-            """
-        ),
-        {
-            "gradeo_class_id": batch.gradeo_class_id,
-            "gradeo_marking_session_id": aggregate.gradeo_marking_session_id,
-        },
-    )
-    row = existing.fetchone()
-    if row:
-        assignment_id, existing_exam_id, existing_exam_session_id, existing_syllabus_id = row
-        if existing_exam_id != aggregate.gradeo_exam_id:
-            raise ValueError(
-                f"Conflicting canonical exam for class assignment {batch.gradeo_class_id}/{aggregate.gradeo_marking_session_id}: {existing_exam_id} vs {aggregate.gradeo_exam_id}"
-            )
-        if _value_conflicts(existing_exam_session_id, aggregate.gradeo_exam_session_id):
-            raise ValueError(
-                f"Conflicting canonical exam session for class assignment {batch.gradeo_class_id}/{aggregate.gradeo_marking_session_id}: {existing_exam_session_id} vs {aggregate.gradeo_exam_session_id}"
-            )
-        if _value_conflicts(existing_syllabus_id, aggregate.syllabus_id):
-            raise ValueError(
-                f"Conflicting canonical syllabus for class assignment {batch.gradeo_class_id}/{aggregate.gradeo_marking_session_id}: {existing_syllabus_id} vs {aggregate.syllabus_id}"
-            )
-        await db.execute(
-            text(
-                """
-                UPDATE gradeo_class_exam_assignments
-                SET exam_name = :exam_name,
-                    class_name = :class_name,
-                    class_average = :class_average,
-                    syllabus_id = COALESCE(syllabus_id, :syllabus_id),
-                    syllabus_title = COALESCE(:syllabus_title, syllabus_title),
-                    syllabus_grade = COALESCE(:syllabus_grade, syllabus_grade),
-                    bands = :bands,
-                    outcomes = :outcomes,
-                    topics = :topics,
-                    updated_at = :updated_at
-                WHERE id = :assignment_id
-                """
-            ),
-            {
-                "assignment_id": assignment_id,
-                "exam_name": aggregate.exam_name,
-                "class_name": aggregate.class_name or batch.gradeo_class_name,
-                "class_average": aggregate.class_average,
-                "syllabus_id": aggregate.syllabus_id,
-                "syllabus_title": aggregate.syllabus_title,
-                "syllabus_grade": aggregate.syllabus_grade,
-                "bands": ",".join(aggregate.bands) or None,
-                "outcomes": ",".join(aggregate.outcomes) or None,
-                "topics": ",".join(aggregate.topics) or None,
-                "updated_at": now,
-            },
-        )
-        return assignment_id
-
     result = await db.execute(
         text(
             """
@@ -321,6 +248,19 @@ async def upsert_gradeo_class_exam_assignment(
                 :exam_name, :class_name, :class_average, :syllabus_id, :syllabus_title, :syllabus_grade,
                 :bands, :outcomes, :topics, :discovered_at, :updated_at
             )
+            ON CONFLICT (gradeo_class_id, gradeo_marking_session_id) DO UPDATE SET
+                gradeo_exam_id = EXCLUDED.gradeo_exam_id,
+                gradeo_exam_session_id = COALESCE(EXCLUDED.gradeo_exam_session_id, gradeo_class_exam_assignments.gradeo_exam_session_id),
+                exam_name = EXCLUDED.exam_name,
+                class_name = EXCLUDED.class_name,
+                class_average = EXCLUDED.class_average,
+                syllabus_id = COALESCE(gradeo_class_exam_assignments.syllabus_id, EXCLUDED.syllabus_id),
+                syllabus_title = COALESCE(EXCLUDED.syllabus_title, gradeo_class_exam_assignments.syllabus_title),
+                syllabus_grade = COALESCE(EXCLUDED.syllabus_grade, gradeo_class_exam_assignments.syllabus_grade),
+                bands = EXCLUDED.bands,
+                outcomes = EXCLUDED.outcomes,
+                topics = EXCLUDED.topics,
+                updated_at = EXCLUDED.updated_at
             RETURNING id
             """
         ),
@@ -706,14 +646,45 @@ async def preflight_class_import(
     gradeo_class_id: str,
     gradeo_class_name: str,
 ) -> dict:
+    started_at = perf_counter()
     if not is_valid_gradeo_class_id(gradeo_class_id):
         raise ValueError(f"Invalid Gradeo class id: {gradeo_class_id}")
 
+    step_started_at = perf_counter()
     await cleanup_invalid_gradeo_classes(db)
-    await upsert_gradeo_class(db, gradeo_class_id, gradeo_class_name)
+    logger.info(
+        "gradeo_preflight_step class_id=%s step=cleanup_invalid_gradeo_classes duration_ms=%s",
+        gradeo_class_id,
+        round((perf_counter() - step_started_at) * 1000, 1),
+    )
 
+    step_started_at = perf_counter()
+    await upsert_gradeo_class(db, gradeo_class_id, gradeo_class_name)
+    logger.info(
+        "gradeo_preflight_step class_id=%s step=upsert_gradeo_class duration_ms=%s",
+        gradeo_class_id,
+        round((perf_counter() - step_started_at) * 1000, 1),
+    )
+
+    step_started_at = perf_counter()
     status = await get_student_directory_status(db)
+    logger.info(
+        "gradeo_preflight_step class_id=%s step=get_student_directory_status duration_ms=%s stale=%s matched_students=%s last_synced_at=%s",
+        gradeo_class_id,
+        round((perf_counter() - step_started_at) * 1000, 1),
+        status["stale"],
+        status["matched_students"],
+        status["last_synced_at"],
+    )
+
+    step_started_at = perf_counter()
     courses = await get_whitelisted_courses(db)
+    logger.info(
+        "gradeo_preflight_step class_id=%s step=get_whitelisted_courses duration_ms=%s course_count=%s",
+        gradeo_class_id,
+        round((perf_counter() - step_started_at) * 1000, 1),
+        len(courses),
+    )
     candidates = [
         {
             "course_id": course["course_id"],
@@ -728,6 +699,7 @@ async def preflight_class_import(
     ]
     unique_candidate = unique_course_candidate(gradeo_class_name, courses)
 
+    step_started_at = perf_counter()
     mapping_result = await db.execute(
         text(
             """
@@ -740,6 +712,12 @@ async def preflight_class_import(
         {"gradeo_class_id": gradeo_class_id},
     )
     mapping_row = mapping_result.fetchone()
+    logger.info(
+        "gradeo_preflight_step class_id=%s step=lookup_mapping duration_ms=%s mapping_found=%s",
+        gradeo_class_id,
+        round((perf_counter() - step_started_at) * 1000, 1),
+        bool(mapping_row),
+    )
 
     if mapping_row:
         reason = None if not status["stale"] else "student_directory_stale"
@@ -755,7 +733,7 @@ async def preflight_class_import(
         reason = "mapping_required"
         mapping = None
 
-    return {
+    result = {
         "ready": ready,
         "reason": reason,
         "student_directory_last_synced_at": status["last_synced_at"],
@@ -764,6 +742,17 @@ async def preflight_class_import(
         "candidate_courses": candidates,
         "suggested_course": unique_candidate,
     }
+    logger.info(
+        "gradeo_preflight_complete class_id=%s class_name=%s ready=%s reason=%s candidate_count=%s mapping=%s total_duration_ms=%s",
+        gradeo_class_id,
+        gradeo_class_name,
+        ready,
+        reason,
+        len(candidates),
+        mapping["canvas_course_id"] if mapping else None,
+        round((perf_counter() - started_at) * 1000, 1),
+    )
+    return result
 
 
 async def import_class_batch(
@@ -772,6 +761,16 @@ async def import_class_batch(
     batch: GradeoImportBatch,
     triggered_by: str | None,
 ) -> dict:
+    started_at = perf_counter()
+    logger.info(
+        "gradeo_import_started class_id=%s class_name=%s students=%s source_type=%s extension_version=%s triggered_by=%s",
+        batch.gradeo_class_id,
+        batch.gradeo_class_name,
+        len(batch.students),
+        batch.source_type,
+        batch.extension_version,
+        triggered_by,
+    )
     preflight = await preflight_class_import(
         db,
         gradeo_class_id=batch.gradeo_class_id,
@@ -808,6 +807,11 @@ async def import_class_batch(
 
     try:
         enrolled_student_ids = await get_course_student_ids(db, canvas_course_id)
+        logger.info(
+            "gradeo_import_step class_id=%s step=get_course_student_ids enrolled_count=%s",
+            batch.gradeo_class_id,
+            len(enrolled_student_ids),
+        )
         student_ids = [student.gradeo_student_id for student in batch.students]
         statement = text(
             """
@@ -818,6 +822,16 @@ async def import_class_batch(
         ).bindparams(bindparam("student_ids", expanding=True))
         result = await db.execute(statement, {"student_ids": student_ids or ["__none__"]})
         matched_students = {row[0]: row[1] for row in result.fetchall()}
+        logger.info(
+            "gradeo_import_step class_id=%s step=load_gradeo_student_matches requested_students=%s matched_directory_students=%s",
+            batch.gradeo_class_id,
+            len(student_ids),
+            len(matched_students),
+        )
+
+        matched_student_updates: list[dict] = []
+        assignment_templates: dict[str, GradeoExamAggregate] = {}
+        assignment_rows: list[dict] = []
 
         for student in batch.students:
             matched_user_id = matched_students.get(student.gradeo_student_id)
@@ -826,19 +840,12 @@ async def import_class_batch(
                 continue
 
             matched_count += 1
-            await db.execute(
-                text(
-                    """
-                    UPDATE gradeo_students
-                    SET name = :name, last_seen_at = :last_seen_at
-                    WHERE gradeo_student_id = :gradeo_student_id
-                    """
-                ),
+            matched_student_updates.append(
                 {
                     "gradeo_student_id": student.gradeo_student_id,
                     "name": student.student_name,
                     "last_seen_at": now,
-                },
+                }
             )
 
             question_aggregates = aggregate_exam_rows(student.rows)
@@ -855,120 +862,185 @@ async def import_class_batch(
                 else:
                     aggregates_by_assignment[key] = aggregate
 
-            for aggregate in aggregates_by_assignment.values():
+            for assignment_key, aggregate in aggregates_by_assignment.items():
                 if aggregate.syllabus_id and class_syllabus_ids and aggregate.syllabus_id not in class_syllabus_ids:
                     raise ValueError(
                         f"Gradeo syllabus mismatch for class {batch.gradeo_class_id} and marking session {aggregate.gradeo_marking_session_id}: {aggregate.syllabus_id}"
                     )
-                await upsert_gradeo_exam_definition(db, aggregate, now)
-                await upsert_gradeo_exam_session(db, aggregate, now)
-                assignment_id = await upsert_gradeo_class_exam_assignment(
-                    db,
-                    batch=batch,
-                    aggregate=aggregate,
-                    now=now,
+                if assignment_key in assignment_templates:
+                    assignment_templates[assignment_key] = merge_assignment_metadata(
+                        assignment_templates[assignment_key],
+                        aggregate,
+                    )
+                else:
+                    assignment_templates[assignment_key] = aggregate
+                assignment_rows.append(
+                    {
+                        "assignment_key": assignment_key,
+                        "student": student,
+                        "matched_user_id": matched_user_id,
+                        "aggregate": aggregate,
+                    }
                 )
-                imported_assignment_ids.add(assignment_id)
-                await db.execute(
-                    text(
-                        """
-                        INSERT INTO gradeo_assignment_results (
-                            gradeo_class_exam_assignment_id, gradeo_student_id, canvas_course_id, user_id, student_name,
-                            status, exam_mark, marks_available, class_average, answer_submitted_count,
-                            unmarked_question_count, created_at, last_imported_at
-                        )
-                        VALUES (
-                            :gradeo_class_exam_assignment_id, :gradeo_student_id, :canvas_course_id, :user_id, :student_name,
-                            :status, :exam_mark, :marks_available, :class_average, :answer_submitted_count,
-                            :unmarked_question_count, :created_at, :last_imported_at
-                        )
-                        ON CONFLICT (gradeo_class_exam_assignment_id, gradeo_student_id) DO UPDATE SET
-                            canvas_course_id = EXCLUDED.canvas_course_id,
-                            user_id = EXCLUDED.user_id,
-                            student_name = EXCLUDED.student_name,
-                            status = EXCLUDED.status,
-                            exam_mark = EXCLUDED.exam_mark,
-                            marks_available = EXCLUDED.marks_available,
-                            class_average = EXCLUDED.class_average,
-                            answer_submitted_count = EXCLUDED.answer_submitted_count,
-                            unmarked_question_count = EXCLUDED.unmarked_question_count,
-                            last_imported_at = EXCLUDED.last_imported_at
-                        """
-                    ),
+
+        if matched_student_updates:
+            await db.execute(
+                text(
+                    """
+                    UPDATE gradeo_students
+                    SET name = :name, last_seen_at = :last_seen_at
+                    WHERE gradeo_student_id = :gradeo_student_id
+                    """
+                ),
+                matched_student_updates,
+            )
+
+        logger.info(
+            "gradeo_import_step class_id=%s step=prepare_assignment_rows matched_students=%s unique_assignments=%s assignment_rows=%s",
+            batch.gradeo_class_id,
+            matched_count,
+            len(assignment_templates),
+            len(assignment_rows),
+        )
+
+        assignment_ids_by_key: dict[str, int] = {}
+        for assignment_key, aggregate in assignment_templates.items():
+            await upsert_gradeo_exam_definition(db, aggregate, now)
+            await upsert_gradeo_exam_session(db, aggregate, now)
+            assignment_id = await upsert_gradeo_class_exam_assignment(
+                db,
+                batch=batch,
+                aggregate=aggregate,
+                now=now,
+            )
+            assignment_ids_by_key[assignment_key] = assignment_id
+            imported_assignment_ids.add(assignment_id)
+
+        assignment_result_params: list[dict] = []
+        question_result_params: list[dict] = []
+        for item in assignment_rows:
+            assignment_id = assignment_ids_by_key[item["assignment_key"]]
+            student = item["student"]
+            aggregate = item["aggregate"]
+            matched_user_id = item["matched_user_id"]
+
+            assignment_result_params.append(
+                {
+                    "gradeo_class_exam_assignment_id": assignment_id,
+                    "gradeo_student_id": student.gradeo_student_id,
+                    "canvas_course_id": canvas_course_id,
+                    "user_id": matched_user_id,
+                    "student_name": student.student_name,
+                    "status": aggregate.status,
+                    "exam_mark": aggregate.exam_mark,
+                    "marks_available": aggregate.marks_available,
+                    "class_average": aggregate.class_average,
+                    "answer_submitted_count": aggregate.answer_submitted_count,
+                    "unmarked_question_count": aggregate.unmarked_question_count,
+                    "created_at": now,
+                    "last_imported_at": now,
+                }
+            )
+            imported_result_keys.add((assignment_id, student.gradeo_student_id))
+
+            for question_row in aggregate.question_rows:
+                question_result_params.append(
                     {
                         "gradeo_class_exam_assignment_id": assignment_id,
                         "gradeo_student_id": student.gradeo_student_id,
-                        "canvas_course_id": canvas_course_id,
-                        "user_id": matched_user_id,
-                        "student_name": student.student_name,
-                        "status": aggregate.status,
-                        "exam_mark": aggregate.exam_mark,
-                        "marks_available": aggregate.marks_available,
-                        "class_average": aggregate.class_average,
-                        "answer_submitted_count": aggregate.answer_submitted_count,
-                        "unmarked_question_count": aggregate.unmarked_question_count,
-                        "created_at": now,
+                        "gradeo_question_id": question_row.gradeo_question_id,
+                        "gradeo_question_part_id": question_row.gradeo_question_part_id,
+                        "copyright_notice": question_row.copyright_notice,
+                        "question": question_row.question,
+                        "question_part": question_row.question_part,
+                        "question_link": question_row.question_link,
+                        "mark": question_row.mark,
+                        "marks_available": question_row.marks_available,
+                        "answer_submitted": question_row.answer_submitted,
+                        "feedback": question_row.feedback,
+                        "marker_name": question_row.marker_name,
+                        "marker_id": question_row.marker_id,
+                        "marking_session_link": question_row.marking_session_link,
                         "last_imported_at": now,
-                    },
+                    }
                 )
-                imported_result_keys.add((assignment_id, student.gradeo_student_id))
-                imported_exam_results += 1
+                imported_question_keys.add(
+                    (assignment_id, student.gradeo_student_id, question_row.gradeo_question_part_id)
+                )
 
-                for question_row in aggregate.question_rows:
-                    await db.execute(
-                        text(
-                            """
-                            INSERT INTO gradeo_assignment_question_results (
-                                gradeo_class_exam_assignment_id, gradeo_student_id, gradeo_question_id, gradeo_question_part_id,
-                                copyright_notice, question, question_part, question_link, mark,
-                                marks_available, answer_submitted, feedback, marker_name, marker_id,
-                                marking_session_link, last_imported_at
-                            )
-                            VALUES (
-                                :gradeo_class_exam_assignment_id, :gradeo_student_id, :gradeo_question_id, :gradeo_question_part_id,
-                                :copyright_notice, :question, :question_part, :question_link, :mark,
-                                :marks_available, :answer_submitted, :feedback, :marker_name, :marker_id,
-                                :marking_session_link, :last_imported_at
-                            )
-                            ON CONFLICT (gradeo_class_exam_assignment_id, gradeo_student_id, gradeo_question_part_id) DO UPDATE SET
-                                gradeo_question_id = EXCLUDED.gradeo_question_id,
-                                copyright_notice = EXCLUDED.copyright_notice,
-                                question = EXCLUDED.question,
-                                question_part = EXCLUDED.question_part,
-                                question_link = EXCLUDED.question_link,
-                                mark = EXCLUDED.mark,
-                                marks_available = EXCLUDED.marks_available,
-                                answer_submitted = EXCLUDED.answer_submitted,
-                                feedback = EXCLUDED.feedback,
-                                marker_name = EXCLUDED.marker_name,
-                                marker_id = EXCLUDED.marker_id,
-                                marking_session_link = EXCLUDED.marking_session_link,
-                                last_imported_at = EXCLUDED.last_imported_at
-                            """
-                        ),
-                        {
-                            "gradeo_class_exam_assignment_id": assignment_id,
-                            "gradeo_student_id": student.gradeo_student_id,
-                            "gradeo_question_id": question_row.gradeo_question_id,
-                            "gradeo_question_part_id": question_row.gradeo_question_part_id,
-                            "copyright_notice": question_row.copyright_notice,
-                            "question": question_row.question,
-                            "question_part": question_row.question_part,
-                            "question_link": question_row.question_link,
-                            "mark": question_row.mark,
-                            "marks_available": question_row.marks_available,
-                            "answer_submitted": question_row.answer_submitted,
-                            "feedback": question_row.feedback,
-                            "marker_name": question_row.marker_name,
-                            "marker_id": question_row.marker_id,
-                            "marking_session_link": question_row.marking_session_link,
-                            "last_imported_at": now,
-                        },
+        if assignment_result_params:
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO gradeo_assignment_results (
+                        gradeo_class_exam_assignment_id, gradeo_student_id, canvas_course_id, user_id, student_name,
+                        status, exam_mark, marks_available, class_average, answer_submitted_count,
+                        unmarked_question_count, created_at, last_imported_at
                     )
-                    imported_question_keys.add(
-                        (assignment_id, student.gradeo_student_id, question_row.gradeo_question_part_id)
+                    VALUES (
+                        :gradeo_class_exam_assignment_id, :gradeo_student_id, :canvas_course_id, :user_id, :student_name,
+                        :status, :exam_mark, :marks_available, :class_average, :answer_submitted_count,
+                        :unmarked_question_count, :created_at, :last_imported_at
                     )
-                    imported_question_results += 1
+                    ON CONFLICT (gradeo_class_exam_assignment_id, gradeo_student_id) DO UPDATE SET
+                        canvas_course_id = EXCLUDED.canvas_course_id,
+                        user_id = EXCLUDED.user_id,
+                        student_name = EXCLUDED.student_name,
+                        status = EXCLUDED.status,
+                        exam_mark = EXCLUDED.exam_mark,
+                        marks_available = EXCLUDED.marks_available,
+                        class_average = EXCLUDED.class_average,
+                        answer_submitted_count = EXCLUDED.answer_submitted_count,
+                        unmarked_question_count = EXCLUDED.unmarked_question_count,
+                        last_imported_at = EXCLUDED.last_imported_at
+                    """
+                ),
+                assignment_result_params,
+            )
+
+        if question_result_params:
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO gradeo_assignment_question_results (
+                        gradeo_class_exam_assignment_id, gradeo_student_id, gradeo_question_id, gradeo_question_part_id,
+                        copyright_notice, question, question_part, question_link, mark,
+                        marks_available, answer_submitted, feedback, marker_name, marker_id,
+                        marking_session_link, last_imported_at
+                    )
+                    VALUES (
+                        :gradeo_class_exam_assignment_id, :gradeo_student_id, :gradeo_question_id, :gradeo_question_part_id,
+                        :copyright_notice, :question, :question_part, :question_link, :mark,
+                        :marks_available, :answer_submitted, :feedback, :marker_name, :marker_id,
+                        :marking_session_link, :last_imported_at
+                    )
+                    ON CONFLICT (gradeo_class_exam_assignment_id, gradeo_student_id, gradeo_question_part_id) DO UPDATE SET
+                        gradeo_question_id = EXCLUDED.gradeo_question_id,
+                        copyright_notice = EXCLUDED.copyright_notice,
+                        question = EXCLUDED.question,
+                        question_part = EXCLUDED.question_part,
+                        question_link = EXCLUDED.question_link,
+                        mark = EXCLUDED.mark,
+                        marks_available = EXCLUDED.marks_available,
+                        answer_submitted = EXCLUDED.answer_submitted,
+                        feedback = EXCLUDED.feedback,
+                        marker_name = EXCLUDED.marker_name,
+                        marker_id = EXCLUDED.marker_id,
+                        marking_session_link = EXCLUDED.marking_session_link,
+                        last_imported_at = EXCLUDED.last_imported_at
+                    """
+                ),
+                question_result_params,
+            )
+
+        imported_exam_results = len(assignment_result_params)
+        imported_question_results = len(question_result_params)
+        logger.info(
+            "gradeo_import_step class_id=%s step=bulk_write_results assignment_results=%s question_results=%s",
+            batch.gradeo_class_id,
+            imported_exam_results,
+            imported_question_results,
+        )
 
         await prune_class_import_state(
             db,
@@ -1015,6 +1087,12 @@ async def import_class_batch(
         imported_question_results,
         unmatched_count,
         skipped_count,
+    )
+    logger.info(
+        "gradeo_import_complete_timing run_id=%s class_id=%s total_duration_ms=%s",
+        run_id,
+        batch.gradeo_class_id,
+        round((perf_counter() - started_at) * 1000, 1),
     )
 
     return {

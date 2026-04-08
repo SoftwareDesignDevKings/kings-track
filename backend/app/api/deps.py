@@ -1,6 +1,8 @@
 import jwt
 from jwt import PyJWKClient, PyJWKClientError
 from hashlib import sha256
+import logging
+from time import perf_counter
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -9,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
+
+logger = logging.getLogger("app.auth")
 
 # Lazily initialised — created on first request so startup doesn't fail
 # if SUPABASE_URL is not yet set in local dev.
@@ -72,6 +76,7 @@ def _hash_extension_api_key(api_key: str) -> str:
 
 
 async def _resolve_extension_api_key_user(api_key: str, db: AsyncSession) -> dict | None:
+    started_at = perf_counter()
     result = await db.execute(
         text("""
             SELECT id, email, role, created_at
@@ -82,6 +87,10 @@ async def _resolve_extension_api_key_user(api_key: str, db: AsyncSession) -> dic
     )
     row = result.fetchone()
     if not row:
+        logger.info(
+            "extension_key_lookup_result found=false duration_ms=%s",
+            round((perf_counter() - started_at) * 1000, 1),
+        )
         return None
 
     await db.execute(
@@ -93,6 +102,12 @@ async def _resolve_extension_api_key_user(api_key: str, db: AsyncSession) -> dic
         {"user_id": row[0]},
     )
     await db.commit()
+    logger.info(
+        "extension_key_lookup_result found=true user_id=%s email=%s duration_ms=%s",
+        row[0],
+        row[1],
+        round((perf_counter() - started_at) * 1000, 1),
+    )
 
     return {
         "id": row[0],
@@ -114,9 +129,20 @@ async def require_auth(
     Raises 401 if the token is invalid, 403 if the user is not registered.
     """
     if extension_api_key:
+        auth_started_at = perf_counter()
+        logger.info("require_auth_extension_key_started")
         user = await _resolve_extension_api_key_user(extension_api_key, db)
         if user:
+            logger.info(
+                "require_auth_extension_key_succeeded email=%s duration_ms=%s",
+                user["email"],
+                round((perf_counter() - auth_started_at) * 1000, 1),
+            )
             return user
+        logger.info(
+            "require_auth_extension_key_failed duration_ms=%s",
+            round((perf_counter() - auth_started_at) * 1000, 1),
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid extension API key",
