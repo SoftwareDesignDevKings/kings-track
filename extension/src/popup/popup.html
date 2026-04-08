@@ -226,6 +226,31 @@
         color: var(--muted);
       }
 
+      .auth-debug {
+        display: grid;
+        gap: 6px;
+        border: 1px solid rgba(24, 51, 43, 0.1);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.72);
+        padding: 10px 12px;
+      }
+
+      .auth-debug-label {
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #6d8178;
+        font-weight: 700;
+      }
+
+      .auth-debug-value {
+        font-size: 11px;
+        line-height: 1.45;
+        color: #335046;
+        word-break: break-all;
+        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      }
+
       .workflow {
         display: grid;
         gap: 10px;
@@ -380,7 +405,7 @@
           <div>
             <div class="card-kicker">Step 1</div>
             <h2>Connection setup</h2>
-            <p>These values tell the extension how to talk to Kings Track and, when needed, Supabase.</p>
+            <p>These values tell the extension how to talk to your Kings Track backend.</p>
           </div>
           <div id="configPill" class="pill idle">Needs setup</div>
         </div>
@@ -390,16 +415,6 @@
             API base URL
             <span class="label-copy">Use your Kings Track backend API, such as `http://localhost:8000/api` or production `/api`.</span>
             <input id="apiBaseUrl" placeholder="https://backend.example.com/api" />
-          </label>
-          <label>
-            Supabase URL
-            <span class="label-copy">Optional for local dev. Required when you want Google sign-in in the extension.</span>
-            <input id="supabaseUrl" placeholder="https://project.supabase.co" />
-          </label>
-          <label>
-            Supabase anon key
-            <span class="label-copy">Paste the anon key only. Leave blank for local-only testing.</span>
-            <input id="supabaseAnonKey" placeholder="ey..." />
           </label>
         </div>
 
@@ -412,22 +427,27 @@
         <div class="card-header">
           <div>
             <div class="card-kicker">Step 2</div>
-            <h2>Authentication</h2>
-            <p>Use Google sign-in for hosted environments, or rely on local dev auth when your backend is running in local mode.</p>
+            <h2>Extension access</h2>
+            <p>Paste the API key generated in Kings Track Settings so the extension can authenticate directly.</p>
           </div>
         </div>
 
         <div class="auth-row">
           <div class="auth-identity">
-            <div id="authSummary" class="auth-summary">Checking session…</div>
-            <div id="authDetail" class="auth-subtle">Verifying extension access.</div>
+            <div id="authSummary" class="auth-summary">Checking extension access…</div>
+            <div id="authDetail" class="auth-subtle">Save a key to verify this extension against Kings Track.</div>
           </div>
           <div id="authPill" class="pill idle">Checking</div>
         </div>
 
-        <div class="button-row two-up">
-          <button id="signIn" class="primary">Sign in with Google</button>
-          <button id="signOut" class="secondary">Sign out</button>
+        <label>
+          Extension API key
+          <span class="label-copy">Generate this in Kings Track Settings. The popup stores it locally and sends it in the `X-Extension-Api-Key` header.</span>
+          <input id="extensionApiKey" type="password" placeholder="ktx_..." />
+        </label>
+
+        <div class="button-row">
+          <button id="saveExtensionKey" class="secondary">Save extension key</button>
         </div>
       </section>
 
