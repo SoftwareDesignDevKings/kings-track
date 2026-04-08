@@ -14,11 +14,11 @@ interface Tab {
 }
 
 const TABS: Tab[] = [
-  { id: 'activities', label: 'Activities' },
+  { id: 'activities', label: 'Canvas' },
+  { id: 'gradeo', label: 'Gradeo' },
+  { id: 'edstem', label: 'EdStem' },
   { id: 'engagement', label: 'Engagement' },
   { id: 'at_risk', label: 'At-Risk' },
-  { id: 'edstem', label: 'EdStem' },
-  { id: 'gradeo', label: 'Gradeo' },
 ]
 
 export default function CourseDetail() {
