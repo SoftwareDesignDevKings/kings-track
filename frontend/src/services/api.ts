@@ -5,6 +5,7 @@ import type {
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
   GradeoImportRun, GradeoCourseReport,
+  ExtensionApiKeyStatus, ExtensionApiKeyResponse,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -24,7 +25,23 @@ async function fetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => '')
     throw new Error(`API error ${res.status}: ${text}`)
   }
-  return res.json() as Promise<T>
+
+  if (res.status === 204) {
+    return undefined as T
+  }
+
+  const contentType = res.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    const text = await res.text().catch(() => '')
+    return (text || undefined) as T
+  }
+
+  const text = await res.text().catch(() => '')
+  if (!text) {
+    return undefined as T
+  }
+
+  return JSON.parse(text) as T
 }
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────
@@ -149,6 +166,39 @@ export function useRemoveUser() {
     mutationFn: (email: string) =>
       fetchJSON<void>(`/admin/users/${encodeURIComponent(email)}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
+  })
+}
+
+export function useExtensionApiKeyStatus() {
+  return useQuery<ExtensionApiKeyStatus>({
+    queryKey: ['admin-extension-api-key'],
+    queryFn: () => fetchJSON<ExtensionApiKeyStatus>('/admin/extension-api-key'),
+  })
+}
+
+export function useGenerateExtensionApiKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      fetchJSON<ExtensionApiKeyResponse>('/admin/extension-api-key', {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-extension-api-key'] })
+    },
+  })
+}
+
+export function useRevokeExtensionApiKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      fetchJSON<void>('/admin/extension-api-key', {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-extension-api-key'] })
+    },
   })
 }
 
