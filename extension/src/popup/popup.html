@@ -308,39 +308,6 @@
         flex: 1;
       }
 
-      details {
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        background: #f8fafc;
-      }
-
-      summary {
-        cursor: pointer;
-        list-style: none;
-        padding: 11px 12px;
-        font-size: 12px;
-        font-weight: 600;
-        color: #334155;
-      }
-
-      summary::-webkit-details-marker {
-        display: none;
-      }
-
-      .details-body {
-        padding: 0 12px 12px;
-        display: grid;
-        gap: 10px;
-      }
-
-      pre {
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-size: 11px;
-        line-height: 1.5;
-        color: #334155;
-      }
-
       .notice {
         display: none;
         border-radius: 12px;
@@ -422,26 +389,6 @@
               <span class="action-meta">Run the report import</span>
             </button>
           </div>
-        </section>
-
-        <section class="card">
-          <details>
-            <summary>State</summary>
-            <div class="details-body">
-              <pre id="stateDetails">{"status":"idle"}</pre>
-            </div>
-          </details>
-
-          <details>
-            <summary>Debug log</summary>
-            <div class="details-body">
-              <div class="log-actions">
-                <button id="refreshLogs" class="secondary" type="button">Refresh</button>
-                <button id="clearLogs" class="secondary" type="button">Clear</button>
-              </div>
-              <pre id="debugLogs">No debug logs yet.</pre>
-            </div>
-          </details>
         </section>
       </main>
 

@@ -14,8 +14,6 @@
   const statePill = document.getElementById('statePill')
   const statusHeadline = document.getElementById('statusHeadline')
   const statusSummary = document.getElementById('statusSummary')
-  const stateDetails = document.getElementById('stateDetails')
-  const debugLogs = document.getElementById('debugLogs')
   const noticeBanner = document.getElementById('noticeBanner')
 
   const readinessPills = [
@@ -123,14 +121,14 @@
     if (status === 'blocked') {
       return {
         headline: 'Blocked',
-        summary: safeState.message || 'Check the state panel for details.',
+        summary: safeState.message || 'Check your setup and try again.',
       }
     }
 
     if (status === 'error') {
       return {
         headline: 'Something failed',
-        summary: safeState.message || 'Check the debug log for details.',
+        summary: safeState.message || 'Try again after checking your settings.',
       }
     }
 
@@ -303,25 +301,11 @@
     const summary = buildStateSummary(context.state)
     statusHeadline.textContent = summary.headline
     statusSummary.textContent = summary.summary
-    stateDetails.textContent = JSON.stringify(context.state || { status: 'idle' }, null, 2)
-  }
-
-  async function refreshLogs() {
-    const logs = await browser.runtime.sendMessage({ type: 'kings.popup.getDebugLogs' })
-    if (!logs || logs.length === 0) {
-      debugLogs.textContent = 'No debug logs yet.'
-      return
-    }
-    debugLogs.textContent = logs
-      .slice(-25)
-      .map((entry) => `${entry.timestamp} [${entry.scope}] ${entry.event} ${JSON.stringify(entry.details || {})}`)
-      .join('\n')
   }
 
   async function refresh() {
     const context = await browser.runtime.sendMessage({ type: 'kings.popup.getContext' })
     renderState(context)
-    await refreshLogs()
   }
 
   async function saveConfig(showSavedMessage) {
@@ -345,7 +329,6 @@
     try {
       await browser.runtime.sendMessage({ type: messageType })
     } catch (error) {
-      stateDetails.textContent = error.message
       showNotice('warn', error.message || String(error))
     } finally {
       actionsBusy = false
@@ -382,16 +365,6 @@
 
   document.getElementById('importMappedClasses').addEventListener('click', async () => {
     await runAction('kings.popup.importMappedClasses')
-  })
-
-  document.getElementById('refreshLogs').addEventListener('click', async () => {
-    await refreshLogs()
-  })
-
-  document.getElementById('clearLogs').addEventListener('click', async () => {
-    await browser.runtime.sendMessage({ type: 'kings.popup.clearDebugLogs' })
-    showNotice('good', 'Debug log cleared.')
-    await refreshLogs()
   })
 
   refresh()
