@@ -7,6 +7,9 @@ vi.mock('../services/api', () => ({
   useAdminUsers: vi.fn(),
   useAddUser: vi.fn(),
   useRemoveUser: vi.fn(),
+  useExtensionApiKeyStatus: vi.fn(),
+  useGenerateExtensionApiKey: vi.fn(),
+  useRevokeExtensionApiKey: vi.fn(),
   useCourses: vi.fn(),
   useWhitelist: vi.fn(),
   useAvailableCourses: vi.fn(),
@@ -33,6 +36,9 @@ import {
   useAdminUsers,
   useAddUser,
   useRemoveUser,
+  useExtensionApiKeyStatus,
+  useGenerateExtensionApiKey,
+  useRevokeExtensionApiKey,
   useCourses,
   useWhitelist,
   useAvailableCourses,
@@ -69,6 +75,17 @@ describe('Admin', () => {
     vi.mocked(useAdminUsers).mockReturnValue({ data: [], isLoading: false } as any)
     vi.mocked(useAddUser).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useRemoveUser).mockReturnValue({ ...baseMutation } as any)
+    vi.mocked(useExtensionApiKeyStatus).mockReturnValue({
+      data: {
+        has_key: true,
+        key_hint: 'ktx_abcd...wxyz',
+        created_at: '2026-03-31T08:30:00Z',
+        last_used_at: '2026-03-31T09:20:00Z',
+      },
+      isLoading: false,
+    } as any)
+    vi.mocked(useGenerateExtensionApiKey).mockReturnValue({ ...baseMutation } as any)
+    vi.mocked(useRevokeExtensionApiKey).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useCourses).mockReturnValue({
       data: [
         {
