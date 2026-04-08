@@ -1,0 +1,80 @@
+{
+  "manifest_version": 3,
+  "name": "Kings Track Gradeo Importer",
+  "version": "0.1.0",
+  "description": "Authenticate with Kings Track and import Gradeo student-directory and reporting data.",
+  "permissions": [
+    "activeTab",
+    "identity",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://platform.gradeo.com.au/*",
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "scripts": [
+      "vendor/webextension-polyfill.js",
+      "src/shared/config.js",
+      "src/shared/logger.js",
+      "src/shared/auth.js",
+      "src/background/index.js"
+    ],
+    "service_worker": "src/background/worker.js",
+    "preferred_environment": [
+      "service_worker",
+      "document"
+    ]
+  },
+  "action": {
+    "default_title": "Kings Track Gradeo",
+    "default_popup": "src/popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://platform.gradeo.com.au/admin/schoolStudents*"],
+      "js": [
+        "vendor/webextension-polyfill.js",
+        "src/shared/config.js",
+        "src/shared/logger.js",
+        "src/shared/csv.js",
+        "src/content/schoolStudents.parsers.js",
+        "src/content/schoolStudents.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://platform.gradeo.com.au/admin/schoolGroups*"],
+      "js": [
+        "vendor/webextension-polyfill.js",
+        "src/shared/config.js",
+        "src/shared/logger.js",
+        "src/shared/csv.js",
+        "src/content/schoolGroups.parsers.js",
+        "src/content/schoolGroups.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://platform.gradeo.com.au/reporting*"],
+      "js": [
+        "vendor/webextension-polyfill.js",
+        "src/shared/config.js",
+        "src/shared/logger.js",
+        "src/shared/csv.js",
+        "src/shared/dom.js",
+        "src/content/reporting.sync.js",
+        "src/content/reporting.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "gradeo-import@kings-track.local"
+    }
+  }
+}

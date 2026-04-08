@@ -1,13 +1,10 @@
 """
-Gradeo integration — placeholder.
+Gradeo integration status.
 
-Gradeo is used for cycle-based quizzes at Kings.
-Future implementation will:
-- Link Gradeo quiz assignments to curriculum cycles
-- Sync Gradeo-specific completion and score data
-- Feed into the Curriculum Progress tab (Phase 3)
-
-TODO: Implement when Gradeo API access is available.
+Gradeo data currently enters the system through the browser-extension import
+pipeline in ``app.gradeo``. This module keeps the integrations surface intact so
+we can later add a real API-backed client without changing call sites that rely
+on the integration registry.
 """
 from app.integrations.base import IntegrationClient
 
@@ -15,11 +12,17 @@ from app.integrations.base import IntegrationClient
 class GradeoClient(IntegrationClient):
     name = "gradeo"
 
+    @property
+    def enabled(self) -> bool:
+        # The current Gradeo path is extension-driven, so backend API credentials
+        # are not required for the integration to be considered available.
+        return True
+
     async def test_connection(self) -> bool:
-        raise NotImplementedError("Gradeo integration not yet available")
+        return True
 
     async def sync(self, course_id: int) -> int:
-        raise NotImplementedError("Gradeo integration not yet available")
+        raise NotImplementedError("Gradeo sync runs through the extension import pipeline")
 
 
 gradeo_client = GradeoClient()

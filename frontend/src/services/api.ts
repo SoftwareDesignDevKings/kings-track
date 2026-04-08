@@ -3,6 +3,8 @@ import type {
   Course, CourseMatrix, SyncStatus, HealthResponse, AppUser,
   WhitelistedCourse, AvailableCourse,
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
+  GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
+  GradeoImportRun, GradeoCourseReport,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -236,6 +238,17 @@ export function useEdStemMatrix(courseId: number) {
   })
 }
 
+// ─── Gradeo — course report ───────────────────────────────────────────────────
+
+export function useGradeoReport(courseId: number) {
+  return useQuery<GradeoCourseReport>({
+    queryKey: ['gradeo-report', courseId],
+    queryFn: () => fetchJSON<GradeoCourseReport>(`/courses/${courseId}/gradeo`),
+    staleTime: 60_000,
+    enabled: !isNaN(courseId),
+  })
+}
+
 // ─── Admin — EdStem mappings ──────────────────────────────────────────────────
 
 export function useEdStemMappings() {
@@ -290,6 +303,85 @@ export function useDeleteEdStemMapping() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-edstem-mappings'] })
       queryClient.invalidateQueries({ queryKey: ['edstem-matrix'] })
+    },
+  })
+}
+
+// ─── Admin — Gradeo ───────────────────────────────────────────────────────────
+
+export function useGradeoStudentDirectoryStatus() {
+  return useQuery<GradeoStudentDirectoryStatus>({
+    queryKey: ['gradeo-student-directory'],
+    queryFn: () => fetchJSON<GradeoStudentDirectoryStatus>('/admin/gradeo/student-directory'),
+    staleTime: 30_000,
+  })
+}
+
+export function useGradeoClasses() {
+  return useQuery<GradeoDiscoveredClass[]>({
+    queryKey: ['gradeo-classes'],
+    queryFn: () => fetchJSON<GradeoDiscoveredClass[]>('/admin/gradeo/classes'),
+    staleTime: 30_000,
+  })
+}
+
+export function useGradeoMappings() {
+  return useQuery<GradeoClassMapping[]>({
+    queryKey: ['gradeo-mappings'],
+    queryFn: () => fetchJSON<GradeoClassMapping[]>('/admin/gradeo/mappings'),
+    staleTime: 30_000,
+  })
+}
+
+export function useGradeoImportRuns() {
+  return useQuery<GradeoImportRun[]>({
+    queryKey: ['gradeo-import-runs'],
+    queryFn: () => fetchJSON<GradeoImportRun[]>('/admin/gradeo/import-runs'),
+    staleTime: 10_000,
+  })
+}
+
+export function useCreateGradeoMapping() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { canvas_course_id: number; gradeo_class_id: string; gradeo_class_name: string }) =>
+      fetchJSON('/admin/gradeo/mappings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gradeo-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-classes'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-report'] })
+    },
+  })
+}
+
+export function useDeleteGradeoMapping() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (canvasCourseId: number) =>
+      fetchJSON<void>(`/admin/gradeo/mappings/${canvasCourseId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gradeo-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-classes'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-report'] })
+    },
+  })
+}
+
+export function useAutoMatchGradeo() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      fetchJSON<{ matched: GradeoClassMapping[]; unmatched: GradeoDiscoveredClass[] }>(
+        '/admin/gradeo/mappings/auto-match',
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gradeo-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-classes'] })
     },
   })
 }

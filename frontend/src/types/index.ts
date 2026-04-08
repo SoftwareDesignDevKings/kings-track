@@ -173,3 +173,114 @@ export interface EdStemAvailableCourse {
   name: string
   code: string
 }
+
+// ─── Gradeo admin ─────────────────────────────────────────────────────────────
+
+export interface GradeoStudentDirectoryStatus {
+  last_synced_at: string | null
+  matched_students: number
+  stale: boolean
+}
+
+export interface GradeoCourseCandidate {
+  course_id: number
+  name: string
+  course_code: string | null
+}
+
+export interface GradeoDiscoveredClass {
+  gradeo_class_id: string
+  name: string
+  discovered_at: string | null
+  last_seen_at: string | null
+  canvas_course_id: number | null
+  canvas_course_name: string | null
+  canvas_course_code: string | null
+  last_imported_at: string | null
+  suggested_course: GradeoCourseCandidate | null
+  candidate_courses: GradeoCourseCandidate[]
+}
+
+export interface GradeoClassMapping {
+  canvas_course_id: number
+  canvas_course_name: string
+  canvas_course_code: string | null
+  gradeo_class_id: string
+  gradeo_class_name: string
+  created_at: string | null
+}
+
+export interface GradeoImportRun {
+  id: number
+  run_type: string
+  status: string
+  canvas_course_id: number | null
+  gradeo_class_id: string | null
+  gradeo_class_name: string | null
+  triggered_by: string | null
+  source_type: string | null
+  extension_version: string | null
+  processed_students: number
+  matched_students: number
+  imported_exams: number
+  imported_question_results: number
+  unmatched_students: number
+  skipped_students: number
+  started_at: string | null
+  completed_at: string | null
+  error_message: string | null
+}
+
+// ─── Gradeo course report ─────────────────────────────────────────────────────
+
+export type GradeoResultStatus = 'not_submitted' | 'awaiting_marking' | 'scored'
+
+export interface GradeoExam {
+  id: string
+  name: string
+  class_average: number | null
+  syllabus_title: string | null
+  syllabus_grade: string | null
+  bands: string[]
+  outcomes: string[]
+  topics: string[]
+}
+
+export interface GradeoQuestionResult {
+  gradeo_question_part_id: string
+  question: string | null
+  question_part: string | null
+  mark: number | null
+  marks_available: number | null
+  answer_submitted: boolean
+  feedback: string | null
+  marker_name: string | null
+  question_link: string | null
+  marking_session_link: string | null
+}
+
+export interface GradeoStudentExamResult {
+  status: GradeoResultStatus
+  exam_mark: number | null
+  marks_available: number | null
+  class_average: number | null
+  questions: GradeoQuestionResult[]
+}
+
+export interface GradeoStudentRow {
+  id: number
+  name: string
+  sortable_name: string | null
+  completion_rate: number | null
+  results: Record<string, GradeoStudentExamResult | null>
+}
+
+export interface GradeoCourseReport {
+  mapped: boolean
+  gradeo_class_id?: string
+  gradeo_class_name?: string
+  last_imported_at?: string | null
+  unmatched_students_count?: number
+  exams?: GradeoExam[]
+  students?: GradeoStudentRow[]
+}
