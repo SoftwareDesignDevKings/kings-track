@@ -91,89 +91,91 @@ export default function EdStemLessonTable({ matrix }: Props) {
         </span>
       </div>
 
-      <table className="activity-table w-full text-sm">
-        <thead>
-          {/* Row 1: Module headers */}
-          <tr className="bg-slate-50 border-b border-slate-200">
-            <th
-              className="sticky-col-header px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[220px]"
-              rowSpan={2}
-            >
-              Student
-            </th>
-            <th
-              className="sticky-col-header px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[130px]"
-              rowSpan={2}
-            >
-              Completion
-            </th>
-            {modules.map((module: EdStemModule) => (
+      <div className="activity-table-scroll">
+        <table className="activity-table w-full text-sm">
+          <thead>
+            {/* Row 1: Module headers */}
+            <tr className="bg-slate-50 border-b border-slate-200">
               <th
-                key={module.name}
-                colSpan={module.lessons.length}
-                className="px-3 py-2 text-center text-xs font-semibold text-slate-600 border-r border-slate-200 bg-slate-50"
+                className="sticky-col-header-1 px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[220px]"
+                rowSpan={2}
               >
-                <span className="block truncate max-w-xs" title={module.name}>
-                  {module.name}
-                </span>
+                Student
               </th>
-            ))}
-          </tr>
-
-          {/* Row 2: Individual lesson headers — rotated vertically */}
-          <tr className="bg-slate-50 border-b border-slate-200">
-            {allLessons.map(lesson => (
               <th
-                key={lesson.id}
-                className="h-[130px] w-11 min-w-11 max-w-11 border-r border-slate-100 px-0 py-0 align-bottom last:border-r-slate-200"
-                title={lesson.title + (lesson.is_interactive ? ' (interactive)' : '')}
+                className="sticky-col-header-2 px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[130px]"
+                rowSpan={2}
               >
-                <div className="flex h-full w-full items-end justify-center px-1 pb-2">
-                  <span
-                    className={`block max-h-[112px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-xs font-medium leading-tight [transform:rotate(180deg)] [writing-mode:vertical-rl] ${lesson.is_interactive ? 'text-brand-500' : 'text-slate-500'}`}
-                  >
-                    {lesson.title}
+                Completion
+              </th>
+              {modules.map((module: EdStemModule) => (
+                <th
+                  key={module.name}
+                  colSpan={module.lessons.length}
+                  className="px-3 py-2 text-center text-xs font-semibold text-slate-600 border-r border-slate-200 bg-slate-50"
+                >
+                  <span className="block truncate max-w-xs" title={module.name}>
+                    {module.name}
                   </span>
-                </div>
-              </th>
-            ))}
-          </tr>
-        </thead>
-
-        <tbody className="divide-y divide-slate-100">
-          {students.map((student, i) => (
-            <tr
-              key={student.id}
-              className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} hover:bg-brand-50/40 transition-colors`}
-            >
-              {/* Student name — sticky */}
-              <td className={`sticky-col px-4 py-2.5 border-r border-slate-200 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-                <span className="font-medium text-slate-800 text-sm">{student.name}</span>
-              </td>
-
-              {/* Completion bar */}
-              <td className="px-3 py-2.5 border-r border-slate-200">
-                <CompletionBar value={student.completion_rate} />
-              </td>
-
-              {/* Lesson progress dots */}
-              {allLessons.map(lesson => {
-                const p = student.progress[String(lesson.id)]
-                const status: EdStemLessonStatus = p?.status ?? 'not_started'
-                return (
-                  <td key={lesson.id} className="px-2 py-2.5 text-center border-r border-slate-100 last:border-r-0">
-                    <StatusDot
-                      status={status}
-                      lessonTitle={lesson.title}
-                      completedAt={p?.completed_at ?? null}
-                    />
-                  </td>
-                )
-              })}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+
+            {/* Row 2: Individual lesson headers — rotated vertically */}
+            <tr className="bg-slate-50 border-b border-slate-200">
+              {allLessons.map(lesson => (
+                <th
+                  key={lesson.id}
+                  className="h-[130px] w-11 min-w-11 max-w-11 border-r border-slate-100 px-0 py-0 align-bottom last:border-r-slate-200"
+                  title={lesson.title + (lesson.is_interactive ? ' (interactive)' : '')}
+                >
+                  <div className="flex h-full w-full items-end justify-center px-1 pb-2">
+                    <span
+                      className={`block max-h-[112px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-xs font-medium leading-tight [transform:rotate(180deg)] [writing-mode:vertical-rl] ${lesson.is_interactive ? 'text-brand-500' : 'text-slate-500'}`}
+                    >
+                      {lesson.title}
+                    </span>
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-slate-100">
+            {students.map((student, i) => (
+              <tr
+                key={student.id}
+                className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} hover:bg-brand-50/40 transition-colors`}
+              >
+                {/* Student name — sticky */}
+                <td className={`sticky-col-1 px-4 py-2.5 border-r border-slate-200 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                  <span className="font-medium text-slate-800 text-sm">{student.name}</span>
+                </td>
+
+                {/* Completion bar */}
+                <td className={`sticky-col-2 px-3 py-2.5 border-r border-slate-200 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                  <CompletionBar value={student.completion_rate} />
+                </td>
+
+                {/* Lesson progress dots */}
+                {allLessons.map(lesson => {
+                  const p = student.progress[String(lesson.id)]
+                  const status: EdStemLessonStatus = p?.status ?? 'not_started'
+                  return (
+                    <td key={lesson.id} className="px-2 py-2.5 text-center border-r border-slate-100 last:border-r-0">
+                      <StatusDot
+                        status={status}
+                        lessonTitle={lesson.title}
+                        completedAt={p?.completed_at ?? null}
+                      />
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

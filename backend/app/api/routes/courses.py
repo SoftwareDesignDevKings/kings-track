@@ -26,6 +26,12 @@ def _submission_status(workflow_state: str | None, score, excused: bool | None) 
     return "not_started"
 
 
+def _split_csv_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 @router.get("")
 async def list_courses(db: AsyncSession = Depends(get_db)):
     """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
@@ -366,5 +372,237 @@ async def get_edstem_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
         "edstem_course_id": edstem_course_id,
         "edstem_course_name": edstem_course_name,
         "modules": modules,
+        "students": students,
+    }
+
+
+@router.get("/{course_id}/gradeo")
+async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
+    course_result = await db.execute(
+        text("SELECT id, name, course_code FROM courses WHERE id = :id"),
+        {"id": course_id},
+    )
+    course_row = course_result.fetchone()
+    if not course_row:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    mapping_result = await db.execute(
+        text(
+            """
+            SELECT gradeo_class_id, gradeo_class_name
+            FROM gradeo_class_mappings
+            WHERE canvas_course_id = :course_id
+            """
+        ),
+        {"course_id": course_id},
+    )
+    mapping_row = mapping_result.fetchone()
+    if not mapping_row:
+        return {"mapped": False}
+
+    gradeo_class_id, gradeo_class_name = mapping_row
+
+    latest_run_result = await db.execute(
+        text(
+            """
+            SELECT completed_at, unmatched_students
+            FROM gradeo_import_runs
+            WHERE run_type = 'class_import'
+              AND status = 'completed'
+              AND gradeo_class_id = :gradeo_class_id
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ),
+        {"gradeo_class_id": gradeo_class_id},
+    )
+    latest_run_row = latest_run_result.fetchone()
+
+    exams_result = await db.execute(
+        text(
+            """
+            SELECT
+                gradeo_marking_session_id,
+                exam_name,
+                class_average,
+                syllabus_title,
+                syllabus_grade,
+                bands,
+                outcomes,
+                topics
+            FROM gradeo_class_exam_assignments
+            WHERE gradeo_class_id = :gradeo_class_id
+            ORDER BY exam_name, gradeo_marking_session_id
+            """
+        ),
+        {"gradeo_class_id": gradeo_class_id},
+    )
+    exams_raw = exams_result.fetchall()
+    exams = [
+        {
+            "id": row[0],
+            "name": row[1],
+            "class_average": float(row[2]) if row[2] is not None else None,
+            "syllabus_title": row[3],
+            "syllabus_grade": row[4],
+            "bands": _split_csv_list(row[5]),
+            "outcomes": _split_csv_list(row[6]),
+            "topics": _split_csv_list(row[7]),
+        }
+        for row in exams_raw
+    ]
+    all_exam_ids = [exam["id"] for exam in exams]
+
+    students_result = await db.execute(
+        text(
+            """
+            SELECT u.id, u.name, u.sortable_name
+            FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
+            ORDER BY u.sortable_name IS NULL, u.sortable_name
+            """
+        ),
+        {"course_id": course_id},
+    )
+    students_raw = students_result.fetchall()
+
+    results_result = await db.execute(
+        text(
+            """
+            SELECT
+                gar.user_id,
+                gcea.gradeo_marking_session_id,
+                gar.status,
+                gar.exam_mark,
+                gar.marks_available,
+                gar.class_average,
+                gar.gradeo_student_id,
+                gar.gradeo_class_exam_assignment_id
+            FROM gradeo_assignment_results gar
+            JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
+            WHERE gar.canvas_course_id = :course_id
+              AND gcea.gradeo_class_id = :gradeo_class_id
+            """
+        ),
+        {"course_id": course_id, "gradeo_class_id": gradeo_class_id},
+    )
+    results_lookup: dict[int, dict[str, dict]] = {}
+    question_results_by_key: dict[tuple[int, str], list[dict]] = {}
+    assignment_ids: set[int] = set()
+    gradeo_student_ids: set[str] = set()
+    for row in results_result.fetchall():
+        (
+            user_id,
+            gradeo_marking_session_id,
+            status,
+            exam_mark,
+            marks_available,
+            class_average,
+            gradeo_student_id,
+            assignment_id,
+        ) = row
+        gradeo_student_ids.add(gradeo_student_id)
+        assignment_ids.add(assignment_id)
+        results_lookup.setdefault(user_id, {})[gradeo_marking_session_id] = {
+            "status": status,
+            "exam_mark": float(exam_mark) if exam_mark is not None else None,
+            "marks_available": float(marks_available) if marks_available is not None else None,
+            "class_average": float(class_average) if class_average is not None else None,
+            "gradeo_student_id": gradeo_student_id,
+            "assignment_id": assignment_id,
+        }
+
+    if gradeo_student_ids and assignment_ids:
+        question_result_rows = await db.execute(
+            text(
+                """
+                SELECT
+                    gradeo_class_exam_assignment_id,
+                    gradeo_student_id,
+                    gradeo_question_part_id,
+                    question,
+                    question_part,
+                    mark,
+                    marks_available,
+                    answer_submitted,
+                    feedback,
+                    marker_name,
+                    question_link,
+                    marking_session_link
+                FROM gradeo_assignment_question_results
+                WHERE gradeo_student_id IN :gradeo_student_ids
+                  AND gradeo_class_exam_assignment_id IN :assignment_ids
+                ORDER BY gradeo_class_exam_assignment_id, gradeo_question_part_id
+                """
+            ).bindparams(
+                bindparam("gradeo_student_ids", expanding=True),
+                bindparam("assignment_ids", expanding=True),
+            ),
+            {
+                "gradeo_student_ids": list(gradeo_student_ids),
+                "assignment_ids": list(assignment_ids),
+            },
+        )
+        for row in question_result_rows.fetchall():
+            question_results_by_key.setdefault((row[0], row[1]), []).append(
+                {
+                    "gradeo_question_part_id": row[2],
+                    "question": row[3],
+                    "question_part": row[4],
+                    "mark": float(row[5]) if row[5] is not None else None,
+                    "marks_available": float(row[6]) if row[6] is not None else None,
+                    "answer_submitted": bool(row[7]),
+                    "feedback": row[8],
+                    "marker_name": row[9],
+                    "question_link": row[10],
+                    "marking_session_link": row[11],
+                }
+            )
+
+    students = []
+    for row in students_raw:
+        user_id, name, sortable_name = row
+        user_results = results_lookup.get(user_id, {})
+        results = {}
+        completed = 0
+        assigned = 0
+        for exam in exams:
+            result_data = user_results.get(exam["id"])
+            if result_data:
+                assigned += 1
+                if result_data["status"] != "not_submitted":
+                    completed += 1
+                results[exam["id"]] = {
+                    "status": result_data["status"],
+                    "exam_mark": result_data["exam_mark"],
+                    "marks_available": result_data["marks_available"],
+                    "class_average": result_data["class_average"],
+                    "questions": question_results_by_key.get(
+                        (result_data["assignment_id"], result_data["gradeo_student_id"]),
+                        [],
+                    ),
+                }
+            else:
+                results[exam["id"]] = None
+
+        completion_rate = (completed / assigned) if assigned else None
+        students.append(
+            {
+                "id": user_id,
+                "name": name,
+                "sortable_name": sortable_name,
+                "completion_rate": completion_rate,
+                "results": results,
+            }
+        )
+
+    return {
+        "mapped": True,
+        "gradeo_class_id": gradeo_class_id,
+        "gradeo_class_name": gradeo_class_name,
+        "last_imported_at": _to_iso(latest_run_row[0]) if latest_run_row else None,
+        "unmatched_students_count": latest_run_row[1] if latest_run_row else 0,
+        "exams": exams,
         "students": students,
     }

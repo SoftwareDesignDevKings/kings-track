@@ -128,6 +128,35 @@ def app_client():
 
 
 @pytest.fixture
+def teacher_client():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.db import get_db
+    from app.api.deps import require_auth, require_admin
+
+    async def override_get_db():
+        async with _TestSessionLocal() as session:
+            yield session
+
+    def override_require_auth():
+        return {"email": "teacher@example.com", "role": "teacher"}
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[require_auth] = override_require_auth
+    app.dependency_overrides.pop(require_admin, None)
+
+    with patch("app.sync.engine.sync_engine.start_scheduler"), \
+         patch("app.sync.engine.sync_engine.stop_scheduler"), \
+         patch("app.api.routes.sync.AsyncSessionLocal", _TestSessionLocal):
+        with TestClient(app) as client:
+            yield client
+
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(require_auth, None)
+    app.dependency_overrides.pop(require_admin, None)
+
+
+@pytest.fixture
 async def db():
     """Async NullPool DB session for pure async tests (e.g. sync_submissions)."""
     async with _TestSessionLocal() as session:

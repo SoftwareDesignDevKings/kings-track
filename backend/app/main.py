@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.routes import auth, courses, sync, admin
+from app.api.routes import auth, courses, sync, admin, gradeo_admin
 from app.sync.engine import sync_engine
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -42,6 +42,7 @@ app.add_middleware(
 app.include_router(courses.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(gradeo_admin.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 
 

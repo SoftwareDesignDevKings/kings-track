@@ -3,8 +3,9 @@ import { useParams, Link, Navigate } from 'react-router-dom'
 import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
 import EdStemLessonTable from '../components/EdStemLessonTable'
+import GradeoReportTable from '../components/GradeoReportTable'
 import Placeholder from '../components/Placeholder'
-import { useCourseMatrix, useEdStemMatrix } from '../services/api'
+import { useCourseMatrix, useEdStemMatrix, useGradeoReport } from '../services/api'
 
 type TabId = 'activities' | 'engagement' | 'at_risk' | 'edstem' | 'gradeo'
 
@@ -14,11 +15,11 @@ interface Tab {
 }
 
 const TABS: Tab[] = [
-  { id: 'activities', label: 'Activities' },
+  { id: 'activities', label: 'Canvas' },
+  { id: 'gradeo', label: 'Gradeo' },
+  { id: 'edstem', label: 'EdStem' },
   { id: 'engagement', label: 'Engagement' },
   { id: 'at_risk', label: 'At-Risk' },
-  { id: 'edstem', label: 'EdStem' },
-  { id: 'gradeo', label: 'Gradeo' },
 ]
 
 export default function CourseDetail() {
@@ -28,6 +29,7 @@ export default function CourseDetail() {
 
   const { data: matrix, isLoading, error } = useCourseMatrix(id)
   const { data: edStemMatrix, isLoading: edStemLoading, error: edStemError } = useEdStemMatrix(id)
+  const { data: gradeoReport, isLoading: gradeoLoading, error: gradeoError } = useGradeoReport(id)
 
   if (!courseId || isNaN(id)) {
     return <Navigate to="/" replace />
@@ -113,7 +115,7 @@ export default function CourseDetail() {
               `}
             >
               {tab.label}
-              {tab.id !== 'activities' && tab.id !== 'edstem' && (
+              {tab.id !== 'activities' && tab.id !== 'edstem' && tab.id !== 'gradeo' && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-400 rounded-full leading-none">
                   Soon
                 </span>
@@ -186,11 +188,48 @@ export default function CourseDetail() {
         )}
 
         {activeTab === 'gradeo' && (
-          <Placeholder
-            title="Gradeo integration coming soon"
-            description="Cycle-based quiz completion and Gradeo scores will be linked to Canvas assignments and shown here."
-            phase="Phase 3"
-          />
+          <>
+            {gradeoLoading && (
+              <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
+                <div className="h-10 bg-slate-100 border-b border-slate-200" />
+                {[1,2,3,4,5].map(i => (
+                  <div key={i} className="h-10 border-b border-slate-100 bg-white" />
+                ))}
+              </div>
+            )}
+            {gradeoError && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
+                Failed to load Gradeo data. Make sure the class has been imported from the extension.
+              </div>
+            )}
+            {gradeoReport && !gradeoReport.mapped && (
+              <Placeholder
+                title="No Gradeo class linked"
+                description="Link this Canvas course to a Gradeo class in Admin settings, then import that class from the browser extension."
+                phase="Gradeo v1"
+              />
+            )}
+            {gradeoReport?.mapped && (
+              <>
+                <div className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{gradeoReport.gradeo_class_name}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {gradeoReport.last_imported_at
+                          ? `Last imported ${new Date(gradeoReport.last_imported_at).toLocaleString()}`
+                          : 'This class is linked, but no Gradeo import has finished yet.'}
+                      </p>
+                    </div>
+                    <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                      {gradeoReport.unmatched_students_count ?? 0} unmatched student{(gradeoReport.unmatched_students_count ?? 0) === 1 ? '' : 's'} in latest import
+                    </div>
+                  </div>
+                </div>
+                <GradeoReportTable report={gradeoReport} />
+              </>
+            )}
+          </>
         )}
       </main>
     </div>

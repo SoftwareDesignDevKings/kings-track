@@ -19,6 +19,12 @@ vi.mock('../services/api', () => ({
   useCreateEdStemMapping: vi.fn(),
   useDeleteEdStemMapping: vi.fn(),
   useAutoMatchEdStem: vi.fn(),
+  useGradeoStudentDirectoryStatus: vi.fn(),
+  useGradeoClasses: vi.fn(),
+  useGradeoMappings: vi.fn(),
+  useCreateGradeoMapping: vi.fn(),
+  useDeleteGradeoMapping: vi.fn(),
+  useAutoMatchGradeo: vi.fn(),
   useHealth: vi.fn(),
   useCurrentUser: vi.fn(() => ({ data: { email: 'admin@example.com', role: 'admin' } })),
 }))
@@ -39,6 +45,12 @@ import {
   useCreateEdStemMapping,
   useDeleteEdStemMapping,
   useAutoMatchEdStem,
+  useGradeoStudentDirectoryStatus,
+  useGradeoClasses,
+  useGradeoMappings,
+  useCreateGradeoMapping,
+  useDeleteGradeoMapping,
+  useAutoMatchGradeo,
   useHealth,
 } from '../services/api'
 
@@ -113,6 +125,42 @@ describe('Admin', () => {
     vi.mocked(useCreateEdStemMapping).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useDeleteEdStemMapping).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useAutoMatchEdStem).mockReturnValue({ ...baseMutation } as any)
+    vi.mocked(useGradeoStudentDirectoryStatus).mockReturnValue({
+      data: { last_synced_at: '2026-03-31T09:00:00Z', matched_students: 48, stale: false },
+    } as any)
+    vi.mocked(useGradeoClasses).mockReturnValue({
+      data: [
+        {
+          gradeo_class_id: 'gradeo-class-1',
+          name: '12 encx_2026',
+          discovered_at: '2026-03-31T09:00:00Z',
+          last_seen_at: '2026-03-31T09:00:00Z',
+          canvas_course_id: 1,
+          canvas_course_name: 'Software Engineering 2026',
+          canvas_course_code: '11SENX',
+          last_imported_at: '2026-03-31T09:15:00Z',
+          suggested_course: null,
+          candidate_courses: [],
+        },
+      ],
+      isLoading: false,
+    } as any)
+    vi.mocked(useGradeoMappings).mockReturnValue({
+      data: [
+        {
+          canvas_course_id: 1,
+          canvas_course_name: 'Software Engineering 2026',
+          canvas_course_code: '11SENX',
+          gradeo_class_id: 'gradeo-class-1',
+          gradeo_class_name: '12 encx_2026',
+          created_at: null,
+        },
+      ],
+      isLoading: false,
+    } as any)
+    vi.mocked(useCreateGradeoMapping).mockReturnValue({ ...baseMutation } as any)
+    vi.mocked(useDeleteGradeoMapping).mockReturnValue({ ...baseMutation } as any)
+    vi.mocked(useAutoMatchGradeo).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useHealth).mockReturnValue({
       data: { status: 'ok', canvas_configured: true, edstem_configured: true },
     } as any)
@@ -172,5 +220,17 @@ describe('Admin', () => {
     renderWithProviders(<Admin />)
 
     expect(screen.getByText(/Canvas timeout/i)).toBeInTheDocument()
+  })
+
+  it('shows the Gradeo student-directory status and linked classes', () => {
+    renderWithProviders(<Admin />)
+
+    expect(screen.getByText(/Gradeo Import Pipeline/i)).toBeInTheDocument()
+    expect(screen.getByText(/Student directory status/i)).toBeInTheDocument()
+    expect(screen.getByText('48')).toBeInTheDocument()
+    expect(screen.getAllByText(/12 encx_2026/i).length).toBeGreaterThan(0)
+    expect(screen.getByRole('columnheader', { name: /Gradeo Class/i })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /Last import/i })).toBeInTheDocument()
+    expect(screen.queryByText(/Recent Gradeo runs/i)).not.toBeInTheDocument()
   })
 })

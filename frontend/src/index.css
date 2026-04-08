@@ -15,8 +15,11 @@
 
 /* Activity table sticky column */
 .activity-table-wrapper {
-  overflow-x: auto;
   position: relative;
+}
+
+.activity-table-scroll {
+  overflow-x: auto;
 }
 
 .activity-table {
@@ -29,18 +32,34 @@
   white-space: nowrap;
 }
 
-.sticky-col {
+.sticky-col-1,
+.sticky-col-2 {
   position: sticky;
-  left: 0;
   z-index: 10;
   background-color: white;
 }
 
-.sticky-col-header {
-  position: sticky;
+.sticky-col-1 {
   left: 0;
+}
+
+.sticky-col-2 {
+  left: 220px;
+}
+
+.sticky-col-header-1,
+.sticky-col-header-2 {
+  position: sticky;
   z-index: 20;
   background-color: #f8fafc; /* slate-50 */
+}
+
+.sticky-col-header-1 {
+  left: 0;
+}
+
+.sticky-col-header-2 {
+  left: 220px;
 }
 
 /* Scrollbar styling */

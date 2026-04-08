@@ -11,6 +11,19 @@ from app.models.course_whitelist import CourseWhitelist
 from app.models.edstem_course_mapping import EdStemCourseMapping
 from app.models.edstem_lesson import EdStemLesson
 from app.models.edstem_lesson_progress import EdStemLessonProgress
+from app.models.gradeo_class import GradeoClass
+from app.models.gradeo_class_syllabus import GradeoClassSyllabus
+from app.models.gradeo_class_mapping import GradeoClassMapping
+from app.models.gradeo_student import GradeoStudent
+from app.models.gradeo_exam import GradeoExam
+from app.models.gradeo_exam_definition import GradeoExamDefinition
+from app.models.gradeo_exam_session import GradeoExamSession
+from app.models.gradeo_class_exam_assignment import GradeoClassExamAssignment
+from app.models.gradeo_exam_result import GradeoExamResult
+from app.models.gradeo_question_result import GradeoQuestionResult
+from app.models.gradeo_assignment_result import GradeoAssignmentResult
+from app.models.gradeo_assignment_question_result import GradeoAssignmentQuestionResult
+from app.models.gradeo_import_run import GradeoImportRun
 
 __all__ = [
     "Base",
@@ -26,4 +39,17 @@ __all__ = [
     "EdStemCourseMapping",
     "EdStemLesson",
     "EdStemLessonProgress",
+    "GradeoClass",
+    "GradeoClassSyllabus",
+    "GradeoClassMapping",
+    "GradeoStudent",
+    "GradeoExam",
+    "GradeoExamDefinition",
+    "GradeoExamSession",
+    "GradeoClassExamAssignment",
+    "GradeoExamResult",
+    "GradeoQuestionResult",
+    "GradeoAssignmentResult",
+    "GradeoAssignmentQuestionResult",
+    "GradeoImportRun",
 ]
