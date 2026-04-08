@@ -13,14 +13,11 @@
         --muted: #64748b;
         --brand: #2f4ac0;
         --brand-strong: #2040a8;
-        --brand-soft: #e0e9ff;
-        --good-bg: #dcfce7;
-        --good-text: #166534;
-        --warn-bg: #fef3c7;
-        --warn-text: #92400e;
-        --idle-bg: #e2e8f0;
-        --idle-text: #475569;
-        --shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+        --brand-soft: #dbe5ff;
+        --good: #0f766e;
+        --warn: #b45309;
+        --idle: #94a3b8;
+        --shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
       }
 
       * {
@@ -31,9 +28,9 @@
         margin: 0;
         min-width: 360px;
         max-width: 392px;
-        font-family: Inter, system-ui, sans-serif;
-        color: var(--text);
         background: var(--bg);
+        color: var(--text);
+        font-family: Inter, system-ui, sans-serif;
       }
 
       button,
@@ -44,8 +41,7 @@
 
       h1,
       h2,
-      p,
-      pre {
+      p {
         margin: 0;
       }
 
@@ -74,7 +70,7 @@
         height: 32px;
         border-radius: 10px;
         background: var(--brand);
-        color: white;
+        color: #fff;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -90,12 +86,13 @@
       .brand-title {
         font-size: 15px;
         font-weight: 600;
-        color: var(--text);
+        line-height: 1.1;
       }
 
       .brand-subtitle {
         font-size: 12px;
         color: var(--muted);
+        line-height: 1.2;
       }
 
       .view {
@@ -107,7 +104,7 @@
         display: grid;
       }
 
-      .card {
+      .panel {
         background: var(--panel);
         border: 1px solid var(--line);
         border-radius: 16px;
@@ -117,82 +114,113 @@
         gap: 12px;
       }
 
-      .card-header {
+      .panel.compact {
+        gap: 10px;
+      }
+
+      .status-row,
+      .panel-header {
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
         gap: 12px;
       }
 
-      .eyebrow {
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin-bottom: 4px;
-      }
-
-      .card-title {
-        font-size: 18px;
-        line-height: 1.2;
-        font-weight: 600;
-      }
-
-      .card-subtitle {
-        font-size: 13px;
-        line-height: 1.45;
-        color: var(--muted);
-      }
-
-      .pill-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 5px 10px;
-        border-radius: 999px;
-        font-size: 11px;
-        font-weight: 600;
-      }
-
-      .pill.good {
-        background: var(--good-bg);
-        color: var(--good-text);
-      }
-
-      .pill.warn {
-        background: var(--warn-bg);
-        color: var(--warn-text);
-      }
-
-      .pill.idle {
-        background: var(--idle-bg);
-        color: var(--idle-text);
-      }
-
       .status-copy {
+        min-width: 0;
         display: grid;
         gap: 4px;
       }
 
       .status-title {
-        font-size: 16px;
+        font-size: 17px;
         font-weight: 600;
-        line-height: 1.25;
+        line-height: 1.15;
       }
 
       .status-detail,
-      .meta-note,
+      .home-note,
+      .settings-note,
       .field-note {
-        font-size: 13px;
+        font-size: 12px;
         line-height: 1.45;
         color: var(--muted);
+      }
+
+      .panel-title {
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+
+      .panel-caption {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .status-chip {
+        border-radius: 999px;
+        padding: 5px 9px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #334155;
+        background: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        white-space: nowrap;
+      }
+
+      .status-chip.good {
+        color: var(--good);
+        background: #f0fdfa;
+        border-color: #ccfbf1;
+      }
+
+      .status-chip.warn {
+        color: var(--warn);
+        background: #fffbeb;
+        border-color: #fde68a;
+      }
+
+      .signal-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .signal {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .signal::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: var(--idle);
+        box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
+      }
+
+      .signal.good {
+        color: #475569;
+      }
+
+      .signal.good::before {
+        background: var(--good);
+        box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+      }
+
+      .signal.warn {
+        color: var(--warn);
+      }
+
+      .signal.warn::before {
+        background: var(--warn);
+        box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.14);
       }
 
       .action-grid,
@@ -201,26 +229,10 @@
         gap: 10px;
       }
 
-      .action-button {
-        text-align: left;
-        display: grid;
-        gap: 2px;
-      }
-
-      .action-title {
-        font-size: 13px;
-        font-weight: 600;
-      }
-
-      .action-meta {
-        font-size: 11px;
-        opacity: 0.92;
-      }
-
       button {
         border: 0;
         border-radius: 12px;
-        padding: 11px 13px;
+        padding: 12px 13px;
         font-size: 13px;
         font-weight: 600;
         cursor: pointer;
@@ -234,7 +246,7 @@
 
       .primary {
         background: var(--brand);
-        color: white;
+        color: #fff;
       }
 
       .primary:hover:not(:disabled) {
@@ -242,7 +254,7 @@
       }
 
       .secondary {
-        background: white;
+        background: #fff;
         color: #334155;
         border: 1px solid var(--line);
       }
@@ -252,16 +264,20 @@
       }
 
       .ghost {
-        background: transparent;
+        padding: 8px 10px;
+        font-size: 12px;
         color: #334155;
+        background: transparent;
         border: 1px solid transparent;
-        padding-left: 10px;
-        padding-right: 10px;
       }
 
       .ghost:hover:not(:disabled) {
         background: #eef2ff;
         border-color: #c7d2fe;
+      }
+
+      .action-button {
+        text-align: left;
       }
 
       label {
@@ -280,7 +296,7 @@
         padding: 10px 12px;
         font-size: 12px;
         color: var(--text);
-        background: white;
+        background: #fff;
       }
 
       input:focus,
@@ -291,20 +307,18 @@
       }
 
       textarea {
-        min-height: 144px;
+        min-height: 132px;
         resize: vertical;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         line-height: 1.45;
       }
 
-      .settings-actions,
-      .log-actions {
+      .settings-actions {
         display: flex;
         gap: 8px;
       }
 
-      .settings-actions > button,
-      .log-actions > button {
+      .settings-actions > button {
         flex: 1;
       }
 
@@ -321,13 +335,13 @@
       }
 
       .notice.good {
-        background: var(--good-bg);
-        color: var(--good-text);
+        color: var(--good);
+        background: #f0fdfa;
       }
 
       .notice.warn {
-        background: var(--warn-bg);
-        color: var(--warn-text);
+        color: var(--warn);
+        background: #fffbeb;
       }
     </style>
   </head>
@@ -347,66 +361,54 @@
       <div id="noticeBanner" class="notice"></div>
 
       <main id="homeView" class="view active">
-        <section class="card">
-          <div class="card-header">
+        <section class="panel compact">
+          <div class="status-row">
             <div class="status-copy">
-              <div class="eyebrow">Status</div>
-              <h1 id="statusHeadline" class="status-title">Idle</h1>
+              <h1 id="statusHeadline" class="status-title">Ready</h1>
               <p id="statusSummary" class="status-detail">No sync running.</p>
             </div>
-            <div id="statePill" class="pill idle">Idle</div>
+            <div id="statePill" class="status-chip">Idle</div>
           </div>
 
-          <div class="pill-row">
-            <div id="configPill" class="pill warn">API</div>
-            <div id="authPill" class="pill warn">Auth</div>
-            <div id="headersPill" class="pill warn">Headers</div>
+          <div class="signal-row">
+            <span id="configPill" class="signal">API</span>
+            <span id="authPill" class="signal">Auth</span>
+            <span id="headersPill" class="signal">Headers</span>
           </div>
 
-          <p id="authSummary" class="meta-note">Open Settings to connect this extension.</p>
-          <p id="workflowHint" class="meta-note">Classes -> map in app -> students -> import</p>
+          <p id="homeNote" class="home-note">Open Settings to connect.</p>
         </section>
 
-        <section class="card">
-          <div class="card-header">
+        <section class="panel">
+          <div class="panel-header">
             <div>
-              <div class="eyebrow">Actions</div>
-              <h2 class="card-title">Sync</h2>
+              <h2 class="panel-title">Sync</h2>
+              <p class="panel-caption">Run the next step.</p>
             </div>
           </div>
 
           <div class="action-grid">
-            <button id="syncClasses" class="primary action-button" type="button">
-              <span class="action-title">Sync classes</span>
-              <span class="action-meta">Pull Gradeo classes</span>
-            </button>
-            <button id="syncStudents" class="primary action-button" type="button">
-              <span class="action-title">Sync students</span>
-              <span class="action-meta">Refresh the directory</span>
-            </button>
-            <button id="importMappedClasses" class="primary action-button" type="button">
-              <span class="action-title">Import mapped classes</span>
-              <span class="action-meta">Run the report import</span>
-            </button>
+            <button id="syncClasses" class="primary action-button" type="button">Sync classes</button>
+            <button id="syncStudents" class="primary action-button" type="button">Sync students</button>
+            <button id="importMappedClasses" class="primary action-button" type="button">Import mapped classes</button>
           </div>
         </section>
       </main>
 
       <main id="settingsView" class="view">
-        <section class="card">
-          <div class="card-header">
-            <div>
-              <div class="eyebrow">Settings</div>
-              <h1 class="card-title">Extension settings</h1>
-              <p class="card-subtitle">Save the backend URL, extension key, and Gradeo headers here.</p>
+        <section class="panel">
+          <div class="panel-header">
+            <div class="status-copy">
+              <h1 class="panel-title">Settings</h1>
+              <p class="settings-note">Save your connection details.</p>
             </div>
             <button id="closeSettings" class="secondary" type="button">Back</button>
           </div>
 
-          <div class="pill-row">
-            <div id="settingsConfigPill" class="pill warn">API</div>
-            <div id="settingsAuthPill" class="pill warn">Auth</div>
-            <div id="settingsHeadersPill" class="pill warn">Headers</div>
+          <div class="signal-row">
+            <span id="settingsConfigPill" class="signal">API</span>
+            <span id="settingsAuthPill" class="signal">Auth</span>
+            <span id="settingsHeadersPill" class="signal">Headers</span>
           </div>
 
           <p id="authDetail" class="field-note">Not connected.</p>

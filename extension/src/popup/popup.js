@@ -8,23 +8,22 @@
   const apiBaseUrl = document.getElementById('apiBaseUrl')
   const extensionApiKey = document.getElementById('extensionApiKey')
   const gradeoApiHeadersJson = document.getElementById('gradeoApiHeadersJson')
-  const authSummary = document.getElementById('authSummary')
+  const homeNote = document.getElementById('homeNote')
   const authDetail = document.getElementById('authDetail')
-  const workflowHint = document.getElementById('workflowHint')
   const statePill = document.getElementById('statePill')
   const statusHeadline = document.getElementById('statusHeadline')
   const statusSummary = document.getElementById('statusSummary')
   const noticeBanner = document.getElementById('noticeBanner')
 
-  const readinessPills = [
+  const configSignals = [
     document.getElementById('configPill'),
     document.getElementById('settingsConfigPill'),
   ]
-  const authPills = [
+  const authSignals = [
     document.getElementById('authPill'),
     document.getElementById('settingsAuthPill'),
   ]
-  const headersPills = [
+  const headerSignals = [
     document.getElementById('headersPill'),
     document.getElementById('settingsHeadersPill'),
   ]
@@ -76,26 +75,31 @@
     return Boolean(raw && raw !== '{}' && raw !== 'null')
   }
 
-  function getPillTone(status) {
+  function getTone(status) {
     if (['completed', 'authenticated', 'ready'].includes(status)) {
       return 'good'
     }
     if (['blocked', 'error', 'missing'].includes(status)) {
       return 'warn'
     }
-    return 'idle'
+    return ''
   }
 
-  function updatePill(element, label, tone) {
+  function updateSignal(element, label, tone) {
     if (!element) {
       return
     }
     element.textContent = label
-    element.className = `pill ${tone}`
+    element.className = tone ? `signal ${tone}` : 'signal'
   }
 
-  function updatePillGroup(elements, label, tone) {
-    elements.forEach((element) => updatePill(element, label, tone))
+  function updateSignalGroup(elements, label, tone) {
+    elements.forEach((element) => updateSignal(element, label, tone))
+  }
+
+  function updateStatusChip(label, tone) {
+    statePill.textContent = label
+    statePill.className = tone ? `status-chip ${tone}` : 'status-chip'
   }
 
   function updateActionAvailability(canRunActions) {
@@ -113,7 +117,7 @@
 
     if (status === 'idle') {
       return {
-        headline: 'Ready when you are',
+        headline: 'Ready',
         summary: 'No sync running.',
       }
     }
@@ -121,37 +125,35 @@
     if (status === 'blocked') {
       return {
         headline: 'Blocked',
-        summary: safeState.message || 'Check your setup and try again.',
+        summary: safeState.message || 'Fix setup and try again.',
       }
     }
 
     if (status === 'error') {
       return {
-        headline: 'Something failed',
-        summary: safeState.message || 'Try again after checking your settings.',
+        headline: 'Failed',
+        summary: safeState.message || 'Check settings and retry.',
       }
     }
 
     if (status === 'scraping_reporting') {
       return {
-        headline: 'Collecting report data',
-        summary: safeState.progress?.message || 'Gradeo is still loading.',
+        headline: 'Collecting reports',
+        summary: safeState.progress?.message || 'Working in Gradeo.',
       }
     }
 
     if (status === 'loading_mappings') {
       return {
         headline: 'Loading mappings',
-        summary: 'Preparing the import list.',
+        summary: 'Preparing import.',
       }
     }
 
     if (status === 'loading_reporting_classes') {
       return {
         headline: 'Checking classes',
-        summary: safeState.totalClasses
-          ? `${safeState.totalClasses} mapped class${safeState.totalClasses === 1 ? '' : 'es'}`
-          : 'Checking mapped classes.',
+        summary: safeState.totalClasses ? `${safeState.totalClasses} mapped` : 'Checking mapped classes.',
       }
     }
 
@@ -160,14 +162,14 @@
         headline: 'Preflight',
         summary: safeState.className
           ? `${safeState.className}${safeState.currentClass && safeState.totalClasses ? ` (${safeState.currentClass}/${safeState.totalClasses})` : ''}`
-          : 'Checking the next class.',
+          : 'Checking next class.',
       }
     }
 
     if (status === 'importing_class') {
       return {
         headline: 'Loading class',
-        summary: safeState.className || 'Fetching class details.',
+        summary: safeState.className || 'Fetching class data.',
       }
     }
 
@@ -176,7 +178,7 @@
         headline: 'Reading students',
         summary: safeState.studentName
           ? `${safeState.studentName}${safeState.currentStudent && safeState.totalStudents ? ` (${safeState.currentStudent}/${safeState.totalStudents})` : ''}`
-          : 'Collecting student results.',
+          : 'Collecting results.',
       }
     }
 
@@ -194,7 +196,7 @@
         headline: 'Uploading class',
         summary: safeState.className
           ? `${safeState.className} · ${safeState.students || 0} students`
-          : 'Sending the class import.',
+          : 'Sending class import.',
       }
     }
 
@@ -230,8 +232,8 @@
 
     if (status === 'completed') {
       return {
-        headline: 'Completed',
-        summary: safeState.action ? titleCaseStatus(safeState.action) : 'The last action finished.',
+        headline: 'Done',
+        summary: safeState.action ? titleCaseStatus(safeState.action) : 'Action finished.',
       }
     }
 
@@ -241,7 +243,7 @@
     }
   }
 
-  function buildReadinessHint(configReady, authReady, headersReady, apiKeySaved, localMode) {
+  function buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode) {
     if (!configReady) {
       return 'Add the API URL in Settings.'
     }
@@ -249,12 +251,12 @@
       return 'Add the extension key in Settings.'
     }
     if (!authReady) {
-      return 'Save valid settings, then reopen or retry.'
+      return 'Check the saved key and API URL.'
     }
     if (!headersReady) {
       return 'Paste fresh Gradeo headers in Settings.'
     }
-    return 'Classes -> map in app -> students -> import'
+    return 'Classes -> map in app -> students -> import.'
   }
 
   function renderState(context) {
@@ -273,32 +275,30 @@
     const localMode = Boolean(user && (user.local_auth || user.auth_source === 'local'))
     const authReady = Boolean(user)
 
-    updatePillGroup(readinessPills, configReady ? 'API saved' : 'API missing', configReady ? 'good' : 'warn')
-    updatePillGroup(
-      authPills,
-      authReady ? (localMode ? 'Local auth' : 'Verified') : apiKeySaved ? 'Needs verify' : 'Key missing',
-      authReady ? 'good' : 'warn',
+    updateSignalGroup(configSignals, 'API', configReady ? 'good' : 'warn')
+    updateSignalGroup(
+      authSignals,
+      localMode ? 'Local' : 'Auth',
+      authReady ? 'good' : apiKeySaved ? '' : 'warn',
     )
-    updatePillGroup(headersPills, headersReady ? 'Headers saved' : 'Headers missing', headersReady ? 'good' : 'warn')
+    updateSignalGroup(headerSignals, 'Headers', headersReady ? 'good' : 'warn')
 
     if (user) {
-      authSummary.textContent = `${user.email} · ${user.role}`
-      authDetail.textContent = localMode ? 'Using local auth.' : 'Extension key verified.'
+      authDetail.textContent = localMode ? 'Using local auth.' : `${user.email} · ${user.role}`
     } else if (apiKeySaved) {
-      authSummary.textContent = 'Saved, not verified'
-      authDetail.textContent = 'Check the API URL and extension key.'
+      authDetail.textContent = 'Saved, not verified.'
     } else {
-      authSummary.textContent = 'Open Settings to connect this extension.'
-      authDetail.textContent = 'Save the backend URL, extension key, and Gradeo headers.'
+      authDetail.textContent = 'Not connected.'
     }
 
-    workflowHint.textContent = buildReadinessHint(configReady, authReady, headersReady, apiKeySaved, localMode)
+    homeNote.textContent = buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode)
     updateActionAvailability(configReady && authReady && headersReady)
 
     const status = context.state?.status || 'idle'
-    updatePill(statePill, titleCaseStatus(status), getPillTone(status))
-
     const summary = buildStateSummary(context.state)
+    const tone = getTone(status)
+
+    updateStatusChip(titleCaseStatus(status), tone)
     statusHeadline.textContent = summary.headline
     statusSummary.textContent = summary.summary
   }
