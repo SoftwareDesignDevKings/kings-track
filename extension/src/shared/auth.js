@@ -39,6 +39,23 @@
     return ext.fetchApi('/auth/me')
   }
 
+  ext.getCachedAuthStatus = async function getCachedAuthStatus(maxAgeMs) {
+    const result = await browser.storage.local.get(AUTH_CACHE_KEY)
+    const cache = result[AUTH_CACHE_KEY]
+    if (!cache || !cache.checkedAt) {
+      return null
+    }
+    const age = Date.now() - Number(cache.checkedAt)
+    if (age > (typeof maxAgeMs === 'number' ? maxAgeMs : DEFAULT_AUTH_CACHE_MS)) {
+      return null
+    }
+    return {
+      ok: Boolean(cache.ok),
+      checkedAt: Number(cache.checkedAt),
+      error: cache.error || null,
+    }
+  }
+
   ext.getCachedCurrentUser = async function getCachedCurrentUser(maxAgeMs) {
     const result = await browser.storage.local.get(AUTH_CACHE_KEY)
     const cache = result[AUTH_CACHE_KEY]
@@ -66,14 +83,25 @@
       .then(async (user) => {
         await browser.storage.local.set({
           [AUTH_CACHE_KEY]: {
+            ok: true,
             user,
+            error: null,
+            checkedAt: Date.now(),
             cachedAt: Date.now(),
           },
         })
         return user
       })
       .catch(async (error) => {
-        await browser.storage.local.remove(AUTH_CACHE_KEY).catch(() => undefined)
+        await browser.storage.local.set({
+          [AUTH_CACHE_KEY]: {
+            ok: false,
+            user: null,
+            error: error instanceof Error ? error.message : String(error),
+            checkedAt: Date.now(),
+            cachedAt: Date.now(),
+          },
+        }).catch(() => undefined)
         throw error
       })
       .finally(() => {

@@ -243,15 +243,18 @@
     }
   }
 
-  function buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode) {
+  function buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode, authStatus) {
     if (!configReady) {
       return 'Add the API URL in Settings.'
+    }
+    if (authStatus && authStatus.ok === false) {
+      return 'Cannot reach Kings Track with current settings.'
     }
     if (!apiKeySaved && !localMode) {
       return 'Add the extension key in Settings.'
     }
     if (!authReady) {
-      return apiKeySaved ? 'Saved key is not verifying yet.' : 'Checking saved credentials.'
+      return apiKeySaved ? 'Checking Kings Track.' : 'Checking saved credentials.'
     }
     if (!headersReady) {
       return 'Paste fresh Gradeo headers in Settings.'
@@ -272,10 +275,18 @@
     const headersReady = hasSavedHeaders(config)
     const apiKeySaved = Boolean(String(config.extensionApiKey || '').trim())
     const user = context.user || null
+    const authStatus = context.authStatus || null
     const localMode = Boolean(user && (user.local_auth || user.auth_source === 'local'))
     const authReady = Boolean(user)
 
-    updateSignalGroup(configSignals, "King's Track", configReady ? 'good' : 'warn')
+    let kingsTrackTone = 'warn'
+    if (configReady && authStatus && authStatus.ok) {
+      kingsTrackTone = 'good'
+    } else if (configReady && !authStatus) {
+      kingsTrackTone = ''
+    }
+
+    updateSignalGroup(configSignals, "King's Track", kingsTrackTone)
     updateSignalGroup(
       authSignals,
       'API Key',
@@ -285,13 +296,15 @@
 
     if (user) {
       authDetail.textContent = localMode ? 'Using local auth.' : `${user.email} · ${user.role}`
+    } else if (authStatus && authStatus.ok === false) {
+      authDetail.textContent = 'Kings Track did not verify the current URL/key.'
     } else if (apiKeySaved) {
       authDetail.textContent = 'Key saved. Verification pending.'
     } else {
       authDetail.textContent = 'Not connected.'
     }
 
-    const note = buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode)
+    const note = buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode, authStatus)
     homeNote.textContent = note
     homeNote.hidden = !note
     updateActionAvailability(configReady && authReady && headersReady)

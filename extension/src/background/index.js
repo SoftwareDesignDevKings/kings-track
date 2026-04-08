@@ -1298,13 +1298,19 @@
     }
 
     if (message?.type === 'kings.popup.getContext') {
-      return Promise.all([ext.getConfig(), getState(), ext.getCachedCurrentUser(5 * 60 * 1000).catch(() => null)])
-        .then(([config, state, user]) => {
+      return Promise.all([
+        ext.getConfig(),
+        getState(),
+        ext.getCachedCurrentUser(5 * 60 * 1000).catch(() => null),
+        ext.getCachedAuthStatus(5 * 60 * 1000).catch(() => null),
+      ])
+        .then(([config, state, user, authStatus]) => {
           ext.getCurrentUser({ maxAgeMs: 30 * 1000 }).catch(() => null)
           return {
             config,
             state,
             user,
+            authStatus,
           }
         })
     }
