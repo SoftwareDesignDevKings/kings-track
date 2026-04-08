@@ -89,10 +89,21 @@ describe('CourseDetail', () => {
     expect(screen.getByText(/Engagement analytics coming soon/i)).toBeInTheDocument()
   })
 
-  it('shows the activity table on the default activities tab', () => {
+  it('shows the activity table on the default Canvas tab', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />)
+    expect(screen.getByRole('button', { name: /^Canvas$/i })).toBeInTheDocument()
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
+  })
+
+  it('renders course tabs in the requested order', () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    renderWithProviders(<CourseDetail />)
+    expect(
+      ['Canvas', 'Gradeo', 'EdStem', 'Engagement', 'At-Risk'].map(label =>
+        screen.getByRole('button', { name: new RegExp(`^${label}`, 'i') }),
+      ).map(button => button.textContent?.replace('Soon', '').trim())
+    ).toEqual(['Canvas', 'Gradeo', 'EdStem', 'Engagement', 'At-Risk'])
   })
 
   it('EdStem tab does not have a "Soon" badge', () => {
