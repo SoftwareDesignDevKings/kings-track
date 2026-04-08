@@ -1298,10 +1298,9 @@
     }
 
     if (message?.type === 'kings.popup.getContext') {
-      return Promise.all([ext.getConfig(), ext.getSession(), getState()])
-        .then(async ([config, session, state]) => ({
+      return Promise.all([ext.getConfig(), getState()])
+        .then(async ([config, state]) => ({
           config,
-          session,
           state,
           user: await ext.getCurrentUser().catch(() => null),
         }))
@@ -1310,22 +1309,9 @@
     if (message?.type === 'kings.popup.saveConfig') {
       ext.logDebug('popup', 'save_config_clicked', {
         apiBaseUrl: message.config?.apiBaseUrl || '',
-        hasSupabaseUrl: Boolean(message.config?.supabaseUrl),
-        hasSupabaseAnonKey: Boolean(message.config?.supabaseAnonKey),
+        hasExtensionApiKey: Boolean(message.config?.extensionApiKey),
       })
       return ext.saveConfig(message.config)
-    }
-
-    if (message?.type === 'kings.popup.signIn') {
-      ext.logDebug('popup', 'sign_in_clicked')
-      return ext.signIn()
-        .then(() => ensureAdmin())
-        .then(user => setState({ status: 'authenticated', user: user.email }))
-    }
-
-    if (message?.type === 'kings.popup.signOut') {
-      ext.logDebug('popup', 'sign_out_clicked')
-      return ext.signOut().then(() => setState({ status: 'signed_out' }))
     }
 
     if (message?.type === 'kings.popup.syncStudents' || message?.type === 'kings.popup.syncStudentDirectory') {

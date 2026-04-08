@@ -5,8 +5,7 @@
 
   ext.defaultConfig = {
     apiBaseUrl: 'http://localhost:8000/api',
-    supabaseUrl: '',
-    supabaseAnonKey: '',
+    extensionApiKey: '',
     gradeoApiHeadersJson: '{}',
   }
 
@@ -19,8 +18,7 @@
     await browser.storage.local.set({
       [CONFIG_KEY]: {
         apiBaseUrl: String(config.apiBaseUrl || '').trim(),
-        supabaseUrl: String(config.supabaseUrl || '').trim().replace(/\/$/, ''),
-        supabaseAnonKey: String(config.supabaseAnonKey || '').trim(),
+        extensionApiKey: String(config.extensionApiKey || '').trim(),
         gradeoApiHeadersJson: String(config.gradeoApiHeadersJson || '{}').trim() || '{}',
       },
     })

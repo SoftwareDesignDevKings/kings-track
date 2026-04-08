@@ -1,3 +1,6 @@
+import secrets
+from hashlib import sha256
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
@@ -10,6 +13,45 @@ from app.db import get_db
 from app.api.deps import require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+
+
+def _hash_extension_api_key(api_key: str) -> str:
+    return sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def _build_extension_api_key() -> tuple[str, str]:
+    raw = f"ktx_{secrets.token_urlsafe(32)}"
+    hint = f"{raw[:8]}...{raw[-4:]}"
+    return raw, hint
+
+
+async def _ensure_persisted_admin_user(user: dict, db: AsyncSession) -> int:
+    if user.get("id"):
+        return int(user["id"])
+
+    result = await db.execute(
+        text("""
+            INSERT INTO app_users (email, role)
+            VALUES (:email, :role)
+            ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role
+            RETURNING id
+        """),
+        {"email": user["email"], "role": user["role"]},
+    )
+    row = result.fetchone()
+    await db.commit()
+    return int(row[0])
+
+
+class ExtensionApiKeyStatusOut(BaseModel):
+    has_key: bool
+    key_hint: str | None = None
+    created_at: str | None = None
+    last_used_at: str | None = None
+
+
+class ExtensionApiKeyOut(ExtensionApiKeyStatusOut):
+    api_key: str
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +93,88 @@ async def add_user(body: UserIn, db: AsyncSession = Depends(get_db)):
 @router.delete("/users/{email}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_user(email: str, db: AsyncSession = Depends(get_db)):
     await db.execute(text("DELETE FROM app_users WHERE email = :email"), {"email": email})
+    await db.commit()
+
+
+@router.get("/extension-api-key", response_model=ExtensionApiKeyStatusOut)
+async def get_extension_api_key_status(
+    user: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        text("""
+            SELECT extension_api_key_hash, extension_api_key_hint,
+                   extension_api_key_created_at, extension_api_key_last_used_at
+            FROM app_users
+            WHERE email = :email
+        """),
+        {"email": user["email"]},
+    )
+    row = result.fetchone()
+    if not row:
+        return ExtensionApiKeyStatusOut(has_key=False)
+
+    return ExtensionApiKeyStatusOut(
+        has_key=bool(row[0]),
+        key_hint=row[1],
+        created_at=row[2].isoformat() if row[2] else None,
+        last_used_at=row[3].isoformat() if row[3] else None,
+    )
+
+
+@router.post("/extension-api-key", response_model=ExtensionApiKeyOut)
+async def generate_extension_api_key(
+    user: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = await _ensure_persisted_admin_user(user, db)
+    api_key, key_hint = _build_extension_api_key()
+    await db.execute(
+        text("""
+            UPDATE app_users
+            SET extension_api_key_hash = :key_hash,
+                extension_api_key_hint = :key_hint,
+                extension_api_key_created_at = CURRENT_TIMESTAMP,
+                extension_api_key_last_used_at = NULL
+            WHERE id = :user_id
+        """),
+        {"key_hash": _hash_extension_api_key(api_key), "key_hint": key_hint, "user_id": user_id},
+    )
+    await db.commit()
+    result = await db.execute(
+        text("""
+            SELECT extension_api_key_created_at, extension_api_key_last_used_at
+            FROM app_users
+            WHERE id = :user_id
+        """),
+        {"user_id": user_id},
+    )
+    row = result.fetchone()
+    return ExtensionApiKeyOut(
+        has_key=True,
+        api_key=api_key,
+        key_hint=key_hint,
+        created_at=row[0].isoformat() if row and row[0] else None,
+        last_used_at=row[1].isoformat() if row and row[1] else None,
+    )
+
+
+@router.delete("/extension-api-key", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_extension_api_key(
+    user: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        text("""
+            UPDATE app_users
+            SET extension_api_key_hash = NULL,
+                extension_api_key_hint = NULL,
+                extension_api_key_created_at = NULL,
+                extension_api_key_last_used_at = NULL
+            WHERE email = :email
+        """),
+        {"email": user["email"]},
+    )
     await db.commit()
 
 

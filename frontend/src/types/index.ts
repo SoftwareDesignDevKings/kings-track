@@ -99,6 +99,9 @@ export interface AppUser {
   email: string
   role: 'admin' | 'teacher'
   created_at: string | null
+  auth_source?: 'local' | 'supabase' | 'extension_api_key' | null
+  auth_mode?: string
+  local_auth?: boolean
 }
 
 export interface WhitelistedCourse {
@@ -112,6 +115,17 @@ export interface AvailableCourse {
   id: number
   name: string
   course_code: string | null
+}
+
+export interface ExtensionApiKeyStatus {
+  has_key: boolean
+  key_hint: string | null
+  created_at: string | null
+  last_used_at: string | null
+}
+
+export interface ExtensionApiKeyResponse extends ExtensionApiKeyStatus {
+  api_key: string
 }
 
 // ─── Health ──────────────────────────────────────────────────────────────────

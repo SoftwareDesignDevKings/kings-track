@@ -1,7 +1,6 @@
 (function () {
   const apiBaseUrl = document.getElementById('apiBaseUrl')
-  const supabaseUrl = document.getElementById('supabaseUrl')
-  const supabaseAnonKey = document.getElementById('supabaseAnonKey')
+  const extensionApiKey = document.getElementById('extensionApiKey')
   const gradeoApiHeadersJson = document.getElementById('gradeoApiHeadersJson')
   const authSummary = document.getElementById('authSummary')
   const authDetail = document.getElementById('authDetail')
@@ -15,12 +14,9 @@
   const authPill = document.getElementById('authPill')
   const headersPill = document.getElementById('headersPill')
   const workflowHint = document.getElementById('workflowHint')
-  const signInButton = document.getElementById('signIn')
-  const signOutButton = document.getElementById('signOut')
   const configInputs = [
     apiBaseUrl,
-    supabaseUrl,
-    supabaseAnonKey,
+    extensionApiKey,
     gradeoApiHeadersJson,
   ]
   const actionButtonIds = ['syncClasses', 'syncStudents', 'importMappedClasses']
@@ -95,23 +91,7 @@
     if (status === 'idle') {
       return {
         headline: 'Nothing running yet.',
-        summary: 'Save your settings, confirm sign-in, and then run the Gradeo sync steps from the workflow card.',
-      }
-    }
-
-    if (status === 'authenticated') {
-      return {
-        headline: 'Authentication looks good.',
-        summary: safeState.user
-          ? `Signed in as ${safeState.user}. You can move on to syncing Gradeo data.`
-          : 'You are signed in and ready for the next step.',
-      }
-    }
-
-    if (status === 'signed_out') {
-      return {
-        headline: 'Signed out.',
-        summary: 'Sign back in with Google if you are using a hosted environment, or keep using local mode if your backend supports it.',
+        summary: 'Save your API URL and extension key, then paste Gradeo headers and run the sync workflow from this popup.',
       }
     }
 
@@ -153,17 +133,21 @@
     }
   }
 
-  function setWorkflowHint(configReady, authReady, headersReady) {
+  function setWorkflowHint(configReady, authReady, headersReady, apiKeySaved, localMode) {
     if (!configReady) {
-      workflowHint.textContent = 'Start by saving the Kings Track API base URL. The sync buttons become useful once connection settings are in place.'
+      workflowHint.textContent = 'Start by saving the Kings Track API base URL so the extension knows where to send imports.'
+      return
+    }
+    if (!apiKeySaved && !localMode) {
+      workflowHint.textContent = 'Generate an extension API key in Kings Track Settings, paste it here, and save it before trying the sync actions.'
       return
     }
     if (!authReady) {
-      workflowHint.textContent = 'Connection settings are saved. Sign in next unless you are intentionally using local backend auth.'
+      workflowHint.textContent = 'The saved key has not verified yet. Double-check the API base URL, regenerate the key if needed, and make sure the key belongs to an admin account.'
       return
     }
     if (!headersReady) {
-      workflowHint.textContent = 'You are almost ready. Paste fresh Gradeo request headers before running classes, students, or imports.'
+      workflowHint.textContent = 'Access looks good. Paste fresh Gradeo request headers before syncing classes, students, or imports.'
       return
     }
     workflowHint.textContent = 'Ready to go: sync classes first, link them in Kings Track, then sync students and import mapped classes.'
@@ -174,40 +158,39 @@
 
     if (!isEditingConfig()) {
       apiBaseUrl.value = config.apiBaseUrl || ''
-      supabaseUrl.value = config.supabaseUrl || ''
-      supabaseAnonKey.value = config.supabaseAnonKey || ''
+      extensionApiKey.value = config.extensionApiKey || ''
       gradeoApiHeadersJson.value = config.gradeoApiHeadersJson || '{}'
     }
 
     const configReady = Boolean(String(config.apiBaseUrl || '').trim())
     const headersReady = hasSavedHeaders(config)
+    const apiKeySaved = Boolean(String(config.extensionApiKey || '').trim())
     const user = context.user || null
-    const session = context.session || null
-    const authReady = Boolean(user || session)
-    const localMode = Boolean(user && !session)
+    const localMode = Boolean(user && (user.local_auth || user.auth_source === 'local'))
+    const authReady = Boolean(user)
 
     updatePill(configPill, configReady ? 'Saved' : 'Needs setup', configReady ? 'good' : 'warn')
-    updatePill(authPill, authReady ? (localMode ? 'Local auth' : 'Signed in') : 'Not signed in', authReady ? 'good' : 'warn')
+    updatePill(
+      authPill,
+      authReady ? (localMode ? 'Local auth' : 'Verified') : apiKeySaved ? 'Needs verify' : 'Missing key',
+      authReady ? 'good' : 'warn',
+    )
     updatePill(headersPill, headersReady ? 'Headers saved' : 'Headers missing', headersReady ? 'good' : 'warn')
 
     if (user) {
       authSummary.textContent = `${user.email} · ${user.role}`
       authDetail.textContent = localMode
-        ? 'Using local backend auth. Google sign-in is optional in this setup.'
-        : 'Extension session is active and Kings Track recognizes your account.'
-    } else if (session) {
-      authSummary.textContent = 'Signed in, checking admin access…'
-      authDetail.textContent = 'The extension has a session and is still resolving your Kings Track user details.'
+        ? 'Using local backend auth for development. The extension API key is optional in this setup.'
+        : 'Extension key verified. Kings Track recognizes this extension as an authenticated admin.'
+    } else if (apiKeySaved) {
+      authSummary.textContent = 'Key saved, not verified yet'
+      authDetail.textContent = 'Check the API base URL, confirm the key was generated in Kings Track Settings, and make sure the backend can reach /auth/me.'
     } else {
-      authSummary.textContent = 'Not signed in'
-      authDetail.textContent = config.supabaseUrl && config.supabaseAnonKey
-        ? 'Use Google sign-in for hosted environments, or rely on local backend auth if that is how you are testing.'
-        : 'Supabase settings are optional for local-only development. They are required for Google sign-in.'
+      authSummary.textContent = 'No extension key saved'
+      authDetail.textContent = 'Generate a key in Kings Track Settings and paste it here to unlock the sync workflow.'
     }
 
-    signInButton.disabled = Boolean(!config.supabaseUrl || !config.supabaseAnonKey)
-    signOutButton.disabled = !authReady
-    setWorkflowHint(configReady, authReady, headersReady)
+    setWorkflowHint(configReady, authReady, headersReady, apiKeySaved, localMode)
     updateActionAvailability(configReady && authReady && headersReady)
 
     const status = context.state?.status || 'idle'
@@ -237,25 +220,32 @@
     await refreshLogs()
   }
 
-  async function saveConfig(showSavedMessage) {
+  async function saveConfig(showSavedMessage, customMessage) {
     await browser.runtime.sendMessage({
       type: 'kings.popup.saveConfig',
       config: {
         apiBaseUrl: apiBaseUrl.value,
-        supabaseUrl: supabaseUrl.value,
-        supabaseAnonKey: supabaseAnonKey.value,
+        extensionApiKey: extensionApiKey.value,
         gradeoApiHeadersJson: gradeoApiHeadersJson.value,
       },
     })
     if (showSavedMessage) {
-      showNotice('good', 'Settings saved.')
+      showNotice('good', customMessage || 'Settings saved.')
     }
     await refresh()
   }
 
   document.getElementById('saveConfig').addEventListener('click', async () => {
     try {
-      await saveConfig(true)
+      await saveConfig(true, 'Connection settings saved.')
+    } catch (error) {
+      showNotice('warn', error.message || String(error))
+    }
+  })
+
+  document.getElementById('saveExtensionKey').addEventListener('click', async () => {
+    try {
+      await saveConfig(true, 'Extension key saved.')
     } catch (error) {
       showNotice('warn', error.message || String(error))
     }
@@ -263,35 +253,9 @@
 
   document.getElementById('saveApiHeaders').addEventListener('click', async () => {
     try {
-      await saveConfig(false)
-      showNotice('good', 'Gradeo headers saved.')
+      await saveConfig(true, 'Gradeo headers saved.')
     } catch (error) {
       showNotice('warn', error.message || String(error))
-    }
-  })
-
-  document.getElementById('signIn').addEventListener('click', async () => {
-    setBusy(['signIn'], true)
-    try {
-      await browser.runtime.sendMessage({ type: 'kings.popup.signIn' })
-      showNotice('good', 'Signed in successfully.')
-    } catch (error) {
-      authSummary.textContent = error.message
-      showNotice('warn', error.message || String(error))
-    } finally {
-      setBusy(['signIn'], false)
-      await refresh()
-    }
-  })
-
-  document.getElementById('signOut').addEventListener('click', async () => {
-    try {
-      await browser.runtime.sendMessage({ type: 'kings.popup.signOut' })
-      showNotice('good', 'Signed out.')
-    } catch (error) {
-      showNotice('warn', error.message || String(error))
-    } finally {
-      await refresh()
     }
   })
 
