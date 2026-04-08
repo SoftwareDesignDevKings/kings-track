@@ -251,7 +251,7 @@
       return 'Add the extension key in Settings.'
     }
     if (!authReady) {
-      return 'Checking saved credentials.'
+      return apiKeySaved ? 'Saved key is not verifying yet.' : 'Checking saved credentials.'
     }
     if (!headersReady) {
       return 'Paste fresh Gradeo headers in Settings.'
@@ -279,14 +279,14 @@
     updateSignalGroup(
       authSignals,
       'API Key',
-      authReady ? 'good' : apiKeySaved ? '' : 'warn',
+      apiKeySaved || localMode ? 'good' : 'warn',
     )
     updateSignalGroup(headerSignals, 'Gradeo Headers', headersReady ? 'good' : 'warn')
 
     if (user) {
       authDetail.textContent = localMode ? 'Using local auth.' : `${user.email} · ${user.role}`
     } else if (apiKeySaved) {
-      authDetail.textContent = 'Saved, not verified.'
+      authDetail.textContent = 'Key saved. Verification pending.'
     } else {
       authDetail.textContent = 'Not connected.'
     }
