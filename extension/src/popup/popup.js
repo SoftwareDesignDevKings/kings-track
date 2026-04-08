@@ -1,30 +1,49 @@
 (function () {
+  const homeView = document.getElementById('homeView')
+  const settingsView = document.getElementById('settingsView')
+  const openSettingsButton = document.getElementById('openSettings')
+  const closeSettingsButton = document.getElementById('closeSettings')
+  const saveSettingsButton = document.getElementById('saveSettings')
+
   const apiBaseUrl = document.getElementById('apiBaseUrl')
   const extensionApiKey = document.getElementById('extensionApiKey')
   const gradeoApiHeadersJson = document.getElementById('gradeoApiHeadersJson')
   const authSummary = document.getElementById('authSummary')
   const authDetail = document.getElementById('authDetail')
+  const workflowHint = document.getElementById('workflowHint')
   const statePill = document.getElementById('statePill')
-  const stateDetails = document.getElementById('stateDetails')
   const statusHeadline = document.getElementById('statusHeadline')
   const statusSummary = document.getElementById('statusSummary')
+  const stateDetails = document.getElementById('stateDetails')
   const debugLogs = document.getElementById('debugLogs')
   const noticeBanner = document.getElementById('noticeBanner')
-  const configPill = document.getElementById('configPill')
-  const authPill = document.getElementById('authPill')
-  const headersPill = document.getElementById('headersPill')
-  const workflowHint = document.getElementById('workflowHint')
-  const configInputs = [
-    apiBaseUrl,
-    extensionApiKey,
-    gradeoApiHeadersJson,
+
+  const readinessPills = [
+    document.getElementById('configPill'),
+    document.getElementById('settingsConfigPill'),
   ]
+  const authPills = [
+    document.getElementById('authPill'),
+    document.getElementById('settingsAuthPill'),
+  ]
+  const headersPills = [
+    document.getElementById('headersPill'),
+    document.getElementById('settingsHeadersPill'),
+  ]
+
+  const configInputs = [apiBaseUrl, extensionApiKey, gradeoApiHeadersJson]
   const actionButtonIds = ['syncClasses', 'syncStudents', 'importMappedClasses']
+
   let noticeTimer = null
   let actionsBusy = false
 
+  function showView(view) {
+    homeView.classList.toggle('active', view === 'home')
+    settingsView.classList.toggle('active', view === 'settings')
+  }
+
   function setBusy(buttonIds, busy) {
-    buttonIds.forEach(id => {
+    buttonIds.forEach((id) => {
       const button = document.getElementById(id)
       if (button) {
         button.disabled = busy
@@ -45,14 +64,13 @@
   }
 
   function isEditingConfig() {
-    const active = document.activeElement
-    return configInputs.includes(active)
+    return configInputs.includes(document.activeElement)
   }
 
   function titleCaseStatus(status) {
     return String(status || 'idle')
       .replace(/_/g, ' ')
-      .replace(/\b\w/g, char => char.toUpperCase())
+      .replace(/\b\w/g, (char) => char.toUpperCase())
   }
 
   function hasSavedHeaders(config) {
@@ -61,27 +79,34 @@
   }
 
   function getPillTone(status) {
-    if (['completed', 'authenticated'].includes(status)) {
+    if (['completed', 'authenticated', 'ready'].includes(status)) {
       return 'good'
     }
-    if (['blocked', 'error'].includes(status)) {
+    if (['blocked', 'error', 'missing'].includes(status)) {
       return 'warn'
     }
     return 'idle'
   }
 
+  function updatePill(element, label, tone) {
+    if (!element) {
+      return
+    }
+    element.textContent = label
+    element.className = `pill ${tone}`
+  }
+
+  function updatePillGroup(elements, label, tone) {
+    elements.forEach((element) => updatePill(element, label, tone))
+  }
+
   function updateActionAvailability(canRunActions) {
-    actionButtonIds.forEach(id => {
+    actionButtonIds.forEach((id) => {
       const button = document.getElementById(id)
       if (button) {
         button.disabled = actionsBusy || !canRunActions
       }
     })
-  }
-
-  function updatePill(element, label, tone) {
-    element.textContent = label
-    element.className = `pill ${tone}`
   }
 
   function buildStateSummary(state) {
@@ -90,67 +115,148 @@
 
     if (status === 'idle') {
       return {
-        headline: 'Nothing running yet.',
-        summary: 'Save your API URL and extension key, then paste Gradeo headers and run the sync workflow from this popup.',
+        headline: 'Ready when you are',
+        summary: 'No sync running.',
       }
     }
 
     if (status === 'blocked') {
       return {
-        headline: 'Something needs attention before the next step.',
-        summary: safeState.message || JSON.stringify(safeState.blocked || safeState.preflight || {}, null, 2),
+        headline: 'Blocked',
+        summary: safeState.message || 'Check the state panel for details.',
       }
     }
 
     if (status === 'error') {
       return {
-        headline: `The last action failed${safeState.action ? ` during ${titleCaseStatus(safeState.action)}` : ''}.`,
-        summary: safeState.message || 'Check the debug log below for more detail.',
+        headline: 'Something failed',
+        summary: safeState.message || 'Check the debug log for details.',
       }
     }
 
     if (status === 'scraping_reporting') {
-      const progress = safeState.progress || {}
       return {
-        headline: 'Import in progress.',
-        summary: progress.message || 'The extension is collecting reporting data from Gradeo.',
+        headline: 'Collecting report data',
+        summary: safeState.progress?.message || 'Gradeo is still loading.',
+      }
+    }
+
+    if (status === 'loading_mappings') {
+      return {
+        headline: 'Loading mappings',
+        summary: 'Preparing the import list.',
+      }
+    }
+
+    if (status === 'loading_reporting_classes') {
+      return {
+        headline: 'Checking classes',
+        summary: safeState.totalClasses
+          ? `${safeState.totalClasses} mapped class${safeState.totalClasses === 1 ? '' : 'es'}`
+          : 'Checking mapped classes.',
+      }
+    }
+
+    if (status === 'preflighting_import') {
+      return {
+        headline: 'Preflight',
+        summary: safeState.className
+          ? `${safeState.className}${safeState.currentClass && safeState.totalClasses ? ` (${safeState.currentClass}/${safeState.totalClasses})` : ''}`
+          : 'Checking the next class.',
+      }
+    }
+
+    if (status === 'importing_class') {
+      return {
+        headline: 'Loading class',
+        summary: safeState.className || 'Fetching class details.',
+      }
+    }
+
+    if (status === 'importing_student_results') {
+      return {
+        headline: 'Reading students',
+        summary: safeState.studentName
+          ? `${safeState.studentName}${safeState.currentStudent && safeState.totalStudents ? ` (${safeState.currentStudent}/${safeState.totalStudents})` : ''}`
+          : 'Collecting student results.',
+      }
+    }
+
+    if (status === 'importing_exam_sessions') {
+      return {
+        headline: 'Resolving exams',
+        summary: safeState.examName
+          ? `${safeState.examName}${safeState.currentExam && safeState.totalExams ? ` (${safeState.currentExam}/${safeState.totalExams})` : ''}`
+          : 'Loading exam sessions.',
+      }
+    }
+
+    if (status === 'uploading_class') {
+      return {
+        headline: 'Uploading class',
+        summary: safeState.className
+          ? `${safeState.className} · ${safeState.students || 0} students`
+          : 'Sending the class import.',
+      }
+    }
+
+    if (status === 'syncing_students') {
+      if (safeState.phase === 'fetching_directory') {
+        return {
+          headline: 'Syncing students',
+          summary: `${safeState.fetched || 0} fetched`,
+        }
+      }
+      if (safeState.phase === 'uploading_student_directory') {
+        return {
+          headline: 'Uploading students',
+          summary: `${safeState.count || 0} students`,
+        }
+      }
+    }
+
+    if (status === 'syncing_classes') {
+      if (safeState.phase === 'fetching_classes') {
+        return {
+          headline: 'Syncing classes',
+          summary: `${safeState.fetched || 0} fetched`,
+        }
+      }
+      if (safeState.phase === 'uploading_school_groups') {
+        return {
+          headline: 'Uploading classes',
+          summary: `${safeState.count || 0} classes`,
+        }
       }
     }
 
     if (status === 'completed') {
-      const action = safeState.action ? titleCaseStatus(safeState.action) : 'The last action'
       return {
-        headline: `${action} finished successfully.`,
-        summary: safeState.user
-          ? `Completed by ${safeState.user}. You can continue with the next workflow step.`
-          : 'The latest action completed successfully.',
+        headline: 'Completed',
+        summary: safeState.action ? titleCaseStatus(safeState.action) : 'The last action finished.',
       }
     }
 
     return {
-      headline: `${titleCaseStatus(status)} in progress.`,
-      summary: 'The extension is currently working. You can keep this popup open to watch the latest state.',
+      headline: titleCaseStatus(status),
+      summary: 'Working.',
     }
   }
 
-  function setWorkflowHint(configReady, authReady, headersReady, apiKeySaved, localMode) {
+  function buildReadinessHint(configReady, authReady, headersReady, apiKeySaved, localMode) {
     if (!configReady) {
-      workflowHint.textContent = 'Start by saving the Kings Track API base URL so the extension knows where to send imports.'
-      return
+      return 'Add the API URL in Settings.'
     }
     if (!apiKeySaved && !localMode) {
-      workflowHint.textContent = 'Generate an extension API key in Kings Track Settings, paste it here, and save it before trying the sync actions.'
-      return
+      return 'Add the extension key in Settings.'
     }
     if (!authReady) {
-      workflowHint.textContent = 'The saved key has not verified yet. Double-check the API base URL, regenerate the key if needed, and make sure the key belongs to an admin account.'
-      return
+      return 'Save valid settings, then reopen or retry.'
     }
     if (!headersReady) {
-      workflowHint.textContent = 'Access looks good. Paste fresh Gradeo request headers before syncing classes, students, or imports.'
-      return
+      return 'Paste fresh Gradeo headers in Settings.'
     }
-    workflowHint.textContent = 'Ready to go: sync classes first, link them in Kings Track, then sync students and import mapped classes.'
+    return 'Classes -> map in app -> students -> import'
   }
 
   function renderState(context) {
@@ -169,28 +275,26 @@
     const localMode = Boolean(user && (user.local_auth || user.auth_source === 'local'))
     const authReady = Boolean(user)
 
-    updatePill(configPill, configReady ? 'Saved' : 'Needs setup', configReady ? 'good' : 'warn')
-    updatePill(
-      authPill,
-      authReady ? (localMode ? 'Local auth' : 'Verified') : apiKeySaved ? 'Needs verify' : 'Missing key',
+    updatePillGroup(readinessPills, configReady ? 'API saved' : 'API missing', configReady ? 'good' : 'warn')
+    updatePillGroup(
+      authPills,
+      authReady ? (localMode ? 'Local auth' : 'Verified') : apiKeySaved ? 'Needs verify' : 'Key missing',
       authReady ? 'good' : 'warn',
     )
-    updatePill(headersPill, headersReady ? 'Headers saved' : 'Headers missing', headersReady ? 'good' : 'warn')
+    updatePillGroup(headersPills, headersReady ? 'Headers saved' : 'Headers missing', headersReady ? 'good' : 'warn')
 
     if (user) {
       authSummary.textContent = `${user.email} · ${user.role}`
-      authDetail.textContent = localMode
-        ? 'Using local backend auth for development. The extension API key is optional in this setup.'
-        : 'Extension key verified. Kings Track recognizes this extension as an authenticated admin.'
+      authDetail.textContent = localMode ? 'Using local auth.' : 'Extension key verified.'
     } else if (apiKeySaved) {
-      authSummary.textContent = 'Key saved, not verified yet'
-      authDetail.textContent = 'Check the API base URL, confirm the key was generated in Kings Track Settings, and make sure the backend can reach /auth/me.'
+      authSummary.textContent = 'Saved, not verified'
+      authDetail.textContent = 'Check the API URL and extension key.'
     } else {
-      authSummary.textContent = 'No extension key saved'
-      authDetail.textContent = 'Generate a key in Kings Track Settings and paste it here to unlock the sync workflow.'
+      authSummary.textContent = 'Open Settings to connect this extension.'
+      authDetail.textContent = 'Save the backend URL, extension key, and Gradeo headers.'
     }
 
-    setWorkflowHint(configReady, authReady, headersReady, apiKeySaved, localMode)
+    workflowHint.textContent = buildReadinessHint(configReady, authReady, headersReady, apiKeySaved, localMode)
     updateActionAvailability(configReady && authReady && headersReady)
 
     const status = context.state?.status || 'idle'
@@ -210,7 +314,7 @@
     }
     debugLogs.textContent = logs
       .slice(-25)
-      .map(entry => `${entry.timestamp} [${entry.scope}] ${entry.event} ${JSON.stringify(entry.details || {})}`)
+      .map((entry) => `${entry.timestamp} [${entry.scope}] ${entry.event} ${JSON.stringify(entry.details || {})}`)
       .join('\n')
   }
 
@@ -220,7 +324,7 @@
     await refreshLogs()
   }
 
-  async function saveConfig(showSavedMessage, customMessage) {
+  async function saveConfig(showSavedMessage) {
     await browser.runtime.sendMessage({
       type: 'kings.popup.saveConfig',
       config: {
@@ -230,34 +334,10 @@
       },
     })
     if (showSavedMessage) {
-      showNotice('good', customMessage || 'Settings saved.')
+      showNotice('good', 'Settings saved.')
     }
     await refresh()
   }
-
-  document.getElementById('saveConfig').addEventListener('click', async () => {
-    try {
-      await saveConfig(true, 'Connection settings saved.')
-    } catch (error) {
-      showNotice('warn', error.message || String(error))
-    }
-  })
-
-  document.getElementById('saveExtensionKey').addEventListener('click', async () => {
-    try {
-      await saveConfig(true, 'Extension key saved.')
-    } catch (error) {
-      showNotice('warn', error.message || String(error))
-    }
-  })
-
-  document.getElementById('saveApiHeaders').addEventListener('click', async () => {
-    try {
-      await saveConfig(true, 'Gradeo headers saved.')
-    } catch (error) {
-      showNotice('warn', error.message || String(error))
-    }
-  })
 
   async function runAction(messageType) {
     actionsBusy = true
@@ -273,6 +353,24 @@
       await refresh()
     }
   }
+
+  openSettingsButton.addEventListener('click', () => {
+    showView('settings')
+  })
+
+  closeSettingsButton.addEventListener('click', async () => {
+    showView('home')
+    await refresh()
+  })
+
+  saveSettingsButton.addEventListener('click', async () => {
+    try {
+      await saveConfig(true)
+      showView('home')
+    } catch (error) {
+      showNotice('warn', error.message || String(error))
+    }
+  })
 
   document.getElementById('syncStudents').addEventListener('click', async () => {
     await runAction('kings.popup.syncStudents')
