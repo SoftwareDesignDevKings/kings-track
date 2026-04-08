@@ -251,12 +251,12 @@
       return 'Add the extension key in Settings.'
     }
     if (!authReady) {
-      return 'Check the saved key and API URL.'
+      return 'Checking saved credentials.'
     }
     if (!headersReady) {
       return 'Paste fresh Gradeo headers in Settings.'
     }
-    return 'Classes -> map in app -> students -> import.'
+    return ''
   }
 
   function renderState(context) {
@@ -275,13 +275,13 @@
     const localMode = Boolean(user && (user.local_auth || user.auth_source === 'local'))
     const authReady = Boolean(user)
 
-    updateSignalGroup(configSignals, 'API', configReady ? 'good' : 'warn')
+    updateSignalGroup(configSignals, 'URL', configReady ? 'good' : 'warn')
     updateSignalGroup(
       authSignals,
-      localMode ? 'Local' : 'Auth',
+      localMode ? 'Local' : 'Key',
       authReady ? 'good' : apiKeySaved ? '' : 'warn',
     )
-    updateSignalGroup(headerSignals, 'Headers', headersReady ? 'good' : 'warn')
+    updateSignalGroup(headerSignals, 'Gradeo', headersReady ? 'good' : 'warn')
 
     if (user) {
       authDetail.textContent = localMode ? 'Using local auth.' : `${user.email} · ${user.role}`
@@ -291,7 +291,9 @@
       authDetail.textContent = 'Not connected.'
     }
 
-    homeNote.textContent = buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode)
+    const note = buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode)
+    homeNote.textContent = note
+    homeNote.hidden = !note
     updateActionAvailability(configReady && authReady && headersReady)
 
     const status = context.state?.status || 'idle'

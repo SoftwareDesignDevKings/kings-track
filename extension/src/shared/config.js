@@ -22,6 +22,9 @@
         gradeoApiHeadersJson: String(config.gradeoApiHeadersJson || '{}').trim() || '{}',
       },
     })
+    if (typeof ext.invalidateCurrentUserCache === 'function') {
+      await ext.invalidateCurrentUserCache()
+    }
     return ext.getConfig()
   }
 })()
