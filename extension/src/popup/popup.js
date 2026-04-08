@@ -290,11 +290,13 @@
     updateSignalGroup(
       authSignals,
       'API Key',
-      apiKeySaved || localMode ? 'good' : 'warn',
+      configReady && (apiKeySaved || localMode) ? 'good' : 'warn',
     )
     updateSignalGroup(headerSignals, 'Gradeo Headers', headersReady ? 'good' : 'warn')
 
-    if (user) {
+    if (!configReady && apiKeySaved) {
+      authDetail.textContent = 'Key saved. Add the Kings Track URL.'
+    } else if (user) {
       authDetail.textContent = localMode ? 'Using local auth.' : `${user.email} · ${user.role}`
     } else if (authStatus && authStatus.ok === false) {
       authDetail.textContent = 'Kings Track did not verify the current URL/key.'
