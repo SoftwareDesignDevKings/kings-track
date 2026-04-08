@@ -191,9 +191,13 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
+        padding: 5px 9px;
+        border-radius: 999px;
+        border: 1px solid #dbe4f0;
+        background: #f8fafc;
         font-size: 11px;
         font-weight: 600;
-        color: var(--muted);
+        color: #475569;
       }
 
       .signal::before {
@@ -206,7 +210,9 @@
       }
 
       .signal.good {
-        color: #475569;
+        color: #0f172a;
+        background: #f0fdfa;
+        border-color: #99f6e4;
       }
 
       .signal.good::before {
@@ -216,6 +222,8 @@
 
       .signal.warn {
         color: var(--warn);
+        background: #fffbeb;
+        border-color: #fcd34d;
       }
 
       .signal.warn::before {
@@ -371,9 +379,9 @@
           </div>
 
           <div class="signal-row">
-            <span id="configPill" class="signal">URL</span>
-            <span id="authPill" class="signal">Key</span>
-            <span id="headersPill" class="signal">Gradeo</span>
+            <span id="configPill" class="signal">King's Track</span>
+            <span id="authPill" class="signal">API Key</span>
+            <span id="headersPill" class="signal">Gradeo Headers</span>
           </div>
 
           <p id="homeNote" class="home-note">Open Settings to connect.</p>
@@ -406,9 +414,9 @@
           </div>
 
           <div class="signal-row">
-            <span id="settingsConfigPill" class="signal">URL</span>
-            <span id="settingsAuthPill" class="signal">Key</span>
-            <span id="settingsHeadersPill" class="signal">Gradeo</span>
+            <span id="settingsConfigPill" class="signal">King's Track</span>
+            <span id="settingsAuthPill" class="signal">API Key</span>
+            <span id="settingsHeadersPill" class="signal">Gradeo Headers</span>
           </div>
 
           <p id="authDetail" class="field-note">Not connected.</p>

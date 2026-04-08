@@ -275,13 +275,13 @@
     const localMode = Boolean(user && (user.local_auth || user.auth_source === 'local'))
     const authReady = Boolean(user)
 
-    updateSignalGroup(configSignals, 'URL', configReady ? 'good' : 'warn')
+    updateSignalGroup(configSignals, "King's Track", configReady ? 'good' : 'warn')
     updateSignalGroup(
       authSignals,
-      localMode ? 'Local' : 'Key',
+      'API Key',
       authReady ? 'good' : apiKeySaved ? '' : 'warn',
     )
-    updateSignalGroup(headerSignals, 'Gradeo', headersReady ? 'good' : 'warn')
+    updateSignalGroup(headerSignals, 'Gradeo Headers', headersReady ? 'good' : 'warn')
 
     if (user) {
       authDetail.textContent = localMode ? 'Using local auth.' : `${user.email} · ${user.role}`
