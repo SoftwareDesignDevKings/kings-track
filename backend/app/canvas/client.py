@@ -122,8 +122,14 @@ class CanvasClient:
     # -------------------------------------------------------------------------
 
     async def list_courses(self) -> list[dict]:
-        """Return all active courses the token-holder teaches."""
-        courses = []
+        """
+        Return active courses visible to the configured token.
+
+        For teacher-scoped tokens, Canvas exposes those via `/api/v1/courses`.
+        For account-admin tokens that are not enrolled in the courses, that
+        endpoint can be empty, so we fall back to account course listings.
+        """
+        courses: list[dict] = []
         async for course in self.get_paginated(
             "/api/v1/courses",
             params={
@@ -134,6 +140,62 @@ class CanvasClient:
             },
         ):
             courses.append(course)
+
+        if courses:
+            return courses
+
+        return await self.list_admin_courses()
+
+    async def list_manageable_accounts(self) -> list[dict]:
+        """Return accounts the current user can manage as an admin."""
+        accounts = []
+        async for account in self.get_paginated("/api/v1/manageable_accounts"):
+            accounts.append(account)
+        return accounts
+
+    async def list_accounts(self) -> list[dict]:
+        """Return accounts visible to the current user."""
+        accounts = []
+        async for account in self.get_paginated("/api/v1/accounts"):
+            accounts.append(account)
+        return accounts
+
+    async def list_account_courses(self, account_id: int) -> list[dict]:
+        """Return active courses for a specific Canvas account."""
+        courses = []
+        async for course in self.get_paginated(
+            f"/api/v1/accounts/{account_id}/courses",
+            params={
+                "state[]": "available",
+                "per_page": 100,
+                "include[]": ["term", "total_students"],
+            },
+        ):
+            courses.append(course)
+        return courses
+
+    async def list_admin_courses(self) -> list[dict]:
+        """Return active courses visible via admin-accessible Canvas accounts."""
+        accounts = await self.list_manageable_accounts()
+        if not accounts:
+            accounts = await self.list_accounts()
+        seen_course_ids: set[int] = set()
+        courses: list[dict] = []
+
+        for account in accounts:
+            account_id = account.get("id")
+            if account_id is None:
+                continue
+            for course in await self.list_account_courses(int(account_id)):
+                try:
+                    course_id = int(course["id"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if course_id in seen_course_ids:
+                    continue
+                seen_course_ids.add(course_id)
+                courses.append(course)
+
         return courses
 
     def list_enrollments(self, course_id: int, since: str | None = None) -> AsyncIterator[dict]:

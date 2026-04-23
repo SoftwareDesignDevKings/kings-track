@@ -130,10 +130,16 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
     # Fetch assignments with group info (ordered)
     assignment_result = await db.execute(
         text("""
-            SELECT id, name, assignment_group_name, assignment_group_id, points_possible, due_at, position
+            SELECT id, name, assignment_group_name, assignment_group_id, assignment_group_position, points_possible, due_at, position
             FROM assignments
             WHERE course_id = :course_id AND workflow_state = 'published'
-            ORDER BY assignment_group_id IS NULL, assignment_group_id, position IS NULL, position, id
+            ORDER BY assignment_group_position IS NULL,
+                     assignment_group_position,
+                     assignment_group_id IS NULL,
+                     assignment_group_id,
+                     position IS NULL,
+                     position,
+                     id
         """),
         {"course_id": course_id},
     )
@@ -145,7 +151,7 @@ async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
     group_assignments: dict[str, list] = {}
 
     for a_row in assignments_raw:
-        a_id, a_name, ag_name, ag_id, points, due_at, position = a_row
+        a_id, a_name, ag_name, ag_id, ag_position, points, due_at, position = a_row
         group_key = ag_name or "Uncategorised"
         if group_key not in seen_groups:
             group_order.append(group_key)

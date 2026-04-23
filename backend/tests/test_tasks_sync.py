@@ -176,7 +176,7 @@ async def test_sync_assignments_inserts_assignment(db):
 
     mock_canvas = MagicMock()
     async def _groups(_course_id):
-        return [{"id": 10, "name": "Classwork"}]
+        return [{"id": 10, "name": "Classwork", "position": 7}]
 
     mock_canvas.list_assignment_groups = _groups
     mock_canvas.list_assignments.return_value = _async_gen([_make_assignment(55500)])
@@ -185,9 +185,11 @@ async def test_sync_assignments_inserts_assignment(db):
 
     assert count == 1
     result = await db.execute(
-        text("SELECT assignment_group_name FROM assignments WHERE id = 55500")
+        text("SELECT assignment_group_name, assignment_group_position FROM assignments WHERE id = 55500")
     )
-    assert result.scalar() == "Classwork"
+    row = result.fetchone()
+    assert row[0] == "Classwork"
+    assert row[1] == 7
 
 
 # ---------------------------------------------------------------------------

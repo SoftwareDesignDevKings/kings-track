@@ -97,3 +97,79 @@ async def test_get_paginated_follows_link_header(client):
         items = [item async for item in client.get_paginated("/api/v1/courses")]
 
     assert [i["id"] for i in items] == [1, 2, 3]
+
+
+@respx.mock
+async def test_list_courses_uses_teacher_courses_when_present(client):
+    respx.get(f"{BASE_URL}/api/v1/courses").mock(
+        return_value=httpx.Response(200, json=[{"id": 11}, {"id": 12}])
+    )
+    manageable_accounts = respx.get(f"{BASE_URL}/api/v1/manageable_accounts").mock(
+        return_value=httpx.Response(200, json=[{"id": 99}])
+    )
+
+    async with client:
+        courses = await client.list_courses()
+
+    assert [course["id"] for course in courses] == [11, 12]
+    assert manageable_accounts.called is False
+
+
+@respx.mock
+async def test_list_courses_falls_back_to_admin_accounts(client):
+    respx.get(f"{BASE_URL}/api/v1/courses").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.get(f"{BASE_URL}/api/v1/manageable_accounts").mock(
+        return_value=httpx.Response(200, json=[{"id": 10}, {"id": 20}])
+    )
+    respx.get(f"{BASE_URL}/api/v1/accounts/10/courses").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": 101, "name": "Admin Course A"},
+                {"id": 102, "name": "Shared Course"},
+            ],
+        )
+    )
+    respx.get(f"{BASE_URL}/api/v1/accounts/20/courses").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": 102, "name": "Shared Course"},
+                {"id": 103, "name": "Admin Course B"},
+            ],
+        )
+    )
+
+    async with client:
+        courses = await client.list_courses()
+
+    assert [course["id"] for course in courses] == [101, 102, 103]
+
+
+@respx.mock
+async def test_list_courses_falls_back_to_visible_accounts_when_manageable_is_empty(client):
+    respx.get(f"{BASE_URL}/api/v1/courses").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.get(f"{BASE_URL}/api/v1/manageable_accounts").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.get(f"{BASE_URL}/api/v1/accounts").mock(
+        return_value=httpx.Response(200, json=[{"id": 11}])
+    )
+    respx.get(f"{BASE_URL}/api/v1/accounts/11/courses").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": 1064, "name": "Course One"},
+                {"id": 1131, "name": "Course Two"},
+            ],
+        )
+    )
+
+    async with client:
+        courses = await client.list_courses()
+
+    assert [course["id"] for course in courses] == [1064, 1131]

@@ -13,6 +13,7 @@ class Assignment(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     assignment_group_name: Mapped[str | None] = mapped_column(String)  # e.g. "Classwork - Unit 1"
     assignment_group_id: Mapped[int | None] = mapped_column(BigInteger)
+    assignment_group_position: Mapped[int | None] = mapped_column(Integer)
     points_possible: Mapped[float | None] = mapped_column(Float)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     unlock_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

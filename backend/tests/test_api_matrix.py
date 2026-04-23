@@ -56,6 +56,39 @@ def test_matrix_assignment_groups(app_client):
     assert ASSIGNMENT_2_ID in assignment_ids
 
 
+def test_matrix_orders_groups_by_canvas_group_position(app_client):
+    seed(
+        "INSERT INTO assignments (id, course_id, name, assignment_group_name, assignment_group_id, assignment_group_position, workflow_state, position) "
+        "VALUES (:id, :cid, 'Prep Task', 'Prep', 20, 1, 'published', 1) ON CONFLICT (id) DO NOTHING",
+        {"id": 50103, "cid": COURSE_ID},
+    )
+
+    resp = app_client.get(f"/api/courses/{COURSE_ID}/matrix")
+    data = resp.json()
+
+    assert [group["name"] for group in data["assignment_groups"]] == ["Prep", GROUP_NAME]
+
+
+def test_matrix_orders_assignments_within_group_by_canvas_position(app_client):
+    cleanup("DELETE FROM assignments WHERE id = :id", {"id": ASSIGNMENT_1_ID})
+    cleanup("DELETE FROM assignments WHERE id = :id", {"id": ASSIGNMENT_2_ID})
+    seed(
+        "INSERT INTO assignments (id, course_id, name, assignment_group_name, assignment_group_id, assignment_group_position, workflow_state, position) "
+        "VALUES (:id, :cid, 'Task 2', :group, 10, 2, 'published', 2) ON CONFLICT (id) DO NOTHING",
+        {"id": ASSIGNMENT_2_ID, "cid": COURSE_ID, "group": GROUP_NAME},
+    )
+    seed(
+        "INSERT INTO assignments (id, course_id, name, assignment_group_name, assignment_group_id, assignment_group_position, workflow_state, position) "
+        "VALUES (:id, :cid, 'Task 1', :group, 10, 2, 'published', 1) ON CONFLICT (id) DO NOTHING",
+        {"id": ASSIGNMENT_1_ID, "cid": COURSE_ID, "group": GROUP_NAME},
+    )
+
+    resp = app_client.get(f"/api/courses/{COURSE_ID}/matrix")
+    data = resp.json()
+
+    assert [assignment["id"] for assignment in data["assignment_groups"][0]["assignments"]] == [ASSIGNMENT_1_ID, ASSIGNMENT_2_ID]
+
+
 def test_matrix_graded_submission_shows_completed(app_client):
     seed(
         "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, score, late, missing) "

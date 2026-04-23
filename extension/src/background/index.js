@@ -1536,12 +1536,24 @@
     }
 
     if (message?.type === 'kings.popup.getContext') {
-      return Promise.all([ext.getConfig(), getState()])
-        .then(async ([config, state]) => ({
-          config,
-          state,
-          user: await ext.getCurrentUser().catch(() => null),
-        }))
+      return Promise.all([
+        ext.getConfig(),
+        getState(),
+        ext.getCachedCurrentUser(5 * 60 * 1000).catch(() => null),
+        ext.getCachedAuthStatus(5 * 60 * 1000).catch(() => null),
+        ext.getCachedBackendStatus(5 * 60 * 1000).catch(() => null),
+      ])
+        .then(([config, state, user, authStatus, backendStatus]) => {
+          ext.refreshBackendStatus().catch(() => null)
+          ext.getCurrentUser({ maxAgeMs: 30 * 1000 }).catch(() => null)
+          return {
+            config,
+            state,
+            user,
+            authStatus,
+            backendStatus,
+          }
+        })
     }
 
     if (message?.type === 'kings.popup.saveConfig') {
