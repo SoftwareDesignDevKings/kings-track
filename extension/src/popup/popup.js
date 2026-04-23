@@ -230,6 +230,97 @@
       }
     }
 
+    if (status === 'loading_mappings') {
+      return {
+        headline: 'Preparing the import list.',
+        summary: 'Reading mapped Gradeo classes from Kings Track before starting the reporting import.',
+      }
+    }
+
+    if (status === 'loading_reporting_classes') {
+      return {
+        headline: 'Checking reporting availability.',
+        summary: safeState.totalClasses
+          ? `Checking ${safeState.totalClasses} mapped class${safeState.totalClasses === 1 ? '' : 'es'} against the Gradeo reporting list.`
+          : 'Checking the mapped classes against the Gradeo reporting list.',
+      }
+    }
+
+    if (status === 'preflighting_import') {
+      return {
+        headline: 'Checking whether a class is ready.',
+        summary: safeState.className
+          ? `Preflighting ${safeState.className}${safeState.currentClass && safeState.totalClasses ? ` (${safeState.currentClass}/${safeState.totalClasses})` : ''}.`
+          : 'Running the backend preflight checks for the next class import.',
+      }
+    }
+
+    if (status === 'importing_class') {
+      return {
+        headline: 'Loading class context.',
+        summary: safeState.className
+          ? `Fetching the roster and syllabus details for ${safeState.className}${safeState.currentClass && safeState.totalClasses ? ` (${safeState.currentClass}/${safeState.totalClasses})` : ''}.`
+          : 'Fetching the class roster and metadata from Gradeo.',
+      }
+    }
+
+    if (status === 'importing_student_results') {
+      return {
+        headline: 'Collecting student result summaries.',
+        summary: safeState.studentName
+          ? `Reading exam results for ${safeState.studentName}${safeState.currentStudent && safeState.totalStudents ? ` (${safeState.currentStudent}/${safeState.totalStudents})` : ''}${safeState.className ? ` in ${safeState.className}` : ''}.`
+          : 'Reading the next student result set from Gradeo.',
+      }
+    }
+
+    if (status === 'importing_exam_sessions') {
+      return {
+        headline: 'Resolving exam session details.',
+        summary: safeState.examName
+          ? `Confirming roster and marking data for ${safeState.examName}${safeState.currentExam && safeState.totalExams ? ` (${safeState.currentExam}/${safeState.totalExams})` : ''}${safeState.className ? ` in ${safeState.className}` : ''}.`
+          : `Resolving exam session details${safeState.currentExam && safeState.totalExams ? ` (${safeState.currentExam}/${safeState.totalExams})` : ''}.`,
+      }
+    }
+
+    if (status === 'uploading_class') {
+      return {
+        headline: 'Uploading the class import.',
+        summary: safeState.className
+          ? `Sending ${safeState.students || 0} student import record${safeState.students === 1 ? '' : 's'} for ${safeState.className} to Kings Track.`
+          : 'Sending the collected class import payload to Kings Track.',
+      }
+    }
+
+    if (status === 'syncing_students') {
+      if (safeState.phase === 'fetching_directory') {
+        return {
+          headline: 'Syncing the Gradeo student directory.',
+          summary: `Fetched ${safeState.fetched || 0} students so far from the Gradeo directory.`,
+        }
+      }
+      if (safeState.phase === 'uploading_student_directory') {
+        return {
+          headline: 'Uploading the Gradeo student directory.',
+          summary: `Sending ${safeState.count || 0} students across ${safeState.pages || 0} page${safeState.pages === 1 ? '' : 's'} to Kings Track.`,
+        }
+      }
+    }
+
+    if (status === 'syncing_classes') {
+      if (safeState.phase === 'fetching_classes') {
+        return {
+          headline: 'Syncing the Gradeo class list.',
+          summary: `Fetched ${safeState.fetched || 0} classes so far from Gradeo.`,
+        }
+      }
+      if (safeState.phase === 'uploading_school_groups') {
+        return {
+          headline: 'Uploading the Gradeo class list.',
+          summary: `Sending ${safeState.count || 0} classes across ${safeState.pages || 0} page${safeState.pages === 1 ? '' : 's'} to Kings Track.`,
+        }
+      }
+    }
+
     if (status === 'completed') {
       return {
         headline: 'Done',
