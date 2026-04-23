@@ -158,14 +158,22 @@ async def sync_assignments(
     """Fetch and upsert assignments, resolving group names."""
     # First get group name map
     groups = await canvas.list_assignment_groups(course_id)
-    group_name_map: dict[int, str] = {g["id"]: g["name"] for g in groups}
+    group_map: dict[int, dict[str, int | str | None]] = {
+        g["id"]: {
+            "name": g.get("name"),
+            "position": g.get("position"),
+        }
+        for g in groups
+    }
 
     count = 0
     now = _now()
 
     async for assignment in canvas.list_assignments(course_id):
         group_id = assignment.get("assignment_group_id")
-        group_name = group_name_map.get(group_id) if group_id else None
+        group = group_map.get(group_id) if group_id else None
+        group_name = group["name"] if group else None
+        group_position = group["position"] if group else None
 
         # Flatten submission_types list to comma-joined string
         sub_types = assignment.get("submission_types", [])
@@ -173,14 +181,15 @@ async def sync_assignments(
 
         await db.execute(
             text("""
-                INSERT INTO assignments (id, course_id, name, assignment_group_name, assignment_group_id,
+                INSERT INTO assignments (id, course_id, name, assignment_group_name, assignment_group_id, assignment_group_position,
                     points_possible, due_at, unlock_at, position, workflow_state, submission_types, synced_at)
-                VALUES (:id, :course_id, :name, :assignment_group_name, :assignment_group_id,
+                VALUES (:id, :course_id, :name, :assignment_group_name, :assignment_group_id, :assignment_group_position,
                     :points_possible, :due_at, :unlock_at, :position, :workflow_state, :submission_types, :synced_at)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     assignment_group_name = EXCLUDED.assignment_group_name,
                     assignment_group_id = EXCLUDED.assignment_group_id,
+                    assignment_group_position = EXCLUDED.assignment_group_position,
                     points_possible = EXCLUDED.points_possible,
                     due_at = EXCLUDED.due_at,
                     unlock_at = EXCLUDED.unlock_at,
@@ -195,6 +204,7 @@ async def sync_assignments(
                 "name": assignment.get("name", ""),
                 "assignment_group_name": group_name,
                 "assignment_group_id": group_id,
+                "assignment_group_position": group_position,
                 "points_possible": assignment.get("points_possible"),
                 "due_at": _parse_dt(assignment.get("due_at")),
                 "unlock_at": _parse_dt(assignment.get("unlock_at")),
