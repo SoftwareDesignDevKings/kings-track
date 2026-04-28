@@ -7,8 +7,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.routes import auth, courses, sync, admin, gradeo_admin
+from app.api.routes import auth, courses, sync, admin, gradeo_admin, reminders_admin
 from app.sync.engine import sync_engine
+from app.reminders.engine import reminder_engine
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 request_logger = logging.getLogger("app.http")
@@ -21,9 +22,13 @@ async def lifespan(app: FastAPI):
         interval_hours=settings.sync_interval_hours,
         incremental_interval_minutes=settings.incremental_sync_interval_minutes,
     )
+    reminder_engine.start_scheduler(
+        interval_seconds=settings.reminder_scheduler_interval_seconds,
+    )
     yield
     # Shutdown
     sync_engine.stop_scheduler()
+    reminder_engine.stop_scheduler()
 
 
 app = FastAPI(
@@ -95,6 +100,7 @@ app.include_router(courses.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(gradeo_admin.router, prefix="/api")
+app.include_router(reminders_admin.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 
 

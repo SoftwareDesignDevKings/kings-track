@@ -24,6 +24,12 @@ from app.models.gradeo_question_result import GradeoQuestionResult
 from app.models.gradeo_assignment_result import GradeoAssignmentResult
 from app.models.gradeo_assignment_question_result import GradeoAssignmentQuestionResult
 from app.models.gradeo_import_run import GradeoImportRun
+from app.models.school import School
+from app.models.student_school_link import StudentSchoolLink
+from app.models.guardian_contact import GuardianContact
+from app.models.school_contact import SchoolContact
+from app.models.reminder_run import ReminderRun
+from app.models.reminder_delivery import ReminderDelivery
 
 __all__ = [
     "Base",
@@ -52,4 +58,10 @@ __all__ = [
     "GradeoAssignmentResult",
     "GradeoAssignmentQuestionResult",
     "GradeoImportRun",
+    "School",
+    "StudentSchoolLink",
+    "GuardianContact",
+    "SchoolContact",
+    "ReminderRun",
+    "ReminderDelivery",
 ]

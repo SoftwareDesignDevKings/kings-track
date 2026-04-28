@@ -119,6 +119,9 @@ def app_client():
 
     with patch("app.sync.engine.sync_engine.start_scheduler"), \
          patch("app.sync.engine.sync_engine.stop_scheduler"), \
+         patch("app.reminders.engine.reminder_engine.start_scheduler"), \
+         patch("app.reminders.engine.reminder_engine.stop_scheduler"), \
+         patch("app.reminders.service.AsyncSessionLocal", _TestSessionLocal), \
          patch("app.api.routes.sync.AsyncSessionLocal", _TestSessionLocal):
         with TestClient(app) as client:
             yield client
@@ -147,6 +150,9 @@ def teacher_client():
 
     with patch("app.sync.engine.sync_engine.start_scheduler"), \
          patch("app.sync.engine.sync_engine.stop_scheduler"), \
+         patch("app.reminders.engine.reminder_engine.start_scheduler"), \
+         patch("app.reminders.engine.reminder_engine.stop_scheduler"), \
+         patch("app.reminders.service.AsyncSessionLocal", _TestSessionLocal), \
          patch("app.api.routes.sync.AsyncSessionLocal", _TestSessionLocal):
         with TestClient(app) as client:
             yield client

@@ -16,6 +16,20 @@ class Settings(BaseSettings):
     local_dev_user_email: str = "admin@local.dev"
     local_dev_user_role: str = "admin"
     supabase_url: str = ""
+    reminder_timezone: str = "Australia/Sydney"
+    reminder_scheduler_interval_seconds: int = 60
+    reminder_email_enabled: bool = False
+    reminder_email_from_name: str = "Kings Track"
+    reminder_email_from_address: str = ""
+    reminder_smtp_host: str = ""
+    reminder_smtp_port: int = 587
+    reminder_smtp_username: str = ""
+    reminder_smtp_password: str = ""
+    reminder_smtp_starttls: bool = True
+    reminder_smtp_use_ssl: bool = False
+    reminder_smtp_timeout_seconds: int = 30
+    reminder_test_mode_enabled: bool = True
+    reminder_test_recipient_email: str = "liam22840@gmail.com"
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -32,6 +46,14 @@ class Settings(BaseSettings):
     @property
     def local_auth_enabled(self) -> bool:
         return self.auth_mode.lower() == "local"
+
+    @property
+    def reminder_email_configured(self) -> bool:
+        return bool(
+            self.reminder_email_enabled
+            and self.reminder_email_from_address
+            and self.reminder_smtp_host
+        )
 
 
 
