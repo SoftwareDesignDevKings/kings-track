@@ -130,7 +130,7 @@ export default function ActivityTable({ matrix, viewMode = 'due' }: Props) {
       viewportLeft = stickyBoundaryRect
         ? Math.max(0, stickyBoundaryRect.right - containerRect.left)
         : 0
-      zoneBounds = zones.map((zone, index) => {
+      zoneBounds = zones.map((_, index) => {
         const zoneCell = zoneHeaderRefs.current[index]
         const zoneRect = zoneCell?.getBoundingClientRect()
 
