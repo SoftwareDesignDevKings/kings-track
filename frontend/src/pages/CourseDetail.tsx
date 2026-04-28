@@ -5,6 +5,12 @@ import ActivityTable from '../components/ActivityTable'
 import EdStemLessonTable from '../components/EdStemLessonTable'
 import GradeoReportTable from '../components/GradeoReportTable'
 import Placeholder from '../components/Placeholder'
+import {
+  buildCanvasActivityColumns,
+  getCanvasDueNowCompletionRate,
+  getCanvasDueNowCount,
+  prepareCanvasActivityView,
+} from '../components/activityTableModel'
 import { useCourseMatrix, useEdStemMatrix, useGradeoReport } from '../services/api'
 
 type TabId = 'activities' | 'engagement' | 'at_risk' | 'edstem' | 'gradeo'
@@ -40,8 +46,15 @@ export default function CourseDetail() {
   const totalAssignments = matrix?.assignment_groups.reduce(
     (sum, g) => sum + g.assignments.length, 0
   ) ?? 0
-  const avgCompletion = matrix
-    ? matrix.students.reduce((sum, s) => sum + (s.metrics.completion_rate ?? 0), 0) / (totalStudents || 1)
+  const activityView = matrix
+    ? prepareCanvasActivityView(buildCanvasActivityColumns(matrix.assignment_groups))
+    : null
+  const dueNowCount = activityView ? getCanvasDueNowCount(activityView) : 0
+  const avgCompletion = matrix && activityView && totalStudents > 0 && dueNowCount > 0
+    ? matrix.students.reduce(
+      (sum, student) => sum + (getCanvasDueNowCompletionRate(student, activityView.columns, dueNowCount) ?? 0),
+      0,
+    ) / totalStudents
     : null
 
   return (

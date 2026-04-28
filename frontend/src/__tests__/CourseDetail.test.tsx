@@ -83,6 +83,51 @@ describe('CourseDetail', () => {
     expect(screen.getByText('2')).toBeInTheDocument() // 2 assignments
   })
 
+  it('bases the header average completion on due-now activities only', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 3, 28, 12, 0, 0))
+
+    vi.mocked(useCourseMatrix).mockReturnValue({
+      isLoading: false,
+      error: null,
+      data: {
+        ...mockMatrix,
+        assignment_groups: [
+          {
+            name: 'Classwork - Unit 1',
+            assignments: [
+              { id: 101, name: 'Past Task', points_possible: 10, due_at: new Date(2026, 3, 27, 9).toISOString() },
+              { id: 102, name: 'Today Task', points_possible: 10, due_at: new Date(2026, 3, 28, 18).toISOString() },
+              { id: 103, name: 'Future Task', points_possible: 10, due_at: new Date(2026, 3, 29, 9).toISOString() },
+            ],
+          },
+        ],
+        students: [
+          {
+            id: 1,
+            name: 'Alice Smith',
+            sortable_name: 'Smith, Alice',
+            submissions: {
+              '101': { status: 'completed', score: 9, late: false, missing: false },
+              '102': { status: 'not_started', score: null, late: false, missing: false },
+              '103': { status: 'completed', score: 10, late: false, missing: false },
+            },
+            metrics: { completion_rate: 1, on_time_rate: 1.0, current_score: 90 },
+          },
+        ],
+      },
+    } as any)
+
+    const { container } = renderWithProviders(<CourseDetail />)
+    const label = screen.getByText('Avg completion')
+    const value = label.previousElementSibling
+
+    expect(value).toHaveTextContent('50%')
+    expect(container).not.toHaveTextContent('100%')
+
+    vi.useRealTimers()
+  })
+
   it('switches to a placeholder tab on click', async () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     const user = userEvent.setup()
