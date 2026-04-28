@@ -1,9 +1,22 @@
+import { useLayoutEffect, useRef } from 'react'
+
 import StatusBadge from './StatusBadge'
-import type { CourseMatrix, AssignmentGroup } from '../types'
+import type { CourseMatrix } from '../types'
+import {
+  buildCanvasActivityColumns,
+  getCanvasDueNowCompletionRate,
+  getCanvasDueNowCount,
+  prepareCanvasActivityView,
+  type CanvasActivityColumn,
+  type CanvasActivityViewMode,
+} from './activityTableModel'
 
 interface Props {
   matrix: CourseMatrix
+  viewMode?: CanvasActivityViewMode
 }
+
+const MIN_ZONE_LABEL_VISIBLE_WIDTH = 88
 
 function CompletionBar({ value }: { value: number | null }) {
   if (value === null) return <span className="text-slate-300 text-xs">—</span>
@@ -19,11 +32,150 @@ function CompletionBar({ value }: { value: number | null }) {
   )
 }
 
-export default function ActivityTable({ matrix }: Props) {
+function formatDueDate(dueAt: string | null): string | null {
+  if (!dueAt) return null
+  const parsed = new Date(dueAt)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toLocaleDateString()
+}
+
+function getColumnDividerClass(
+  columnIndex: number,
+  firstFutureIndex: number | null,
+): string {
+  const isFutureBoundaryEnd = firstFutureIndex !== null && firstFutureIndex > 0 && columnIndex === firstFutureIndex - 1
+  if (firstFutureIndex !== null && firstFutureIndex > 0 && columnIndex === firstFutureIndex) {
+    return 'timeline-divider-primary-start'
+  }
+  if (isFutureBoundaryEnd) {
+    return 'timeline-divider-primary-end'
+  }
+  return ''
+}
+
+function getZoneDividerClass(
+  zoneKey: 'due_now' | 'future' | 'undated',
+  firstFutureIndex: number | null,
+): string {
+  if (zoneKey === 'due_now' && firstFutureIndex !== null && firstFutureIndex > 0) {
+    return 'timeline-divider-primary-end'
+  }
+  if (zoneKey === 'future' && firstFutureIndex !== null && firstFutureIndex > 0) {
+    return 'timeline-divider-primary-start'
+  }
+  return ''
+}
+
+function buildAssignmentTitle(column: CanvasActivityColumn): string {
+  const dueLabel = formatDueDate(column.due_at)
+  const parts = [
+    column.name,
+    `Group: ${column.source_group_name}`,
+    dueLabel ? `Due ${dueLabel}` : 'No due date',
+    column.points_possible != null ? `${column.points_possible} pts` : null,
+  ]
+
+  return parts.filter(Boolean).join('\n')
+}
+
+export default function ActivityTable({ matrix, viewMode = 'due' }: Props) {
   const { assignment_groups, students } = matrix
 
-  // Flatten assignments (keep group info for column headers)
-  const allAssignments = assignment_groups.flatMap(g => g.assignments)
+  const activityColumns = buildCanvasActivityColumns(assignment_groups)
+  const activityView = prepareCanvasActivityView(activityColumns, { mode: viewMode })
+  const { columns, zones, firstFutureIndex } = activityView
+  const dueNowCount = getCanvasDueNowCount(activityView)
+  const zoneLayoutKey = zones.map(zone => `${zone.key}:${zone.count}:${zone.label}`).join('|')
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const stickyBoundaryRef = useRef<HTMLTableCellElement | null>(null)
+  const zoneHeaderRefs = useRef<Array<HTMLTableCellElement | null>>([])
+  const zoneWindowRefs = useRef<Array<HTMLDivElement | null>>([])
+
+  useLayoutEffect(() => {
+    const scrollEl = scrollRef.current
+    if (!scrollEl || zones.length === 0) {
+      return
+    }
+
+    let frameId = 0
+    let viewportLeft = 0
+    let zoneBounds: Array<{ left: number; right: number }> = []
+
+    const applyLayouts = () => {
+      const viewportRight = scrollEl.clientWidth
+
+      zoneBounds.forEach((bounds, index) => {
+        const zoneWindow = zoneWindowRefs.current[index]
+        if (!zoneWindow || viewportRight <= viewportLeft) {
+          return
+        }
+
+        const visibleLeft = Math.max(bounds.left - scrollEl.scrollLeft, viewportLeft)
+        const visibleRight = Math.min(bounds.right - scrollEl.scrollLeft, viewportRight)
+        const visibleWidth = Math.max(0, visibleRight - visibleLeft)
+        const roundedLeft = Math.round(visibleLeft)
+        const roundedWidth = Math.round(visibleWidth)
+        const isVisible = roundedWidth >= MIN_ZONE_LABEL_VISIBLE_WIDTH
+
+        zoneWindow.style.transform = `translate3d(${roundedLeft}px, 0, 0)`
+        zoneWindow.style.width = `${roundedWidth}px`
+        zoneWindow.classList.toggle('activity-table-zone-window-visible', isVisible)
+        zoneWindow.classList.toggle('activity-table-zone-window-hidden', !isVisible)
+      })
+    }
+
+    const measureBounds = () => {
+      const containerRect = scrollEl.getBoundingClientRect()
+      const stickyBoundaryRect = stickyBoundaryRef.current?.getBoundingClientRect()
+      viewportLeft = stickyBoundaryRect
+        ? Math.max(0, stickyBoundaryRect.right - containerRect.left)
+        : 0
+      zoneBounds = zones.map((zone, index) => {
+        const zoneCell = zoneHeaderRefs.current[index]
+        const zoneRect = zoneCell?.getBoundingClientRect()
+
+        if (!zoneRect || zoneRect.width === 0) {
+          return { left: viewportLeft, right: viewportLeft }
+        }
+
+        return {
+          left: zoneRect.left - containerRect.left + scrollEl.scrollLeft,
+          right: zoneRect.right - containerRect.left + scrollEl.scrollLeft,
+        }
+      })
+    }
+
+    const scheduleLayout = () => {
+      cancelAnimationFrame(frameId)
+      frameId = requestAnimationFrame(applyLayouts)
+    }
+
+    const scheduleMeasure = () => {
+      measureBounds()
+      scheduleLayout()
+    }
+
+    scheduleMeasure()
+    scrollEl.addEventListener('scroll', scheduleLayout, { passive: true })
+    window.addEventListener('resize', scheduleMeasure)
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(scheduleMeasure)
+      : null
+
+    resizeObserver?.observe(scrollEl)
+    stickyBoundaryRef.current && resizeObserver?.observe(stickyBoundaryRef.current)
+    zoneHeaderRefs.current.forEach(zoneHeader => {
+      zoneHeader && resizeObserver?.observe(zoneHeader)
+    })
+
+    return () => {
+      cancelAnimationFrame(frameId)
+      scrollEl.removeEventListener('scroll', scheduleLayout)
+      window.removeEventListener('resize', scheduleMeasure)
+      resizeObserver?.disconnect()
+    }
+  }, [zoneLayoutKey])
 
   if (students.length === 0) {
     return (
@@ -33,7 +185,7 @@ export default function ActivityTable({ matrix }: Props) {
     )
   }
 
-  if (allAssignments.length === 0) {
+  if (columns.length === 0) {
     return (
       <div className="text-center py-16 text-slate-400 text-sm">
         No published assignments found in this course.
@@ -60,47 +212,67 @@ export default function ActivityTable({ matrix }: Props) {
         </span>
       </div>
 
-      <div className="activity-table-scroll">
+      <div className="activity-table-scroll-frame">
+        <div className="activity-table-zone-overlay" aria-hidden="true">
+          {zones.map((zone, index) => (
+            <div
+              key={zone.key}
+              data-zone-key={zone.key}
+              ref={element => {
+                zoneWindowRefs.current[index] = element
+              }}
+              className="activity-table-zone-window activity-table-zone-window-hidden"
+            >
+              <div className="activity-table-zone-label">
+                {zone.label}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div ref={scrollRef} className="activity-table-scroll">
         <table className="activity-table w-full text-sm">
           <thead>
-            {/* Row 1: Group headers */}
             <tr className="bg-slate-50 border-b border-slate-200">
-              {/* Sticky student column header */}
               <th
                 className="sticky-col-header-1 px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[220px]"
                 rowSpan={2}
               >
                 Student
               </th>
-              {/* Completion column */}
-              <th className="sticky-col-header-2 px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[130px]" rowSpan={2}>
+              <th
+                ref={stickyBoundaryRef}
+                className="sticky-col-header-2 px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide border-r border-slate-200 min-w-[130px]"
+                rowSpan={2}
+              >
                 Completion
               </th>
-              {/* Assignment group spanning headers */}
-              {assignment_groups.map((group: AssignmentGroup) => (
+              {zones.map((zone, index) => (
                 <th
-                  key={group.name}
-                  colSpan={group.assignments.length}
-                  className="px-3 py-2 text-center text-xs font-semibold text-slate-600 border-r border-slate-200 bg-slate-50"
+                  key={zone.key}
+                  colSpan={zone.count}
+                  ref={element => {
+                    zoneHeaderRefs.current[index] = element
+                  }}
+                  aria-label={zone.label}
+                  className={`px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500 border-r border-slate-200 bg-slate-50 last:border-r-0 ${getZoneDividerClass(zone.key, firstFutureIndex)}`}
                 >
-                  <span className="block truncate max-w-xs" title={group.name}>
-                    {group.name}
+                  <span className="block truncate max-w-xs opacity-0 select-none">
+                    {zone.label}
                   </span>
                 </th>
               ))}
             </tr>
 
-            {/* Row 2: Individual assignment headers */}
             <tr className="bg-slate-50 border-b border-slate-200">
-              {allAssignments.map(a => (
+              {columns.map((column, columnIndex) => (
                 <th
-                  key={a.id}
-                  className="px-2 py-2 text-center text-xs font-medium text-slate-500 border-r border-slate-100 last:border-r-slate-200 max-w-[52px]"
-                  title={`${a.name}${a.points_possible != null ? ` (${a.points_possible} pts)` : ''}${a.due_at ? ` · Due ${new Date(a.due_at).toLocaleDateString()}` : ''}`}
+                  key={column.id}
+                  className={`px-2 py-2 text-center text-xs font-medium text-slate-500 border-r border-slate-100 last:border-r-slate-200 max-w-[52px] ${getColumnDividerClass(columnIndex, firstFutureIndex)}`}
+                  title={buildAssignmentTitle(column)}
+                  data-group-name={column.source_group_name}
                 >
                   <span className="block w-10 overflow-hidden text-ellipsis mx-auto text-center leading-tight">
-                    {/* Show short number from name if it matches pattern like "1.1", "2.3", else abbreviate */}
-                    {a.name.match(/^\d+\.\d+/) ? a.name.match(/^(\d+\.\d+)/)?.[1] : a.name.slice(0, 4)}
+                    {column.name.match(/^\d+\.\d+/) ? column.name.match(/^(\d+\.\d+)/)?.[1] : column.name.slice(0, 4)}
                   </span>
                 </th>
               ))}
@@ -108,44 +280,51 @@ export default function ActivityTable({ matrix }: Props) {
           </thead>
 
           <tbody className="divide-y divide-slate-100">
-            {students.map((student, i) => (
-              <tr
-                key={student.id}
-                className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} hover:bg-brand-50/40 transition-colors`}
-              >
-                {/* Student name — sticky */}
-                <td className={`sticky-col-1 px-4 py-2.5 border-r border-slate-200 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-                  <span className="font-medium text-slate-800 text-sm">{student.name}</span>
-                </td>
+            {students.map((student, i) => {
+              const dueNowCompletionRate = getCanvasDueNowCompletionRate(student, columns, dueNowCount)
 
-                {/* Completion bar */}
-                <td className={`sticky-col-2 px-3 py-2.5 border-r border-slate-200 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-                  <CompletionBar value={student.metrics.completion_rate} />
-                </td>
+              return (
+                <tr
+                  key={student.id}
+                  className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} hover:bg-brand-50/40 transition-colors`}
+                >
+                  {/* Student name — sticky */}
+                  <td className={`sticky-col-1 px-4 py-2.5 border-r border-slate-200 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                    <span className="font-medium text-slate-800 text-sm">{student.name}</span>
+                  </td>
 
-                {/* Submission status badges */}
-                {allAssignments.map(a => {
-                  const sub = student.submissions[String(a.id)]
-                  return (
-                    <td key={a.id} className="px-2 py-2.5 text-center border-r border-slate-100 last:border-r-0">
-                      {sub ? (
-                        <StatusBadge
-                          status={sub.status}
-                          score={sub.score}
-                          pointsPossible={a.points_possible}
-                          late={sub.late}
-                          missing={sub.missing}
-                        />
-                      ) : (
-                        <div className="w-5 h-5 mx-auto rounded-full bg-slate-100" />
-                      )}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
+                  {/* Completion bar */}
+                  <td className={`sticky-col-2 px-3 py-2.5 border-r border-slate-200 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                    <CompletionBar value={dueNowCompletionRate} />
+                  </td>
+
+                  {columns.map((column, columnIndex) => {
+                    const sub = student.submissions[String(column.id)]
+                    return (
+                      <td
+                        key={column.id}
+                        className={`px-2 py-2.5 text-center border-r border-slate-100 last:border-r-0 ${getColumnDividerClass(columnIndex, firstFutureIndex)}`}
+                      >
+                        {sub ? (
+                          <StatusBadge
+                            status={sub.status}
+                            score={sub.score}
+                            pointsPossible={column.points_possible}
+                            late={sub.late}
+                            missing={sub.missing}
+                          />
+                        ) : (
+                          <div className="w-5 h-5 mx-auto rounded-full bg-slate-100" />
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )

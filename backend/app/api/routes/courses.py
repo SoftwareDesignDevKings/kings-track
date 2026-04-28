@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +28,10 @@ def _submission_status(workflow_state: str | None, score, excused: bool | None) 
     return "not_started"
 
 
+def _start_of_tomorrow_utc(now: datetime) -> datetime:
+    return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def _split_csv_list(value: str | None) -> list[str]:
     if not value:
         return []
@@ -36,6 +42,7 @@ def _split_csv_list(value: str | None) -> list[str]:
 async def list_courses(db: AsyncSession = Depends(get_db)):
     """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
     whitelist = await get_effective_whitelist(db)
+    due_now_cutoff = _start_of_tomorrow_utc(datetime.now(timezone.utc))
     base_query = """
         SELECT
             c.id,
@@ -44,12 +51,30 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
             c.workflow_state,
             c.synced_at,
             COUNT(DISTINCT e.user_id) AS student_count,
-            ROUND(CAST(AVG(sm.completion_rate) AS numeric), 3) AS avg_completion_rate,
+            ROUND(CAST(AVG(due_now_metrics.completion_rate) AS numeric), 3) AS avg_completion_rate,
             ROUND(CAST(AVG(sm.on_time_rate) AS numeric), 3) AS avg_on_time_rate,
             ROUND(CAST(AVG(sm.current_score) AS numeric), 1) AS avg_current_score
         FROM courses c
         LEFT JOIN enrollments e ON e.course_id = c.id AND e.role = 'StudentEnrollment'
         LEFT JOIN student_metrics sm ON sm.course_id = c.id AND sm.user_id = e.user_id
+        LEFT JOIN LATERAL (
+            SELECT
+                CASE
+                    WHEN e.user_id IS NULL OR COUNT(a.id) = 0 THEN NULL
+                    ELSE 1.0 * SUM(
+                        CASE
+                            WHEN s.excused = true OR s.workflow_state IN ('graded', 'submitted', 'pending_review') THEN 1
+                            ELSE 0
+                        END
+                    ) / COUNT(a.id)
+                END AS completion_rate
+            FROM assignments a
+            LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = e.user_id
+            WHERE a.course_id = c.id
+              AND a.workflow_state = 'published'
+              AND a.due_at IS NOT NULL
+              AND a.due_at < :due_now_cutoff
+        ) AS due_now_metrics ON true
     """
     if not whitelist:
         return []
@@ -62,7 +87,7 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
             ORDER BY c.name
         """
     ).bindparams(bindparam("ids", expanding=True))
-    result = await db.execute(statement, {"ids": whitelist})
+    result = await db.execute(statement, {"ids": whitelist, "due_now_cutoff": due_now_cutoff})
     rows = result.fetchall()
 
     return [

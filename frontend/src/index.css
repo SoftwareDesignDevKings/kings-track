@@ -20,6 +20,11 @@
 
 .activity-table-scroll {
   overflow-x: auto;
+  position: relative;
+}
+
+.activity-table-scroll-frame {
+  position: relative;
 }
 
 .activity-table {
@@ -30,6 +35,86 @@
 .activity-table th,
 .activity-table td {
   white-space: nowrap;
+}
+
+.activity-table-zone-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 37px;
+  pointer-events: none;
+  z-index: 25;
+}
+
+.activity-table-zone-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0 8px;
+  transition: opacity 140ms ease;
+  will-change: transform, width;
+}
+
+.activity-table-zone-window-visible {
+  opacity: 1;
+}
+
+.activity-table-zone-window-hidden {
+  opacity: 0;
+}
+
+.activity-table-zone-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 9999px;
+  padding: 0 10px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+  background: rgba(248, 250, 252, 0.94);
+  max-width: 100%;
+}
+
+.timeline-divider-primary-start,
+.timeline-divider-primary-end {
+  position: relative;
+}
+
+.timeline-divider-primary-start {
+  background-clip: padding-box;
+}
+
+.timeline-divider-primary-end {
+  border-right-color: transparent !important;
+  background-clip: padding-box;
+}
+
+.timeline-divider-primary-start::before,
+.timeline-divider-primary-end::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 3px;
+  background: #f43f5e;
+  pointer-events: none;
+}
+
+.timeline-divider-primary-start::before {
+  left: -1px;
+}
+
+.timeline-divider-primary-end::after {
+  right: -1px;
 }
 
 .sticky-col-1,
