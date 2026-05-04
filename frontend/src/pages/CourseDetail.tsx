@@ -223,24 +223,7 @@ export default function CourseDetail() {
               />
             )}
             {gradeoReport?.mapped && (
-              <>
-                <div className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{gradeoReport.gradeo_class_name}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {gradeoReport.last_imported_at
-                          ? `Last imported ${new Date(gradeoReport.last_imported_at).toLocaleString()}`
-                          : 'This class is linked, but no Gradeo import has finished yet.'}
-                      </p>
-                    </div>
-                    <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                      {gradeoReport.unmatched_students_count ?? 0} unmatched student{(gradeoReport.unmatched_students_count ?? 0) === 1 ? '' : 's'} in latest import
-                    </div>
-                  </div>
-                </div>
-                <GradeoReportTable report={gradeoReport} />
-              </>
+              <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
             )}
           </>
         )}

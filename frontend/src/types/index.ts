@@ -293,8 +293,10 @@ export interface GradeoCourseReport {
   mapped: boolean
   gradeo_class_id?: string
   gradeo_class_name?: string
+  gradeo_classes?: Array<{ gradeo_class_id: string; gradeo_class_name: string }>
   last_imported_at?: string | null
   unmatched_students_count?: number
   exams?: GradeoExam[]
   students?: GradeoStudentRow[]
+  hidden_students?: Array<{ id: number; name: string }>
 }
