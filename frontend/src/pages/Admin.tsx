@@ -24,7 +24,7 @@ import {
   useGradeoClasses,
   useGradeoMappings,
   useCreateGradeoMapping,
-  useDeleteGradeoMapping,
+  useDeleteGradeoMappingByClass,
   useAutoMatchGradeo,
 } from '../services/api'
 import { useHealth } from '../services/api'
@@ -82,7 +82,7 @@ export default function Admin() {
   const { data: gradeoClasses = [], isLoading: gradeoClassesLoading } = useGradeoClasses()
   const { data: gradeoMappings = [], isLoading: gradeoMappingsLoading } = useGradeoMappings()
   const createGradeoMapping = useCreateGradeoMapping()
-  const deleteGradeoMapping = useDeleteGradeoMapping()
+  const deleteGradeoMappingByClass = useDeleteGradeoMappingByClass()
   const autoMatchGradeo = useAutoMatchGradeo()
 
   const [newEmail, setNewEmail] = useState('')
@@ -170,8 +170,6 @@ export default function Admin() {
   const wasRunningRef = useRef(isRunning)
   const mappedGradeoClassIds = new Set(gradeoMappings.map(mapping => mapping.gradeo_class_id))
   const unmappedGradeoClasses = gradeoClasses.filter(c => !mappedGradeoClassIds.has(c.gradeo_class_id))
-  const mappedGradeoCanvasCourseIds = new Set(gradeoMappings.map(mapping => mapping.canvas_course_id))
-  const unmappedWhitelistedCourses = whitelist.filter(course => !mappedGradeoCanvasCourseIds.has(course.course_id))
   const gradeoClassesById = new Map(gradeoClasses.map(gradeoClass => [gradeoClass.gradeo_class_id, gradeoClass]))
 
   const formatCourseLabel = (name: string, code?: string | null) =>
@@ -883,7 +881,7 @@ export default function Admin() {
                         {gradeoMappings.map(mapping => {
                           const linkedClass = gradeoClassesById.get(mapping.gradeo_class_id)
                           return (
-                            <tr key={mapping.canvas_course_id} className="hover:bg-slate-50/50 transition-colors">
+                            <tr key={mapping.gradeo_class_id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-5 py-3 text-slate-800">{formatCourseLabel(mapping.canvas_course_name, mapping.canvas_course_code)}</td>
                               <td className="px-5 py-3 text-slate-600">
                                 <div className="font-medium text-slate-800">{mapping.gradeo_class_name}</div>
@@ -894,7 +892,7 @@ export default function Admin() {
                               </td>
                               <td className="px-5 py-3 text-right">
                                 <button
-                                  onClick={() => deleteGradeoMapping.mutate(mapping.canvas_course_id)}
+                                  onClick={() => deleteGradeoMappingByClass.mutate(mapping.gradeo_class_id)}
                                   className="text-red-500 hover:text-red-700 text-xs font-medium"
                                 >
                                   Remove
@@ -917,7 +915,7 @@ export default function Admin() {
                       required
                     >
                       <option value="">Whitelisted course…</option>
-                      {unmappedWhitelistedCourses.map(course => (
+                      {whitelist.map(course => (
                         <option key={course.course_id} value={course.course_id}>{course.name}</option>
                       ))}
                     </select>

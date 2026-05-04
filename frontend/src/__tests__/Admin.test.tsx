@@ -27,6 +27,7 @@ vi.mock('../services/api', () => ({
   useGradeoMappings: vi.fn(),
   useCreateGradeoMapping: vi.fn(),
   useDeleteGradeoMapping: vi.fn(),
+  useDeleteGradeoMappingByClass: vi.fn(),
   useAutoMatchGradeo: vi.fn(),
   useHealth: vi.fn(),
   useCurrentUser: vi.fn(() => ({ data: { email: 'admin@example.com', role: 'admin' } })),
@@ -56,6 +57,7 @@ import {
   useGradeoMappings,
   useCreateGradeoMapping,
   useDeleteGradeoMapping,
+  useDeleteGradeoMappingByClass,
   useAutoMatchGradeo,
   useHealth,
 } from '../services/api'
@@ -177,6 +179,7 @@ describe('Admin', () => {
     } as any)
     vi.mocked(useCreateGradeoMapping).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useDeleteGradeoMapping).mockReturnValue({ ...baseMutation } as any)
+    vi.mocked(useDeleteGradeoMappingByClass).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useAutoMatchGradeo).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useHealth).mockReturnValue({
       data: { status: 'ok', canvas_configured: true, edstem_configured: true },

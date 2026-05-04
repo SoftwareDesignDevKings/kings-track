@@ -2,6 +2,7 @@ import type { GradeoCourseReport, GradeoExam, GradeoQuestionResult, GradeoResult
 
 interface Props {
   report: GradeoCourseReport
+  hiddenStudents?: Array<{ id: number; name: string }>
 }
 
 function CompletionBar({ value }: { value: number | null }) {
@@ -92,7 +93,7 @@ function UnassignedCell({ examName }: { examName: string }) {
   )
 }
 
-export default function GradeoReportTable({ report }: Props) {
+export default function GradeoReportTable({ report, hiddenStudents = [] }: Props) {
   const exams = report.exams ?? []
   const students = report.students ?? []
 
@@ -113,6 +114,7 @@ export default function GradeoReportTable({ report }: Props) {
   }
 
   return (
+    <>
     <div className="activity-table-wrapper border border-slate-200 rounded-xl overflow-hidden">
       <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
         <span className="font-medium">Legend:</span>
@@ -203,5 +205,14 @@ export default function GradeoReportTable({ report }: Props) {
         </table>
       </div>
     </div>
+    {hiddenStudents.length > 0 && (
+      <p
+        className="text-xs text-slate-400 px-4 py-3 cursor-help"
+        title={hiddenStudents.map(s => s.name).join('\n')}
+      >
+        {hiddenStudents.length} student{hiddenStudents.length === 1 ? '' : 's'} hidden — not in Gradeo roster for this class
+      </p>
+    )}
+    </>
   )
 }

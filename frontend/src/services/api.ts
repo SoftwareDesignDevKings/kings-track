@@ -421,6 +421,19 @@ export function useDeleteGradeoMapping() {
   })
 }
 
+export function useDeleteGradeoMappingByClass() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (gradeoClassId: string) =>
+      fetchJSON<void>(`/admin/gradeo/mappings/by-gradeo-class/${encodeURIComponent(gradeoClassId)}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gradeo-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-classes'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-report'] })
+    },
+  })
+}
+
 export function useAutoMatchGradeo() {
   const queryClient = useQueryClient()
   return useMutation({

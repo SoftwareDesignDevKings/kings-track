@@ -370,16 +370,8 @@ async def create_gradeo_mapping(body: GradeoMappingIn, db: AsyncSession = Depend
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     await db.execute(
-        text(
-            """
-            DELETE FROM gradeo_class_mappings
-            WHERE canvas_course_id = :canvas_course_id OR gradeo_class_id = :gradeo_class_id
-            """
-        ),
-        {
-            "canvas_course_id": body.canvas_course_id,
-            "gradeo_class_id": body.gradeo_class_id,
-        },
+        text("DELETE FROM gradeo_class_mappings WHERE gradeo_class_id = :gradeo_class_id"),
+        {"gradeo_class_id": body.gradeo_class_id},
     )
     await db.execute(
         text(
@@ -403,6 +395,15 @@ async def delete_gradeo_mapping(canvas_course_id: int, db: AsyncSession = Depend
     await db.commit()
 
 
+@router.delete("/mappings/by-gradeo-class/{gradeo_class_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_gradeo_mapping_by_class(gradeo_class_id: str, db: AsyncSession = Depends(get_db)):
+    await db.execute(
+        text("DELETE FROM gradeo_class_mappings WHERE gradeo_class_id = :gradeo_class_id"),
+        {"gradeo_class_id": gradeo_class_id},
+    )
+    await db.commit()
+
+
 @router.post("/mappings/auto-match")
 async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
     await cleanup_invalid_gradeo_classes(db)
@@ -419,14 +420,12 @@ async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
         )
     )
     courses = await get_whitelisted_courses(db)
-    existing_mapping_rows = await db.execute(text("SELECT canvas_course_id FROM gradeo_class_mappings"))
-    occupied_canvas_course_ids = {row[0] for row in existing_mapping_rows.fetchall()}
     matched: list[dict] = []
     unmatched: list[dict] = []
 
     for gradeo_class_id, gradeo_class_name in class_rows.fetchall():
         candidate = unique_course_candidate(gradeo_class_name, courses)
-        if not candidate or candidate["course_id"] in occupied_canvas_course_ids:
+        if not candidate:
             unmatched.append(
                 {
                     "gradeo_class_id": gradeo_class_id,
@@ -441,8 +440,8 @@ async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
                 """
                 INSERT INTO gradeo_class_mappings (canvas_course_id, gradeo_class_id, gradeo_class_name, created_at)
                 VALUES (:canvas_course_id, :gradeo_class_id, :gradeo_class_name, NOW())
-                ON CONFLICT (canvas_course_id) DO UPDATE SET
-                    gradeo_class_id = EXCLUDED.gradeo_class_id,
+                ON CONFLICT (gradeo_class_id) DO UPDATE SET
+                    canvas_course_id = EXCLUDED.canvas_course_id,
                     gradeo_class_name = EXCLUDED.gradeo_class_name
                 """
             ),
@@ -460,7 +459,6 @@ async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
                 "gradeo_class_name": gradeo_class_name,
             }
         )
-        occupied_canvas_course_ids.add(candidate["course_id"])
 
     await db.commit()
     return {"matched": matched, "unmatched": unmatched}
