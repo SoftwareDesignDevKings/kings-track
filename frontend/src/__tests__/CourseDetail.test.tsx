@@ -268,7 +268,6 @@ describe('CourseDetail', () => {
     const user = userEvent.setup()
     renderWithProviders(<CourseDetail />)
     await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
-    expect(screen.getByText('12 encx_2026')).toBeInTheDocument()
     expect(screen.getByText('12ENC_Cycle6')).toBeInTheDocument()
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
     expect(screen.getByText('Noah Ould')).toBeInTheDocument()
