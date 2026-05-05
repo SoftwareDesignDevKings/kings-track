@@ -128,14 +128,6 @@ describe('CourseDetail', () => {
     vi.useRealTimers()
   })
 
-  it('switches to a placeholder tab on click', async () => {
-    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /Engagement/i }))
-    expect(screen.getByText(/Engagement analytics coming soon/i)).toBeInTheDocument()
-  })
-
   it('shows the activity table on the default Canvas tab', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />)
@@ -145,44 +137,44 @@ describe('CourseDetail', () => {
 
   it('renders course tabs in the requested order', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: false, error: null, data: { mapped: true } } as any)
+    vi.mocked(useGradeoReport).mockReturnValue({ isLoading: false, error: null, data: { mapped: true } } as any)
     renderWithProviders(<CourseDetail />)
     expect(
-      ['Canvas', 'Gradeo', 'EdStem', 'Engagement', 'At-Risk'].map(label =>
+      ['Canvas', 'Gradeo', 'EdStem'].map(label =>
         screen.getByRole('button', { name: new RegExp(`^${label}`, 'i') }),
-      ).map(button => button.textContent?.replace('Soon', '').trim())
-    ).toEqual(['Canvas', 'Gradeo', 'EdStem', 'Engagement', 'At-Risk'])
+      ).map(button => button.textContent?.trim())
+    ).toEqual(['Canvas', 'Gradeo', 'EdStem'])
   })
 
-  it('EdStem tab does not have a "Soon" badge', () => {
+  it('does not render unfinished tabs', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />)
-    const edStemTab = screen.getByRole('button', { name: /^EdStem$/i })
-    expect(edStemTab.querySelector('.bg-slate-100')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Engagement/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /At-Risk/i })).not.toBeInTheDocument()
   })
 
-  it('Gradeo tab does not have a "Soon" badge', () => {
+  it('does not render the EdStem tab when the course is not linked', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: false, error: null, data: { mapped: false } } as any)
     renderWithProviders(<CourseDetail />)
-    const gradeoTab = screen.getByRole('button', { name: /^Gradeo$/i })
-    expect(gradeoTab.querySelector('.bg-slate-100')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^EdStem$/i })).not.toBeInTheDocument()
+  })
+
+  it('does not render the Gradeo tab when the course is not linked', () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useGradeoReport).mockReturnValue({ isLoading: false, error: null, data: { mapped: false } } as any)
+    renderWithProviders(<CourseDetail />)
+    expect(screen.queryByRole('button', { name: /^Gradeo$/i })).not.toBeInTheDocument()
   })
 
   it('shows loading skeleton on EdStem tab while loading', async () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
-    vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: true, error: null, data: undefined } as any)
+    vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: true, error: null, data: { mapped: true } } as any)
     const user = userEvent.setup()
     renderWithProviders(<CourseDetail />)
     await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
     expect(document.querySelector('.animate-pulse')).toBeTruthy()
-  })
-
-  it('shows not-mapped placeholder on EdStem tab when course is not mapped', async () => {
-    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
-    vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: false, error: null, data: { mapped: false } } as any)
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
-    expect(screen.getByText(/No EdStem course linked/i)).toBeInTheDocument()
   })
 
   it('shows EdStemLessonTable on EdStem tab when mapped', async () => {
@@ -203,15 +195,6 @@ describe('CourseDetail', () => {
     await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
     expect(screen.getByText('Module 1')).toBeInTheDocument()
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
-  })
-
-  it('shows not-mapped placeholder on Gradeo tab when course is not mapped', async () => {
-    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
-    vi.mocked(useGradeoReport).mockReturnValue({ isLoading: false, error: null, data: { mapped: false } } as any)
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
-    expect(screen.getByText(/No Gradeo class linked/i)).toBeInTheDocument()
   })
 
   it('shows the Gradeo report table when the course is mapped', async () => {
