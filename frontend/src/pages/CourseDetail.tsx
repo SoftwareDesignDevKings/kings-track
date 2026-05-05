@@ -1,10 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link, Navigate } from 'react-router-dom'
 import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
 import EdStemLessonTable from '../components/EdStemLessonTable'
 import GradeoReportTable from '../components/GradeoReportTable'
-import Placeholder from '../components/Placeholder'
 import {
   buildCanvasActivityColumns,
   getCanvasDueNowCompletionRate,
@@ -13,7 +12,7 @@ import {
 } from '../components/activityTableModel'
 import { useCourseMatrix, useEdStemMatrix, useGradeoReport } from '../services/api'
 
-type TabId = 'activities' | 'engagement' | 'at_risk' | 'edstem' | 'gradeo'
+type TabId = 'activities' | 'edstem' | 'gradeo'
 
 interface Tab {
   id: TabId
@@ -24,8 +23,6 @@ const TABS: Tab[] = [
   { id: 'activities', label: 'Canvas' },
   { id: 'gradeo', label: 'Gradeo' },
   { id: 'edstem', label: 'EdStem' },
-  { id: 'engagement', label: 'Engagement' },
-  { id: 'at_risk', label: 'At-Risk' },
 ]
 
 export default function CourseDetail() {
@@ -36,6 +33,17 @@ export default function CourseDetail() {
   const { data: matrix, isLoading, error } = useCourseMatrix(id)
   const { data: edStemMatrix, isLoading: edStemLoading, error: edStemError } = useEdStemMatrix(id)
   const { data: gradeoReport, isLoading: gradeoLoading, error: gradeoError } = useGradeoReport(id)
+  const tabs = useMemo(() => TABS.filter(tab => {
+    if (tab.id === 'gradeo') return gradeoReport?.mapped
+    if (tab.id === 'edstem') return edStemMatrix?.mapped
+    return true
+  }), [edStemMatrix?.mapped, gradeoReport?.mapped])
+
+  useEffect(() => {
+    if (!tabs.some(tab => tab.id === activeTab)) {
+      setActiveTab('activities')
+    }
+  }, [activeTab, tabs])
 
   if (!courseId || isNaN(id)) {
     return <Navigate to="/" replace />
@@ -114,7 +122,7 @@ export default function CourseDetail() {
         {/* Tab bar */}
         <div className="mb-5 overflow-x-auto border-b border-slate-200">
           <div className="flex min-w-max items-center gap-1">
-          {TABS.map(tab => (
+          {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -124,15 +132,9 @@ export default function CourseDetail() {
                   ? 'border-brand-500 text-brand-600'
                   : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                 }
-                ${tab.id !== 'activities' ? 'relative' : ''}
               `}
             >
               {tab.label}
-              {tab.id !== 'activities' && tab.id !== 'edstem' && tab.id !== 'gradeo' && (
-                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-400 rounded-full leading-none">
-                  Soon
-                </span>
-              )}
             </button>
           ))}
           </div>
@@ -158,22 +160,6 @@ export default function CourseDetail() {
           </>
         )}
 
-        {activeTab === 'engagement' && (
-          <Placeholder
-            title="Engagement analytics coming soon"
-            description="Daily page views, participation trends, and per-student activity heatmaps will appear here."
-            phase="Phase 2"
-          />
-        )}
-
-        {activeTab === 'at_risk' && (
-          <Placeholder
-            title="At-risk detection coming soon"
-            description="Students with declining grades, low activity, or missing submissions will be flagged here automatically."
-            phase="Phase 2"
-          />
-        )}
-
         {activeTab === 'edstem' && (
           <>
             {edStemLoading && (
@@ -188,13 +174,6 @@ export default function CourseDetail() {
               <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
                 Failed to load EdStem data. Make sure the course has been synced.
               </div>
-            )}
-            {edStemMatrix && !edStemMatrix.mapped && (
-              <Placeholder
-                title="No EdStem course linked"
-                description="Link this Canvas course to an EdStem course in Admin settings to see lesson progress here."
-                phase="Phase 2"
-              />
             )}
             {edStemMatrix?.mapped && <EdStemLessonTable matrix={edStemMatrix} />}
           </>
@@ -214,13 +193,6 @@ export default function CourseDetail() {
               <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
                 Failed to load Gradeo data. Make sure the class has been imported from the extension.
               </div>
-            )}
-            {gradeoReport && !gradeoReport.mapped && (
-              <Placeholder
-                title="No Gradeo class linked"
-                description="Link this Canvas course to a Gradeo class in Admin settings, then import that class from the browser extension."
-                phase="Gradeo v1"
-              />
             )}
             {gradeoReport?.mapped && (
               <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
