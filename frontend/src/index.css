@@ -15,15 +15,34 @@
 
 /* Activity table sticky column */
 .activity-table-wrapper {
+  --activity-table-frozen-width: 350px;
+  --activity-table-header-row-height: 37px;
+  --activity-table-scrollbar-size: 6px;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   position: relative;
 }
 
 .activity-table-scroll {
-  overflow-x: auto;
+  flex: 0 1 auto;
+  max-height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: var(--activity-table-scrollbar-size);
   position: relative;
 }
 
 .activity-table-scroll-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
   position: relative;
 }
 
@@ -37,14 +56,48 @@
   white-space: nowrap;
 }
 
+.activity-table thead th {
+  background-color: #f8fafc; /* slate-50 */
+  border-bottom-color: transparent;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.activity-table thead tr:nth-child(2) th {
+  top: var(--activity-table-header-row-height);
+  z-index: 20;
+}
+
+.activity-table-canvas thead tr {
+  height: var(--activity-table-header-row-height);
+}
+
+.activity-table-canvas .sticky-col-header-1,
+.activity-table-canvas .sticky-col-header-2 {
+  height: calc(var(--activity-table-header-row-height) * 2);
+  min-height: calc(var(--activity-table-header-row-height) * 2);
+}
+
+.activity-table-edstem {
+  --activity-table-edstem-lesson-row-height: 130px;
+}
+
+.activity-table-edstem .sticky-col-header-1,
+.activity-table-edstem .sticky-col-header-2 {
+  height: calc(var(--activity-table-header-row-height) + var(--activity-table-edstem-lesson-row-height));
+  min-height: calc(var(--activity-table-header-row-height) + var(--activity-table-edstem-lesson-row-height));
+}
+
 .activity-table-zone-overlay {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   height: 37px;
+  clip-path: inset(0 0 0 var(--activity-table-frozen-width));
   pointer-events: none;
-  z-index: 25;
+  z-index: 40;
 }
 
 .activity-table-zone-window {
@@ -124,6 +177,11 @@
   background-color: white;
 }
 
+.activity-table .sticky-col-1,
+.activity-table .sticky-col-2 {
+  z-index: 10;
+}
+
 .sticky-col-1 {
   left: 0;
 }
@@ -135,8 +193,13 @@
 .sticky-col-header-1,
 .sticky-col-header-2 {
   position: sticky;
-  z-index: 20;
   background-color: #f8fafc; /* slate-50 */
+}
+
+.activity-table .sticky-col-header-1,
+.activity-table .sticky-col-header-2 {
+  top: 0;
+  z-index: 80;
 }
 
 .sticky-col-header-1 {
