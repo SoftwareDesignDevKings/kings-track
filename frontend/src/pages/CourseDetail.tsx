@@ -66,12 +66,12 @@ export default function CourseDetail() {
     : null
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
       <Header />
 
-      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
+      <main className="mx-auto flex min-h-0 w-full max-w-screen-2xl flex-1 flex-col px-4 py-6 sm:px-6">
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-sm text-slate-400 mb-5">
+        <nav className="mb-5 flex shrink-0 items-center gap-2 text-sm text-slate-400">
           <Link to="/" className="hover:text-brand-600 transition-colors">Courses</Link>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -82,7 +82,7 @@ export default function CourseDetail() {
         </nav>
 
         {/* Course header */}
-        <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-end">
+        <div className="mb-6 flex shrink-0 flex-col gap-4 sm:flex-row sm:items-end">
           <div className="flex-1 min-w-0">
             {isLoading ? (
               <div className="h-7 bg-slate-200 rounded w-48 animate-pulse" />
@@ -120,85 +120,87 @@ export default function CourseDetail() {
         </div>
 
         {/* Tab bar */}
-        <div className="mb-5 overflow-x-auto border-b border-slate-200">
+        <div className="mb-5 shrink-0 overflow-x-auto overflow-y-hidden border-b border-slate-200">
           <div className="flex min-w-max items-center gap-1">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`
-                px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors
-                ${activeTab === tab.id
-                  ? 'border-brand-500 text-brand-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                }
-              `}
-            >
-              {tab.label}
-            </button>
-          ))}
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`
+                  px-4 py-2.5 text-sm font-medium border-b-2 transition-colors
+                  ${activeTab === tab.id
+                    ? 'border-brand-500 text-brand-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                  }
+                `}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Tab content */}
-        {activeTab === 'activities' && (
-          <>
-            {isLoading && (
-              <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
-                <div className="h-10 bg-slate-100 border-b border-slate-200" />
-                {[1,2,3,4,5].map(i => (
-                  <div key={i} className="h-10 border-b border-slate-100 bg-white" />
-                ))}
-              </div>
-            )}
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
-                Failed to load activity data. Make sure the course has been synced.
-              </div>
-            )}
-            {matrix && <ActivityTable matrix={matrix} />}
-          </>
-        )}
+        <section className="min-h-0 min-w-0 flex-1">
+          {activeTab === 'activities' && (
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              {isLoading && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
+                  <div className="h-10 bg-slate-100 border-b border-slate-200" />
+                  {[1,2,3,4,5].map(i => (
+                    <div key={i} className="h-10 border-b border-slate-100 bg-white" />
+                  ))}
+                </div>
+              )}
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
+                  Failed to load activity data. Make sure the course has been synced.
+                </div>
+              )}
+              {matrix && <ActivityTable matrix={matrix} />}
+            </div>
+          )}
 
-        {activeTab === 'edstem' && (
-          <>
-            {edStemLoading && (
-              <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
-                <div className="h-10 bg-slate-100 border-b border-slate-200" />
-                {[1,2,3,4,5].map(i => (
-                  <div key={i} className="h-10 border-b border-slate-100 bg-white" />
-                ))}
-              </div>
-            )}
-            {edStemError && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
-                Failed to load EdStem data. Make sure the course has been synced.
-              </div>
-            )}
-            {edStemMatrix?.mapped && <EdStemLessonTable matrix={edStemMatrix} />}
-          </>
-        )}
+          {activeTab === 'edstem' && (
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              {edStemLoading && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
+                  <div className="h-10 bg-slate-100 border-b border-slate-200" />
+                  {[1,2,3,4,5].map(i => (
+                    <div key={i} className="h-10 border-b border-slate-100 bg-white" />
+                  ))}
+                </div>
+              )}
+              {edStemError && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
+                  Failed to load EdStem data. Make sure the course has been synced.
+                </div>
+              )}
+              {edStemMatrix?.mapped && <EdStemLessonTable matrix={edStemMatrix} />}
+            </div>
+          )}
 
-        {activeTab === 'gradeo' && (
-          <>
-            {gradeoLoading && (
-              <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
-                <div className="h-10 bg-slate-100 border-b border-slate-200" />
-                {[1,2,3,4,5].map(i => (
-                  <div key={i} className="h-10 border-b border-slate-100 bg-white" />
-                ))}
-              </div>
-            )}
-            {gradeoError && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
-                Failed to load Gradeo data. Make sure the class has been imported from the extension.
-              </div>
-            )}
-            {gradeoReport?.mapped && (
-              <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
-            )}
-          </>
-        )}
+          {activeTab === 'gradeo' && (
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              {gradeoLoading && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
+                  <div className="h-10 bg-slate-100 border-b border-slate-200" />
+                  {[1,2,3,4,5].map(i => (
+                    <div key={i} className="h-10 border-b border-slate-100 bg-white" />
+                  ))}
+                </div>
+              )}
+              {gradeoError && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
+                  Failed to load Gradeo data. Make sure the class has been imported from the extension.
+                </div>
+              )}
+              {gradeoReport?.mapped && (
+                <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
+              )}
+            </div>
+          )}
+        </section>
       </main>
     </div>
   )

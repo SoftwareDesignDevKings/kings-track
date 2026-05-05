@@ -25,6 +25,14 @@ const statusDotConfig: Record<GradeoResultStatus, { dot: string; ring: string; l
   scored: { dot: 'bg-emerald-400', ring: 'ring-emerald-200', label: 'Scored' },
 }
 
+function CheckIcon({ className = 'h-2.5 w-2.5' }: { className?: string }) {
+  return (
+    <svg className={`${className} text-white`} fill="none" viewBox="0 0 10 10" aria-hidden="true">
+      <path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function buildQuestionTooltip(exam: GradeoExam, questions: GradeoQuestionResult[]) {
   const lines = [
     exam.name,
@@ -75,9 +83,11 @@ function GradeoCell({
   return (
     <div
       title={title}
-      className={`h-5 w-5 mx-auto rounded-full ${cfg.dot} ring-2 ${cfg.ring} cursor-default`}
+      className={`h-5 w-5 mx-auto rounded-full flex items-center justify-center ${cfg.dot} ring-2 ${cfg.ring} cursor-default`}
       aria-label={`${examName}: ${cfg.label}`}
-    />
+    >
+      {status === 'scored' && <CheckIcon />}
+    </div>
   )
 }
 
@@ -119,7 +129,9 @@ export default function GradeoReportTable({ report, hiddenStudents = [] }: Props
       <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
         <span className="font-medium">Legend:</span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-emerald-200 inline-block" />
+          <span className="h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-emerald-200 inline-flex items-center justify-center">
+            <CheckIcon className="h-2 w-2" />
+          </span>
           Scored
         </span>
         <span className="inline-flex items-center gap-1.5">

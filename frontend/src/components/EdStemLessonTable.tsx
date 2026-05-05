@@ -24,6 +24,14 @@ const statusDotConfig: Record<EdStemLessonStatus, { dot: string; ring: string; l
   not_started: { dot: 'bg-slate-200',   ring: 'ring-slate-100',   label: 'Not started' },
 }
 
+function CheckIcon({ className = 'h-2.5 w-2.5' }: { className?: string }) {
+  return (
+    <svg className={`${className} text-white`} fill="none" viewBox="0 0 10 10" aria-hidden="true">
+      <path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function StatusDot({ status, lessonTitle, completedAt }: {
   status: EdStemLessonStatus
   lessonTitle: string
@@ -38,9 +46,12 @@ function StatusDot({ status, lessonTitle, completedAt }: {
 
   return (
     <div
-      className={`w-5 h-5 mx-auto rounded-full ${cfg.dot} ring-2 ${cfg.ring} cursor-default`}
+      className={`w-5 h-5 mx-auto rounded-full flex items-center justify-center ${cfg.dot} ring-2 ${cfg.ring} cursor-default`}
       title={tooltipLines}
-    />
+      aria-label={`${lessonTitle}: ${cfg.label}`}
+    >
+      {status === 'completed' && <CheckIcon />}
+    </div>
   )
 }
 
@@ -78,7 +89,9 @@ export default function EdStemLessonTable({ matrix }: Props) {
       <div className="flex items-center gap-4 px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
         <span className="font-medium">Legend:</span>
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-emerald-200 inline-block" />
+          <span className="w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-emerald-200 inline-flex items-center justify-center">
+            <CheckIcon className="h-2 w-2" />
+          </span>
           Completed
         </span>
         <span className="flex items-center gap-1.5">
@@ -92,7 +105,7 @@ export default function EdStemLessonTable({ matrix }: Props) {
       </div>
 
       <div className="activity-table-scroll">
-        <table className="activity-table w-full text-sm">
+        <table className="activity-table activity-table-edstem w-full text-sm">
           <thead>
             {/* Row 1: Module headers */}
             <tr className="bg-slate-50 border-b border-slate-200">
@@ -131,7 +144,7 @@ export default function EdStemLessonTable({ matrix }: Props) {
                 >
                   <div className="flex h-full w-full items-end justify-center px-1 pb-2">
                     <span
-                      className={`block max-h-[112px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-xs font-medium leading-tight [transform:rotate(180deg)] [writing-mode:vertical-rl] ${lesson.is_interactive ? 'text-brand-500' : 'text-slate-500'}`}
+                      className="block max-h-[112px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-xs font-medium leading-tight text-slate-500 [transform:rotate(180deg)] [writing-mode:vertical-rl]"
                     >
                       {lesson.title}
                     </span>

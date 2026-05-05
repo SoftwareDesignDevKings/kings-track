@@ -32,6 +32,14 @@ function CompletionBar({ value }: { value: number | null }) {
   )
 }
 
+function CheckIcon({ className = 'h-2 w-2' }: { className?: string }) {
+  return (
+    <svg className={`${className} text-white`} fill="none" viewBox="0 0 10 10" aria-hidden="true">
+      <path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function formatDueDate(dueAt: string | null): string | null {
   if (!dueAt) return null
   const parsed = new Date(dueAt)
@@ -199,7 +207,9 @@ export default function ActivityTable({ matrix, viewMode = 'due' }: Props) {
       <div className="flex items-center gap-4 px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
         <span className="font-medium">Legend:</span>
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-emerald-200 inline-block" />
+          <span className="w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-emerald-200 inline-flex items-center justify-center">
+            <CheckIcon />
+          </span>
           Completed
         </span>
         <span className="flex items-center gap-1.5">
@@ -230,7 +240,7 @@ export default function ActivityTable({ matrix, viewMode = 'due' }: Props) {
           ))}
         </div>
         <div ref={scrollRef} className="activity-table-scroll">
-        <table className="activity-table w-full text-sm">
+        <table className="activity-table activity-table-canvas w-full text-sm">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
               <th
