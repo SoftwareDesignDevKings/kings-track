@@ -4,9 +4,9 @@
   const openSettingsButton = document.getElementById('openSettings')
   const closeSettingsButton = document.getElementById('closeSettings')
   const saveSettingsButton = document.getElementById('saveSettings')
+  const openBridgeTabButton = document.getElementById('openBridgeTab')
 
-  const apiBaseUrl = document.getElementById('apiBaseUrl')
-  const extensionApiKey = document.getElementById('extensionApiKey')
+  const frontendUrl = document.getElementById('frontendUrl')
   const gradeoApiHeadersJson = document.getElementById('gradeoApiHeadersJson')
   const homeNote = document.getElementById('homeNote')
   const authDetail = document.getElementById('authDetail')
@@ -15,20 +15,14 @@
   const statusSummary = document.getElementById('statusSummary')
   const noticeBanner = document.getElementById('noticeBanner')
 
-  const configSignals = [
-    document.getElementById('configPill'),
-    document.getElementById('settingsConfigPill'),
-  ]
-  const authSignals = [
-    document.getElementById('authPill'),
-    document.getElementById('settingsAuthPill'),
-  ]
+  const bridgeSignals = [
+    document.getElementById('settingsBridgePill'),
+  ].filter(Boolean)
   const headerSignals = [
-    document.getElementById('headersPill'),
     document.getElementById('settingsHeadersPill'),
-  ]
+  ].filter(Boolean)
 
-  const configInputs = [apiBaseUrl, extensionApiKey, gradeoApiHeadersJson]
+  const configInputs = [frontendUrl, gradeoApiHeadersJson]
   const actionButtonIds = ['syncClasses', 'syncStudents', 'importMappedClasses']
 
   let noticeTimer = null
@@ -86,11 +80,12 @@
   }
 
   function updateSignal(element, label, tone) {
-    if (!element) {
-      return
-    }
+    if (!element) return
     element.textContent = label
-    element.className = tone ? `signal ${tone}` : 'signal'
+    element.classList.remove('good', 'warn')
+    if (tone) {
+      element.classList.add(tone)
+    }
   }
 
   function updateSignalGroup(elements, label, tone) {
@@ -99,256 +94,164 @@
 
   function updateStatusChip(label, tone) {
     statePill.textContent = label
-    statePill.className = tone ? `status-chip ${tone}` : 'status-chip'
+    statePill.classList.remove('good', 'warn')
+    if (tone) {
+      statePill.classList.add(tone)
+    }
   }
 
-  function updateActionAvailability(canRunActions) {
-    actionButtonIds.forEach((id) => {
-      const button = document.getElementById(id)
-      if (button) {
-        button.disabled = actionsBusy || !canRunActions
-      }
-    })
+  function updateActionAvailability(ready) {
+    if (actionsBusy) return
+    setBusy(actionButtonIds, !ready)
   }
 
   function buildStateSummary(state) {
-    const safeState = state || { status: 'idle' }
+    if (!state) {
+      return { headline: 'Ready', summary: 'No sync running.' }
+    }
+    const safeState = state || {}
     const status = safeState.status || 'idle'
 
     if (status === 'idle') {
+      return { headline: 'Ready', summary: '' }
+    }
+
+    if (status === 'completed') {
       return {
-        headline: 'Ready',
-        summary: 'No sync running.',
+        headline: 'Done',
+        summary: safeState.action ? titleCaseStatus(safeState.action) : '',
+      }
+    }
+
+    if (status === 'error') {
+      return {
+        headline: 'Error',
+        summary: safeState.message || '',
       }
     }
 
     if (status === 'blocked') {
       return {
         headline: 'Blocked',
-        summary: safeState.message || 'Fix setup and try again.',
-      }
-    }
-
-    if (status === 'error') {
-      return {
-        headline: 'Failed',
-        summary: safeState.message || 'Check settings and retry.',
-      }
-    }
-
-    if (status === 'scraping_reporting') {
-      return {
-        headline: 'Collecting reports',
-        summary: safeState.progress?.message || 'Working in Gradeo.',
+        summary: safeState.preflight?.reason || safeState.blocked?.reason || '',
       }
     }
 
     if (status === 'loading_mappings') {
-      return {
-        headline: 'Loading mappings',
-        summary: 'Preparing import.',
-      }
+      return { headline: 'Loading mappings', summary: '' }
     }
 
     if (status === 'loading_reporting_classes') {
       return {
-        headline: 'Checking classes',
-        summary: safeState.totalClasses ? `${safeState.totalClasses} mapped` : 'Checking mapped classes.',
+        headline: 'Checking reporting',
+        summary: safeState.totalClasses ? `${safeState.totalClasses} classes` : '',
       }
     }
 
     if (status === 'preflighting_import') {
+      const progress = safeState.currentClass && safeState.totalClasses
+        ? ` ${safeState.currentClass}/${safeState.totalClasses}`
+        : ''
       return {
-        headline: 'Preflight',
-        summary: safeState.className
-          ? `${safeState.className}${safeState.currentClass && safeState.totalClasses ? ` (${safeState.currentClass}/${safeState.totalClasses})` : ''}`
-          : 'Checking next class.',
+        headline: `Preflight${progress}`,
+        summary: safeState.className || '',
       }
     }
 
     if (status === 'importing_class') {
+      const progress = safeState.currentClass && safeState.totalClasses
+        ? ` ${safeState.currentClass}/${safeState.totalClasses}`
+        : ''
       return {
-        headline: 'Loading class',
-        summary: safeState.className || 'Fetching class data.',
+        headline: `Importing class${progress}`,
+        summary: safeState.className || '',
       }
     }
 
     if (status === 'importing_student_results') {
+      const classProgress = safeState.currentClass && safeState.totalClasses
+        ? ` ${safeState.currentClass}/${safeState.totalClasses}`
+        : ''
+      const studentProgress = safeState.currentStudent && safeState.totalStudents
+        ? `${safeState.currentStudent}/${safeState.totalStudents}`
+        : ''
+      const summary = [studentProgress, safeState.studentName, safeState.className]
+        .filter(Boolean)
+        .join(' · ')
       return {
-        headline: 'Reading students',
-        summary: safeState.studentName
-          ? `${safeState.studentName}${safeState.currentStudent && safeState.totalStudents ? ` (${safeState.currentStudent}/${safeState.totalStudents})` : ''}`
-          : 'Collecting results.',
+        headline: `Students${classProgress}`,
+        summary,
       }
     }
 
     if (status === 'importing_exam_sessions') {
+      const examProgress = safeState.currentExam && safeState.totalExams
+        ? ` ${safeState.currentExam}/${safeState.totalExams}`
+        : ''
+      const summary = [safeState.examName, safeState.className].filter(Boolean).join(' · ')
       return {
-        headline: 'Resolving exams',
-        summary: safeState.examName
-          ? `${safeState.examName}${safeState.currentExam && safeState.totalExams ? ` (${safeState.currentExam}/${safeState.totalExams})` : ''}`
-          : 'Loading exam sessions.',
+        headline: `Exam sessions${examProgress}`,
+        summary,
       }
     }
 
     if (status === 'uploading_class') {
+      const progress = safeState.currentClass && safeState.totalClasses
+        ? ` ${safeState.currentClass}/${safeState.totalClasses}`
+        : ''
+      const parts = []
+      if (safeState.className) parts.push(safeState.className)
+      if (safeState.students != null) parts.push(`${safeState.students} students`)
       return {
-        headline: 'Uploading class',
-        summary: safeState.className
-          ? `${safeState.className} · ${safeState.students || 0} students`
-          : 'Sending class import.',
+        headline: `Uploading${progress}`,
+        summary: parts.join(' · '),
       }
     }
 
     if (status === 'syncing_students') {
       if (safeState.phase === 'fetching_directory') {
         return {
-          headline: 'Syncing students',
+          headline: 'Fetching students',
           summary: `${safeState.fetched || 0} fetched`,
         }
       }
       if (safeState.phase === 'uploading_student_directory') {
         return {
           headline: 'Uploading students',
-          summary: `${safeState.count || 0} students`,
+          summary: `${safeState.count || 0} · ${safeState.pages || 0} pages`,
         }
       }
+      return { headline: 'Syncing students', summary: '' }
     }
 
     if (status === 'syncing_classes') {
       if (safeState.phase === 'fetching_classes') {
         return {
-          headline: 'Syncing classes',
+          headline: 'Fetching classes',
           summary: `${safeState.fetched || 0} fetched`,
         }
       }
       if (safeState.phase === 'uploading_school_groups') {
         return {
           headline: 'Uploading classes',
-          summary: `${safeState.count || 0} classes`,
+          summary: `${safeState.count || 0} · ${safeState.pages || 0} pages`,
         }
       }
-    }
-
-    if (status === 'loading_mappings') {
-      return {
-        headline: 'Preparing the import list.',
-        summary: 'Reading mapped Gradeo classes from Kings Track before starting the reporting import.',
-      }
-    }
-
-    if (status === 'loading_reporting_classes') {
-      return {
-        headline: 'Checking reporting availability.',
-        summary: safeState.totalClasses
-          ? `Checking ${safeState.totalClasses} mapped class${safeState.totalClasses === 1 ? '' : 'es'} against the Gradeo reporting list.`
-          : 'Checking the mapped classes against the Gradeo reporting list.',
-      }
-    }
-
-    if (status === 'preflighting_import') {
-      return {
-        headline: 'Checking whether a class is ready.',
-        summary: safeState.className
-          ? `Preflighting ${safeState.className}${safeState.currentClass && safeState.totalClasses ? ` (${safeState.currentClass}/${safeState.totalClasses})` : ''}.`
-          : 'Running the backend preflight checks for the next class import.',
-      }
-    }
-
-    if (status === 'importing_class') {
-      return {
-        headline: 'Loading class context.',
-        summary: safeState.className
-          ? `Fetching the roster and syllabus details for ${safeState.className}${safeState.currentClass && safeState.totalClasses ? ` (${safeState.currentClass}/${safeState.totalClasses})` : ''}.`
-          : 'Fetching the class roster and metadata from Gradeo.',
-      }
-    }
-
-    if (status === 'importing_student_results') {
-      return {
-        headline: 'Collecting student result summaries.',
-        summary: safeState.studentName
-          ? `Reading exam results for ${safeState.studentName}${safeState.currentStudent && safeState.totalStudents ? ` (${safeState.currentStudent}/${safeState.totalStudents})` : ''}${safeState.className ? ` in ${safeState.className}` : ''}.`
-          : 'Reading the next student result set from Gradeo.',
-      }
-    }
-
-    if (status === 'importing_exam_sessions') {
-      return {
-        headline: 'Resolving exam session details.',
-        summary: safeState.examName
-          ? `Confirming roster and marking data for ${safeState.examName}${safeState.currentExam && safeState.totalExams ? ` (${safeState.currentExam}/${safeState.totalExams})` : ''}${safeState.className ? ` in ${safeState.className}` : ''}.`
-          : `Resolving exam session details${safeState.currentExam && safeState.totalExams ? ` (${safeState.currentExam}/${safeState.totalExams})` : ''}.`,
-      }
-    }
-
-    if (status === 'uploading_class') {
-      return {
-        headline: 'Uploading the class import.',
-        summary: safeState.className
-          ? `Sending ${safeState.students || 0} student import record${safeState.students === 1 ? '' : 's'} for ${safeState.className} to Kings Track.`
-          : 'Sending the collected class import payload to Kings Track.',
-      }
-    }
-
-    if (status === 'syncing_students') {
-      if (safeState.phase === 'fetching_directory') {
-        return {
-          headline: 'Syncing the Gradeo student directory.',
-          summary: `Fetched ${safeState.fetched || 0} students so far from the Gradeo directory.`,
-        }
-      }
-      if (safeState.phase === 'uploading_student_directory') {
-        return {
-          headline: 'Uploading the Gradeo student directory.',
-          summary: `Sending ${safeState.count || 0} students across ${safeState.pages || 0} page${safeState.pages === 1 ? '' : 's'} to Kings Track.`,
-        }
-      }
-    }
-
-    if (status === 'syncing_classes') {
-      if (safeState.phase === 'fetching_classes') {
-        return {
-          headline: 'Syncing the Gradeo class list.',
-          summary: `Fetched ${safeState.fetched || 0} classes so far from Gradeo.`,
-        }
-      }
-      if (safeState.phase === 'uploading_school_groups') {
-        return {
-          headline: 'Uploading the Gradeo class list.',
-          summary: `Sending ${safeState.count || 0} classes across ${safeState.pages || 0} page${safeState.pages === 1 ? '' : 's'} to Kings Track.`,
-        }
-      }
-    }
-
-    if (status === 'completed') {
-      return {
-        headline: 'Done',
-        summary: safeState.action ? titleCaseStatus(safeState.action) : 'Action finished.',
-      }
+      return { headline: 'Syncing classes', summary: '' }
     }
 
     return {
       headline: titleCaseStatus(status),
-      summary: 'Working.',
+      summary: safeState.phase || '',
     }
   }
 
-  function buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode, authStatus, backendStatus) {
+  function buildHomeNote(configReady, bridgeOpen, headersReady) {
     if (!configReady) {
-      return 'Add the API URL in Settings.'
+      return 'Set the Dashboard URL in Settings.'
     }
-    if (backendStatus && backendStatus.ok === false) {
-      return 'Cannot reach Kings Track.'
-    }
-    if (!apiKeySaved && !localMode) {
-      return 'Add the extension key in Settings.'
-    }
-    if (authStatus && authStatus.ok === false) {
-      return 'API key is not verifying.'
-    }
-    if (!authReady) {
-      return apiKeySaved ? 'Checking API key.' : 'Checking saved credentials.'
+    if (!bridgeOpen) {
+      return 'Open the Extension Bridge tab and sign in as admin.'
     }
     if (!headersReady) {
       return 'Paste fresh Gradeo headers in Settings.'
@@ -360,55 +263,36 @@
     const config = context.config || {}
 
     if (!isEditingConfig()) {
-      apiBaseUrl.value = config.apiBaseUrl || ''
-      extensionApiKey.value = config.extensionApiKey || ''
+      frontendUrl.value = config.frontendUrl || ''
       gradeoApiHeadersJson.value = config.gradeoApiHeadersJson || '{}'
     }
 
-    const configReady = Boolean(String(config.apiBaseUrl || '').trim())
+    const configReady = Boolean(String(config.frontendUrl || '').trim())
     const headersReady = hasSavedHeaders(config)
-    const apiKeySaved = Boolean(String(config.extensionApiKey || '').trim())
-    const user = context.user || null
-    const authStatus = context.authStatus || null
-    const backendStatus = context.backendStatus || null
-    const localMode = Boolean(user && (user.local_auth || user.auth_source === 'local'))
-    const authReady = Boolean(user)
+    const bridgeOpen = Boolean(context.bridgeTabOpen)
 
-    let kingsTrackTone = 'warn'
-    if (configReady && backendStatus && backendStatus.ok) {
-      kingsTrackTone = 'good'
-    } else if (configReady && !backendStatus) {
-      kingsTrackTone = ''
+    let bridgeTone = 'warn'
+    if (configReady && bridgeOpen) {
+      bridgeTone = 'good'
+    } else if (!configReady) {
+      bridgeTone = 'warn'
     }
 
-    updateSignalGroup(configSignals, "King's Track", kingsTrackTone)
-    let apiKeyTone = 'warn'
-    if (configReady && (apiKeySaved || localMode) && authStatus && authStatus.ok) {
-      apiKeyTone = 'good'
-    } else if (configReady && (apiKeySaved || localMode) && !authStatus) {
-      apiKeyTone = ''
-    }
-    updateSignalGroup(authSignals, 'API Key', apiKeyTone)
+    updateSignalGroup(bridgeSignals, bridgeOpen ? 'Bridge tab open' : 'Bridge tab closed', bridgeTone)
     updateSignalGroup(headerSignals, 'Gradeo Headers', headersReady ? 'good' : 'warn')
 
-    if (!configReady && apiKeySaved) {
-      authDetail.textContent = 'Key saved. Add the Kings Track URL.'
-    } else if (backendStatus && backendStatus.ok === false) {
-      authDetail.textContent = 'Kings Track is unreachable.'
-    } else if (user) {
-      authDetail.textContent = localMode ? 'Using local auth.' : `${user.email} · ${user.role}`
-    } else if (authStatus && authStatus.ok === false) {
-      authDetail.textContent = 'API key did not verify.'
-    } else if (apiKeySaved) {
-      authDetail.textContent = 'Key saved. Checking verification.'
+    if (!configReady) {
+      authDetail.textContent = 'Set the Kings Track Dashboard URL.'
+    } else if (!bridgeOpen) {
+      authDetail.textContent = 'Open the Bridge tab to connect.'
     } else {
-      authDetail.textContent = 'Not connected.'
+      authDetail.textContent = 'Bridge tab is open and listening.'
     }
 
-    const note = buildHomeNote(configReady, authReady, headersReady, apiKeySaved, localMode, authStatus, backendStatus)
+    const note = buildHomeNote(configReady, bridgeOpen, headersReady)
     homeNote.textContent = note
-    homeNote.hidden = !note
-    updateActionAvailability(configReady && authReady && headersReady)
+    homeNote.style.display = note ? '' : 'none'
+    updateActionAvailability(configReady && bridgeOpen && headersReady)
 
     const status = context.state?.status || 'idle'
     const summary = buildStateSummary(context.state)
@@ -428,8 +312,7 @@
     await browser.runtime.sendMessage({
       type: 'kings.popup.saveConfig',
       config: {
-        apiBaseUrl: apiBaseUrl.value,
-        extensionApiKey: extensionApiKey.value,
+        frontendUrl: frontendUrl.value,
         gradeoApiHeadersJson: gradeoApiHeadersJson.value,
       },
     })
@@ -466,6 +349,14 @@
     try {
       await saveConfig(true)
       showView('home')
+    } catch (error) {
+      showNotice('warn', error.message || String(error))
+    }
+  })
+
+  openBridgeTabButton.addEventListener('click', async () => {
+    try {
+      await browser.runtime.sendMessage({ type: 'kings.popup.openBridgeTab' })
     } catch (error) {
       showNotice('warn', error.message || String(error))
     }
