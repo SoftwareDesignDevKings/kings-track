@@ -30,7 +30,7 @@
   }
 
   function getActiveStudentTable(doc) {
-    const tables = Array.from(
+    const tables = Array.from<any>(
       doc.querySelectorAll(
         '.RaDatagrid-table, .RaDatagrid-root table, .RaDatagrid-tableWrapper table, table'
       )
@@ -38,7 +38,7 @@
 
     const ranked = tables
       .map(table => {
-        const bodyRows = Array.from(table.querySelectorAll('tbody tr'))
+        const bodyRows = Array.from<any>(table.querySelectorAll('tbody tr'))
         const visibleRows = bodyRows.filter(isVisible)
         return {
           table,
@@ -53,7 +53,7 @@
   }
 
   function getCellTexts(row) {
-    const selectorMatches = Array.from(row.querySelectorAll('td, th, [role="cell"], [role="gridcell"]'))
+    const selectorMatches = Array.from<any>(row.querySelectorAll('td, th, [role="cell"], [role="gridcell"]'))
       .map(node => (node.textContent || '').replace(/\s+/g, ' ').trim())
       .filter(Boolean)
 
@@ -61,7 +61,7 @@
       return selectorMatches
     }
 
-    const directChildren = Array.from(row.children)
+    const directChildren = Array.from<any>(row.children)
       .map(node => (node.textContent || '').replace(/\s+/g, ' ').trim())
       .filter(Boolean)
 
@@ -86,7 +86,7 @@
     const emailCell = cells.find(value => EMAIL_RE.test(value))
     const emailMatch = emailCell?.match(EMAIL_RE)
     const idCell = cells.find(value => UUID_RE.test(value))
-    const idMatch = idCell?.match(UUID_RE) || Array.from(row.querySelectorAll('[href], [data-id], [data-student-id]'))
+    const idMatch = idCell?.match(UUID_RE) || Array.from<any>(row.querySelectorAll('[href], [data-id], [data-student-id]'))
       .map(node => {
         const values = [
           node.getAttribute('href'),
@@ -146,8 +146,8 @@
   function extractStudentDirectoryFromDocument(doc) {
     const activeTable = getActiveStudentTable(doc)
     const rows = activeTable
-      ? Array.from(activeTable.querySelectorAll('tbody tr')).filter(isVisible)
-      : Array.from(doc.querySelectorAll('tbody tr')).filter(isVisible)
+      ? Array.from<any>(activeTable.querySelectorAll('tbody tr')).filter(isVisible)
+      : Array.from<any>(doc.querySelectorAll('tbody tr')).filter(isVisible)
     const students = []
     const seen = new Set()
 
@@ -165,16 +165,16 @@
   function inspectStudentDirectoryDocument(doc) {
     const activeTable = getActiveStudentTable(doc)
     const rows = activeTable
-      ? Array.from(activeTable.querySelectorAll('tbody tr')).filter(isVisible)
-      : Array.from(doc.querySelectorAll('tbody tr')).filter(isVisible)
-    const allTables = Array.from(doc.querySelectorAll('.RaDatagrid-table, table'))
+      ? Array.from<any>(activeTable.querySelectorAll('tbody tr')).filter(isVisible)
+      : Array.from<any>(doc.querySelectorAll('tbody tr')).filter(isVisible)
+    const allTables = Array.from<any>(doc.querySelectorAll('.RaDatagrid-table, table'))
     const sampleRows = rows
       .slice(0, 5)
       .map(row => (row.textContent || '').replace(/\s+/g, ' ').trim())
       .filter(Boolean)
       .map(text => text.slice(0, 220))
 
-    const emails = Array.from(doc.querySelectorAll('a[href^="mailto:"], [href], td, div, span'))
+    const emails = Array.from<any>(doc.querySelectorAll('a[href^="mailto:"], [href], td, div, span'))
       .map(node => {
         const text = (node.textContent || '').trim()
         const href = node.getAttribute && node.getAttribute('href')
@@ -184,7 +184,7 @@
       .map(value => value.match(EMAIL_RE)?.[0] || null)
       .filter(Boolean)
 
-    const uuids = Array.from(doc.querySelectorAll('[href], [data-id], [data-student-id], td, div, span'))
+    const uuids = Array.from<any>(doc.querySelectorAll('[href], [data-id], [data-student-id], td, div, span'))
       .map(node => {
         const candidates = [
           node.getAttribute && node.getAttribute('href'),

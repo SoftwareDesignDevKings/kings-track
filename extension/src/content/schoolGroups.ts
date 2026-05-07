@@ -32,7 +32,7 @@
       Object.entries(headers || {})
         .map(([key, value]) => [String(key || '').trim(), value])
         .filter(([key, value]) => key && value != null && String(value).trim() !== '')
-        .filter(([key]) => !blockedHeaders.has(key.toLowerCase()))
+        .filter(([key]) => !blockedHeaders.has(String(key).toLowerCase()))
     )
   }
 
@@ -456,7 +456,7 @@
       })
 
       nextButton.scrollIntoView({ block: 'center', inline: 'center' })
-      nextButton.click()
+      ;(nextButton as HTMLElement).click()
       state = await waitForPageChange(state)
     }
 

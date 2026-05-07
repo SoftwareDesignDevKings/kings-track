@@ -43,14 +43,14 @@
     const trigger = root.querySelector('[aria-label]') || root
     trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     return waitFor(() => {
-      const panels = Array.from(document.querySelectorAll('[role="listbox"], .p-dropdown-panel'))
+      const panels = Array.from<any>(document.querySelectorAll('[role="listbox"], .p-dropdown-panel'))
       return panels.find(panel => panel && panel.getBoundingClientRect().height > 0)
     }, 3000)
   }
 
   async function listDropdownOptions(ariaLabel) {
     const panel = await openDropdown(ariaLabel)
-    const options = Array.from(panel.querySelectorAll('[role="option"], .p-dropdown-item'))
+    const options = Array.from<any>(panel.querySelectorAll('[role="option"], .p-dropdown-item'))
       .map(option => ({
         id:
           option.getAttribute('data-value') ||
@@ -71,7 +71,7 @@
     const panel = await openDropdown(ariaLabel)
     const optionName = optionSelector?.name || optionSelector
     const optionId = optionSelector && typeof optionSelector === 'object' ? optionSelector.id : null
-    const option = Array.from(panel.querySelectorAll('[role="option"], .p-dropdown-item'))
+    const option = Array.from<any>(panel.querySelectorAll('[role="option"], .p-dropdown-item'))
       .find(node => {
         const nodeName = node.textContent.trim()
         const nodeId =
@@ -90,7 +90,7 @@
   }
 
   function findActionByText(pattern) {
-    const nodes = Array.from(document.querySelectorAll('button, a'))
+    const nodes = Array.from<any>(document.querySelectorAll('button, a'))
     return nodes.find(node => pattern.test(node.textContent || ''))
   }
 

@@ -290,7 +290,7 @@
       })
 
       nextButton.scrollIntoView({ block: 'center', inline: 'center' })
-      nextButton.click()
+      ;(nextButton as HTMLElement).click()
       state = await waitForPageChange(state)
     }
 
