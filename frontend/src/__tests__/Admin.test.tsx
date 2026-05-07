@@ -27,6 +27,7 @@ vi.mock('../services/api', () => ({
   useDeleteGradeoMappingByClass: vi.fn(),
   useAutoMatchGradeo: vi.fn(),
   useHealth: vi.fn(),
+  useCanvasHealth: vi.fn(() => ({ data: undefined })),
   useCurrentUser: vi.fn(() => ({ data: { email: 'admin@example.com', role: 'admin' } })),
 }))
 

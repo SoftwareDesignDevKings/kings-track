@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.routes import auth, courses, sync, admin, gradeo_admin, reminders_admin
+from app.api.routes import auth, courses, sync, admin, gradeo_admin, reminders_admin, canvas_health
 from app.sync.engine import sync_engine
 from app.reminders.engine import reminder_engine
 
@@ -50,6 +50,7 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(gradeo_admin.router, prefix="/api")
 app.include_router(reminders_admin.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(canvas_health.router, prefix="/api")
 
 
 @app.get("/api/health")
