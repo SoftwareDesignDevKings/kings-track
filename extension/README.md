@@ -319,6 +319,97 @@ runtime `Authorization: Bearer ...` header used by the Gradeo web app.
   - It may be useful when we need to know which students were actually relevant to a specific exam, especially if class membership changed over time.
   - It could also help explain discrepancies between the general class roster and a single exam/marking session.
 
+
+### Teacher exam session list (OWNER)
+
+- `GET /api/exam-process/session?limit=:limit&offset=:offset`
+- Example:
+  - `/api/exam-process/session?limit=50&offset=0`
+- Purpose:
+  - Returns all exam sessions the authenticated teacher/admin owns.
+- Response shape:
+  - `{ pgn: { total }, list: [{ session, summary, markingSessionId, isMarkingSessionFinished, userAccessAttribute, status, isSafeExamBrowserRequired, safeExamBrowserConfigFileId, ... }] }`
+- Useful fields confirmed:
+  - `session.startDate` — scheduled window open (UTC)
+  - `session.endDate` — scheduled window close (UTC)
+  - `summary.blueprintName` — exam/test name
+  - `summary.subjectName` — subject
+  - `markingSessionId` — joins to marking task summary
+  - `isMarkingSessionFinished` — whether grading is complete
+  - `userAccessAttribute` — `"OWNER"` for teacher/admin
+  - `status` — `SCHEDULED`, `LIVE`, `OVERDUE`, or `COMPLETED`
+  - `isSafeExamBrowserRequired` — high-stakes lockdown flag
+  - `safeExamBrowserConfigFileId` — SEB config reference (if required)
+- Notes:
+  - Sample size observed: 267 records for one teacher account.
+  - `session.startDate` / `session.endDate` are the **scheduled window** for all students, not individual start/submit times.
+
+### Personal exam participation history (PARTICIPANT)
+
+- `GET /api/exam-process/session-participant?limit=:limit&offset=:offset`
+- Example:
+  - `/api/exam-process/session-participant?limit=50&offset=0`
+- Purpose:
+  - Returns the authenticated user's own exam history.
+- Response shape:
+  - `[{ userAnswerSheetHeader, markingSessionId, isMarkingSessionFinished, status, ... }]`, where `userAnswerSheetHeader` contains personal timing data.
+- Useful fields confirmed:
+  - `userAnswerSheetHeader.startDate` — exact moment student clicked **Start**
+  - `userAnswerSheetHeader.submitDate` — exact moment student submitted (or auto-submitted)
+  - `userAnswerSheetHeader.endDate` — personal timer expiry (`startDate + durationSeconds`)
+  - `userAnswerSheetHeader.readTimeEndDate` — when reading time ended
+  - `userAnswerSheetHeader.userAnswerSheetId` — answer sheet identifier
+  - `markingSessionId` — joins to marking summary
+  - `isMarkingSessionFinished` — grading complete flag
+- Notes:
+  - Sample size observed: 6 records for one student account.
+  - This endpoint exposes **actual student action times**, not scheduled windows.
+  - Compare `userAnswerSheetHeader.startDate` to `session.startDate` to see when a student actually began relative to the scheduled window.
+
+### Marking session summary list
+
+- `GET /api/marking-session/summary?limit=:limit&offset=:offset`
+- Example:
+  - `/api/marking-session/summary?limit=10&offset=0`
+- Purpose:
+  - Returns aggregated marking task counts (commenced / completed / overdue).
+- Response shape:
+  - `[{ examSessionStartDate, createdDate, commencedCount, completedCount, overdueCount, ... }]`
+- Useful fields confirmed:
+  - `examSessionStartDate` — scheduled exam window start (same as `session.startDate` above)
+  - `createdDate` — when the marking session was created / completed
+  - `commencedCount` — tasks started by markers
+  - `completedCount` — tasks fully marked
+  - `overdueCount` — tasks past due date
+- Notes:
+  - Useful for cross-checking marking progress against the teacher session list.
+
+---
+
+## Date field semantics
+
+All API timestamps are UTC (`Z` suffix). The Gradeo frontend renders them as AEST (Sydney, UTC+10).
+
+| Field | Context | Semantics |
+|-------|---------|-----------|
+| `session.startDate` | Session (OWNER) | Scheduled window open for **all** students |
+| `session.endDate` | Session (OWNER) | Scheduled window close for **all** students |
+| `userAnswerSheetHeader.startDate` | Participant | Exact student click-to-start time |
+| `userAnswerSheetHeader.submitDate` | Participant | Exact student submission time |
+| `userAnswerSheetHeader.endDate` | Participant | Personal timer expiry (computed) |
+| `userAnswerSheetHeader.readTimeEndDate` | Participant | When reading time ended |
+| `examSessionStartDate` | Marking summary | Scheduled window start (same as `session.startDate`) |
+| `createdDate` | Marking summary | When marking session was created / completed |
+
+## Status values
+
+| Status | Meaning |
+|--------|---------|
+| `SCHEDULED` | Window has not yet opened |
+| `LIVE` | Window is currently open |
+| `OVERDUE` | Window has passed, not yet completed |
+| `COMPLETED` | Student has submitted or auto-submitted |
+
 ## What We Still Need
 
 - Confirmation whether any non-CSV JSON detail endpoint exists for a single
