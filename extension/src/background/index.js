@@ -470,13 +470,6 @@
       ? Math.max(1000, Number(options.timeoutMs))
       : null
     const requestId = createRequestId('kt')
-    const requestOptions = {
-      ...(options || {}),
-      headers: {
-        ...(options?.headers || {}),
-        'X-Extension-Request-Id': requestId,
-      },
-    }
     await ext.logDebug('background', 'kings_track_request_started', {
       requestId,
       path,
@@ -485,7 +478,7 @@
       ...(debugDetails || {}),
     })
     try {
-      const result = await ext.fetchApi(path, requestOptions)
+      const result = await ext.bridgeRequest(path, options || {})
       const durationMs = Date.now() - startedAt
       await ext.logDebug(
         'background',
@@ -609,13 +602,24 @@
   }
 
   async function ensureAdmin() {
-    const user = await ext.getCurrentUser()
-    if (!user || user.role !== 'admin') {
-      await ext.logDebug('background', 'admin_check_failed', { user: user || null })
-      throw new Error('Your Kings Track account must have admin access to use this extension.')
+    // Admin gating now lives on the dashboard bridge page — it refuses to install
+    // its listener for non-admin sessions. Here we only verify a bridge tab is
+    // available so we can fail fast with a clear message.
+    const config = await ext.getConfig()
+    const base = String(config.frontendUrl || '').trim().replace(/\/$/, '')
+    if (!base) {
+      throw new Error('Set the Kings Track Dashboard URL in Settings.')
     }
-    await ext.logDebug('background', 'admin_check_passed', { email: user.email, role: user.role })
-    return user
+    const tabs = await browser.tabs.query({})
+    const bridgeTab = (tabs || []).find(tab =>
+      typeof tab.url === 'string' && tab.url.startsWith(`${base}/extension-bridge`),
+    )
+    if (!bridgeTab) {
+      await ext.logDebug('background', 'bridge_tab_missing', { frontendUrl: base })
+      throw new Error(`Open the Kings Track Extension Bridge tab at ${base}/extension-bridge and stay signed in.`)
+    }
+    await ext.logDebug('background', 'bridge_tab_found', { frontendUrl: base, tabId: bridgeTab.id })
+    return { email: 'bridge-session', role: 'admin' }
   }
 
   async function syncStudentsApi() {
@@ -1527,8 +1531,9 @@
 
   browser.runtime.onMessage.addListener((message) => {
     if (message?.type === 'kings.debug.log') {
-      const entry = message.entry || {}
-      return ext.sendDebugLog(entry)
+      // Telemetry was dropped — content scripts still emit these for the popup
+      // log viewer; we just acknowledge here.
+      return Promise.resolve(undefined)
     }
 
     if (message?.type === 'kings.gradeo.progress') {
@@ -1536,32 +1541,39 @@
     }
 
     if (message?.type === 'kings.popup.getContext') {
-      return Promise.all([
-        ext.getConfig(),
-        getState(),
-        ext.getCachedCurrentUser(5 * 60 * 1000).catch(() => null),
-        ext.getCachedAuthStatus(5 * 60 * 1000).catch(() => null),
-        ext.getCachedBackendStatus(5 * 60 * 1000).catch(() => null),
-      ])
-        .then(([config, state, user, authStatus, backendStatus]) => {
-          ext.refreshBackendStatus().catch(() => null)
-          ext.getCurrentUser({ maxAgeMs: 30 * 1000 }).catch(() => null)
-          return {
-            config,
-            state,
-            user,
-            authStatus,
-            backendStatus,
+      return Promise.all([ext.getConfig(), getState()])
+        .then(async ([config, state]) => {
+          const base = String(config.frontendUrl || '').trim().replace(/\/$/, '')
+          let bridgeTabOpen = false
+          if (base) {
+            try {
+              const tabs = await browser.tabs.query({})
+              bridgeTabOpen = (tabs || []).some(tab =>
+                typeof tab.url === 'string' && tab.url.startsWith(`${base}/extension-bridge`),
+              )
+            } catch (_error) {
+              bridgeTabOpen = false
+            }
           }
+          return { config, state, bridgeTabOpen }
         })
     }
 
     if (message?.type === 'kings.popup.saveConfig') {
       ext.logDebug('popup', 'save_config_clicked', {
-        apiBaseUrl: message.config?.apiBaseUrl || '',
-        hasExtensionApiKey: Boolean(message.config?.extensionApiKey),
+        frontendUrl: message.config?.frontendUrl || '',
       })
       return ext.saveConfig(message.config)
+    }
+
+    if (message?.type === 'kings.popup.openBridgeTab') {
+      return ext.getConfig().then((config) => {
+        const base = String(config.frontendUrl || '').trim().replace(/\/$/, '')
+        if (!base) {
+          throw new Error('Set the Kings Track Dashboard URL in Settings.')
+        }
+        return browser.tabs.create({ url: `${base}/extension-bridge` })
+      })
     }
 
     if (message?.type === 'kings.popup.syncStudents' || message?.type === 'kings.popup.syncStudentDirectory') {

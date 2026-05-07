@@ -4,8 +4,7 @@
   const CONFIG_KEY = 'kingsTrackConfig'
 
   ext.defaultConfig = {
-    apiBaseUrl: 'http://localhost:8000/api',
-    extensionApiKey: '',
+    frontendUrl: 'http://localhost:5173',
     gradeoApiHeadersJson: '{}',
   }
 
@@ -17,17 +16,10 @@
   ext.saveConfig = async function saveConfig(config) {
     await browser.storage.local.set({
       [CONFIG_KEY]: {
-        apiBaseUrl: String(config.apiBaseUrl || '').trim(),
-        extensionApiKey: String(config.extensionApiKey || '').trim(),
+        frontendUrl: String(config.frontendUrl || '').trim().replace(/\/$/, ''),
         gradeoApiHeadersJson: String(config.gradeoApiHeadersJson || '{}').trim() || '{}',
       },
     })
-    if (typeof ext.invalidateCurrentUserCache === 'function') {
-      await ext.invalidateCurrentUserCache()
-    }
-    if (typeof ext.invalidateBackendStatusCache === 'function') {
-      await ext.invalidateBackendStatusCache()
-    }
     return ext.getConfig()
   }
 })()

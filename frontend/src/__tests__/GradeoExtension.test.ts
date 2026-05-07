@@ -106,39 +106,4 @@ describe('Gradeo extension utilities', () => {
     expect(progressEvents.at(-1)).toMatchObject({ phase: 'class_ready', current: 2, total: 2 })
   })
 
-  it('times out a stalled backend request instead of waiting forever', async () => {
-    vi.useFakeTimers()
-    ;(globalThis as any).KingsTrackExtension = {
-      getConfig: vi.fn().mockResolvedValue({
-        apiBaseUrl: 'https://kings-track.test/api',
-        extensionApiKey: 'extension-key',
-        apiTimeoutMs: 1000,
-      }),
-    }
-
-    globalThis.fetch = vi.fn((_url: string, options?: RequestInit) => new Promise((_resolve, reject) => {
-      options?.signal?.addEventListener('abort', () => {
-        reject(options.signal?.reason || new DOMException('Aborted', 'AbortError'))
-      }, { once: true })
-    })) as typeof fetch
-
-    await import('../../../extension/src/shared/auth.js')
-    const ext = (globalThis as any).KingsTrackExtension
-
-    const request = ext.fetchApi('/auth/me', { timeoutMs: 1000 })
-    const rejection = expect(request).rejects.toThrow(/timed out/i)
-
-    await vi.advanceTimersByTimeAsync(1100)
-
-    await rejection
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://kings-track.test/api/auth/me',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          'Content-Type': 'application/json',
-          'X-Extension-Api-Key': 'extension-key',
-        }),
-      }),
-    )
-  })
 })

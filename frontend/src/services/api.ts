@@ -5,7 +5,6 @@ import type {
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
   GradeoImportRun, GradeoCourseReport,
-  ExtensionApiKeyStatus, ExtensionApiKeyResponse,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -166,39 +165,6 @@ export function useRemoveUser() {
     mutationFn: (email: string) =>
       fetchJSON<void>(`/admin/users/${encodeURIComponent(email)}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
-  })
-}
-
-export function useExtensionApiKeyStatus() {
-  return useQuery<ExtensionApiKeyStatus>({
-    queryKey: ['admin-extension-api-key'],
-    queryFn: () => fetchJSON<ExtensionApiKeyStatus>('/admin/extension-api-key'),
-  })
-}
-
-export function useGenerateExtensionApiKey() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () =>
-      fetchJSON<ExtensionApiKeyResponse>('/admin/extension-api-key', {
-        method: 'POST',
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-extension-api-key'] })
-    },
-  })
-}
-
-export function useRevokeExtensionApiKey() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () =>
-      fetchJSON<void>('/admin/extension-api-key', {
-        method: 'DELETE',
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-extension-api-key'] })
-    },
   })
 }
 

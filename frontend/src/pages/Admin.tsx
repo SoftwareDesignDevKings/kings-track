@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import Header from '../components/Header'
 import {
   useAdminUsers,
   useAddUser,
   useRemoveUser,
-  useExtensionApiKeyStatus,
-  useGenerateExtensionApiKey,
-  useRevokeExtensionApiKey,
   useCourses,
   useWhitelist,
   useAvailableCourses,
@@ -49,9 +47,6 @@ export default function Admin() {
 
   const addUser = useAddUser()
   const removeUser = useRemoveUser()
-  const { data: extensionApiKeyStatus, isLoading: extensionApiKeyStatusLoading } = useExtensionApiKeyStatus()
-  const generateExtensionApiKey = useGenerateExtensionApiKey()
-  const revokeExtensionApiKey = useRevokeExtensionApiKey()
   const addToWhitelist = useAddToWhitelist()
   const removeFromWhitelist = useRemoveFromWhitelist()
   const { data: syncStatus } = useSyncStatus()
@@ -93,8 +88,6 @@ export default function Admin() {
   const [gradeoCanvasId, setGradeoCanvasId] = useState<number | ''>('')
   const [gradeoClassId, setGradeoClassId] = useState<string>('')
   const [autoMatchedCourse, setAutoMatchedCourse] = useState<string | null>(null)
-  const [generatedExtensionApiKey, setGeneratedExtensionApiKey] = useState<string | null>(null)
-  const [extensionApiKeyCopied, setExtensionApiKeyCopied] = useState(false)
 
   function handleCreateEdStemMapping(e: React.FormEvent) {
     e.preventDefault()
@@ -195,21 +188,6 @@ export default function Admin() {
       { email: newEmail.trim(), role: newRole },
       { onSuccess: () => setNewEmail('') },
     )
-  }
-
-  function handleGenerateExtensionApiKey() {
-    generateExtensionApiKey.mutate(undefined, {
-      onSuccess: data => {
-        setGeneratedExtensionApiKey(data.api_key)
-        setExtensionApiKeyCopied(false)
-      },
-    })
-  }
-
-  async function handleCopyExtensionApiKey() {
-    if (!generatedExtensionApiKey) return
-    await navigator.clipboard.writeText(generatedExtensionApiKey)
-    setExtensionApiKeyCopied(true)
   }
 
   return (
@@ -480,119 +458,36 @@ export default function Admin() {
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900">Extension API Key</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Generate a dedicated key for the Gradeo extension so it can authenticate without Google sign-in.
-                </p>
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <button
-                  onClick={handleGenerateExtensionApiKey}
-                  disabled={generateExtensionApiKey.isPending}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
-                >
-                  {generateExtensionApiKey.isPending
-                    ? 'Generating…'
-                    : extensionApiKeyStatus?.has_key
-                      ? 'Regenerate key'
-                      : 'Generate key'}
-                </button>
-                <button
-                  onClick={() => revokeExtensionApiKey.mutate(undefined, {
-                    onSuccess: () => {
-                      setGeneratedExtensionApiKey(null)
-                      setExtensionApiKeyCopied(false)
-                    },
-                  })}
-                  disabled={revokeExtensionApiKey.isPending || !extensionApiKeyStatus?.has_key}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {revokeExtensionApiKey.isPending ? 'Revoking…' : 'Revoke key'}
-                </button>
-              </div>
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-900">Gradeo Extension</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Open the bridge tab while running syncs from the Gradeo browser extension.
+              </p>
             </div>
-
-            <div className="px-5 py-5 border-b border-slate-100 bg-slate-50/60">
-              <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
-                  <p className="text-sm font-semibold text-slate-900">Current status</p>
-                  {extensionApiKeyStatusLoading ? (
-                    <p className="mt-3 text-sm text-slate-500">Loading key status…</p>
-                  ) : (
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Saved key</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">
-                          {extensionApiKeyStatus?.has_key ? extensionApiKeyStatus.key_hint || 'Configured' : 'Not generated'}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Last used</p>
-                        <p className="mt-1 text-sm font-medium text-slate-700">
-                          {formatDateTime(extensionApiKeyStatus?.last_used_at)}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Created</p>
-                        <p className="mt-1 text-sm font-medium text-slate-700">
-                          {formatDateTime(extensionApiKeyStatus?.created_at)}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Rotation</p>
-                        <p className="mt-1 text-sm font-medium text-slate-700">
-                          Regenerating immediately invalidates the old key.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-brand-200 bg-brand-50/50 px-4 py-4">
-                  <p className="text-sm font-semibold text-slate-900">Extension setup</p>
-                  <ol className="mt-3 space-y-2 text-sm text-slate-600 list-decimal list-inside">
-                    <li>Generate a key here and copy it once.</li>
-                    <li>Open the Gradeo extension popup and save your Kings Track API base URL.</li>
-                    <li>Paste the key into the extension, save it, then use the sync workflow as normal.</li>
-                  </ol>
-                  <p className="mt-3 text-xs text-slate-500">
-                    The extension sends this key in a dedicated header, so it no longer needs a browser login flow.
+            <div className="px-5 py-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <p className="text-sm font-semibold text-slate-900">How it works</p>
+                <ol className="mt-3 space-y-2 text-sm text-slate-600 list-decimal list-inside">
+                  <li>Open the Extension Bridge tab and stay signed in as admin.</li>
+                  <li>In the extension popup, set the dashboard URL and paste fresh Gradeo headers.</li>
+                  <li>Run sync actions from the popup. Data is forwarded through your session — no API key needed.</li>
+                </ol>
+              </div>
+              <div className="rounded-xl border border-brand-200 bg-brand-50/50 px-4 py-4 flex flex-col justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Extension Bridge</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    The bridge listens for the extension and forwards requests to the backend.
                   </p>
                 </div>
+                <Link
+                  to="/extension-bridge"
+                  className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700"
+                >
+                  Open Bridge
+                </Link>
               </div>
             </div>
-
-            {generatedExtensionApiKey && (
-              <div className="px-5 py-4 border-b border-slate-100 bg-emerald-50/70">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-emerald-900">New extension key</p>
-                    <p className="mt-1 text-xs text-emerald-800/80">
-                      This is only shown once. Copy it into the extension now before leaving this page.
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleCopyExtensionApiKey}
-                    className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-50"
-                  >
-                    {extensionApiKeyCopied ? 'Copied' : 'Copy key'}
-                  </button>
-                </div>
-                <pre className="mt-3 overflow-x-auto rounded-lg border border-emerald-200 bg-white px-3 py-3 text-sm text-slate-800">
-                  {generatedExtensionApiKey}
-                </pre>
-              </div>
-            )}
-
-            {(generateExtensionApiKey.isError || revokeExtensionApiKey.isError) && (
-              <div className="px-5 py-3 text-sm text-red-600 bg-red-50/60">
-                {generateExtensionApiKey.isError
-                  ? (generateExtensionApiKey.error as Error).message
-                  : (revokeExtensionApiKey.error as Error).message}
-              </div>
-            )}
           </section>
 
           {/* ── Course Whitelist ───────────────────────────────────── */}
