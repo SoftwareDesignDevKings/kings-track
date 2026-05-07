@@ -1,28 +1,30 @@
-(function () {
-  const homeView = document.getElementById('homeView')
-  const settingsView = document.getElementById('settingsView')
-  const openSettingsButton = document.getElementById('openSettings')
-  const closeSettingsButton = document.getElementById('closeSettings')
-  const saveSettingsButton = document.getElementById('saveSettings')
-  const openBridgeTabButton = document.getElementById('openBridgeTab')
+import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
 
-  const frontendUrl = document.getElementById('frontendUrl')
-  const gradeoApiHeadersJson = document.getElementById('gradeoApiHeadersJson')
-  const homeNote = document.getElementById('homeNote')
-  const authDetail = document.getElementById('authDetail')
-  const statePill = document.getElementById('statePill')
-  const statusHeadline = document.getElementById('statusHeadline')
-  const statusSummary = document.getElementById('statusSummary')
-  const noticeBanner = document.getElementById('noticeBanner')
+(function () {
+  const homeView = getRequiredElement<HTMLElement>('homeView')
+  const settingsView = getRequiredElement<HTMLElement>('settingsView')
+  const openSettingsButton = getRequiredElement<HTMLButtonElement>('openSettings')
+  const closeSettingsButton = getRequiredElement<HTMLButtonElement>('closeSettings')
+  const saveSettingsButton = getRequiredElement<HTMLButtonElement>('saveSettings')
+  const openBridgeTabButton = getRequiredElement<HTMLButtonElement>('openBridgeTab')
+
+  const frontendUrl = getRequiredElement<HTMLInputElement>('frontendUrl')
+  const gradeoApiHeadersJson = getRequiredElement<HTMLTextAreaElement>('gradeoApiHeadersJson')
+  const homeNote = getRequiredElement<HTMLElement>('homeNote')
+  const authDetail = getRequiredElement<HTMLElement>('authDetail')
+  const statePill = getRequiredElement<HTMLElement>('statePill')
+  const statusHeadline = getRequiredElement<HTMLElement>('statusHeadline')
+  const statusSummary = getRequiredElement<HTMLElement>('statusSummary')
+  const noticeBanner = getRequiredElement<HTMLElement>('noticeBanner')
 
   const bridgeSignals = [
-    document.getElementById('settingsBridgePill'),
+    getOptionalElement<HTMLElement>('settingsBridgePill'),
   ].filter(Boolean)
   const headerSignals = [
-    document.getElementById('settingsHeadersPill'),
+    getOptionalElement<HTMLElement>('settingsHeadersPill'),
   ].filter(Boolean)
 
-  const configInputs = [frontendUrl, gradeoApiHeadersJson]
+  const configInputs: HTMLElement[] = [frontendUrl, gradeoApiHeadersJson]
   const actionButtonIds = ['syncClasses', 'syncStudents', 'importMappedClasses']
 
   let noticeTimer = null
@@ -31,15 +33,6 @@
   function showView(view) {
     homeView.classList.toggle('active', view === 'home')
     settingsView.classList.toggle('active', view === 'settings')
-  }
-
-  function setBusy(buttonIds, busy) {
-    buttonIds.forEach((id) => {
-      const button = document.getElementById(id)
-      if (button) {
-        button.disabled = busy
-      }
-    })
   }
 
   function showNotice(kind, message) {
@@ -55,7 +48,7 @@
   }
 
   function isEditingConfig() {
-    return configInputs.includes(document.activeElement)
+    return configInputs.includes(document.activeElement as HTMLElement)
   }
 
   function titleCaseStatus(status) {
@@ -102,7 +95,7 @@
 
   function updateActionAvailability(ready) {
     if (actionsBusy) return
-    setBusy(actionButtonIds, !ready)
+    setButtonsBusy(actionButtonIds, !ready)
   }
 
   function buildStateSummary(state) {
@@ -324,14 +317,14 @@
 
   async function runAction(messageType) {
     actionsBusy = true
-    setBusy(actionButtonIds, true)
+    setButtonsBusy(actionButtonIds, true)
     try {
       await browser.runtime.sendMessage({ type: messageType })
     } catch (error) {
       showNotice('warn', error.message || String(error))
     } finally {
       actionsBusy = false
-      setBusy(actionButtonIds, false)
+      setButtonsBusy(actionButtonIds, false)
       await refresh()
     }
   }

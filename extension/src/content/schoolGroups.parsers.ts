@@ -28,7 +28,7 @@
   }
 
   function getActiveSchoolGroupsTable(doc) {
-    const tables = Array.from(
+    const tables = Array.from<any>(
       doc.querySelectorAll(
         '.RaDatagrid-table, .RaDatagrid-root table, .RaDatagrid-tableWrapper table, table'
       )
@@ -36,7 +36,7 @@
 
     const ranked = tables
       .map(table => {
-        const bodyRows = Array.from(table.querySelectorAll('tbody tr'))
+        const bodyRows = Array.from<any>(table.querySelectorAll('tbody tr'))
         const visibleRows = bodyRows.filter(isVisible)
         return {
           table,
@@ -51,7 +51,7 @@
   }
 
   function getCellTexts(row) {
-    const selectorMatches = Array.from(row.querySelectorAll('td, th, [role="cell"], [role="gridcell"]'))
+    const selectorMatches = Array.from<any>(row.querySelectorAll('td, th, [role="cell"], [role="gridcell"]'))
       .map(node => (node.textContent || '').replace(/\s+/g, ' ').trim())
       .filter(Boolean)
 
@@ -59,7 +59,7 @@
       return selectorMatches
     }
 
-    return Array.from(row.children)
+    return Array.from<any>(row.children)
       .map(node => (node.textContent || '').replace(/\s+/g, ' ').trim())
       .filter(Boolean)
   }
@@ -98,8 +98,8 @@
   function extractSchoolGroupsFromDocument(doc) {
     const activeTable = getActiveSchoolGroupsTable(doc)
     const rows = activeTable
-      ? Array.from(activeTable.querySelectorAll('tbody tr')).filter(isVisible)
-      : Array.from(doc.querySelectorAll('tbody tr')).filter(isVisible)
+      ? Array.from<any>(activeTable.querySelectorAll('tbody tr')).filter(isVisible)
+      : Array.from<any>(doc.querySelectorAll('tbody tr')).filter(isVisible)
     const classes = []
     const seen = new Set()
 
@@ -117,8 +117,8 @@
   function inspectSchoolGroupsDocument(doc) {
     const activeTable = getActiveSchoolGroupsTable(doc)
     const rows = activeTable
-      ? Array.from(activeTable.querySelectorAll('tbody tr')).filter(isVisible)
-      : Array.from(doc.querySelectorAll('tbody tr')).filter(isVisible)
+      ? Array.from<any>(activeTable.querySelectorAll('tbody tr')).filter(isVisible)
+      : Array.from<any>(doc.querySelectorAll('tbody tr')).filter(isVisible)
 
     return {
       rowCount: rows.length,
