@@ -168,9 +168,6 @@ export default function Admin() {
   const formatCourseLabel = (name: string, code?: string | null) =>
     code ? `${name} · ${code}` : name
 
-  const formatDateTime = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleString() : 'Never'
-
   useEffect(() => {
     const wasRunning = wasRunningRef.current
     if (wasRunning && !isRunning) {
