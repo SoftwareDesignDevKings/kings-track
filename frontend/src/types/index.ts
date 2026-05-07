@@ -136,6 +136,13 @@ export interface HealthResponse {
   edstem_configured: boolean
 }
 
+export interface CanvasHealthResponse {
+  up: boolean
+  configured: boolean
+  status: number | null
+  reason: string
+}
+
 // ─── EdStem lesson matrix ─────────────────────────────────────────────────────
 
 export type EdStemLessonStatus = 'completed' | 'viewed' | 'not_started'

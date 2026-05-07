@@ -1,5 +1,6 @@
 import Header from '../components/Header'
 import CourseCard from '../components/CourseCard'
+import CanvasOutageBanner from '../components/CanvasOutageBanner'
 import { useCourses, useHealth } from '../services/api'
 
 function SetupBanner() {
@@ -33,6 +34,7 @@ export default function Overview() {
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
+      <CanvasOutageBanner />
 
       <main className="max-w-screen-2xl mx-auto px-6 py-8">
         {/* Setup banner if Canvas not configured */}

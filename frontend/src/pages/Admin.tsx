@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Header from '../components/Header'
+import CanvasOutageBanner from '../components/CanvasOutageBanner'
 import {
   useAdminUsers,
   useAddUser,
@@ -217,6 +218,7 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
+      <CanvasOutageBanner />
 
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
         <div className="mb-6">

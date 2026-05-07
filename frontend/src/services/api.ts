@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type {
-  Course, CourseMatrix, SyncStatus, HealthResponse, AppUser,
+  Course, CourseMatrix, SyncStatus, HealthResponse, CanvasHealthResponse, AppUser,
   WhitelistedCourse, AvailableCourse,
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
@@ -52,6 +52,16 @@ export function useHealth() {
     queryFn: () => fetchJSON<HealthResponse>('/health'),
     refetchInterval: 30_000,
     staleTime: 20_000,
+  })
+}
+
+export function useCanvasHealth() {
+  return useQuery<CanvasHealthResponse>({
+    queryKey: ['canvas-health'],
+    queryFn: () => fetchJSON<CanvasHealthResponse>('/canvas/health'),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    retry: false,
   })
 }
 
