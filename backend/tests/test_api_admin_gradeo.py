@@ -273,6 +273,34 @@ def _summary_import_payload():
     }
 
 
+def _summary_import_payload_for(
+    *,
+    gradeo_class_id: str = GRADEO_CLASS_ID,
+    gradeo_class_name: str = "12 encx_2026",
+    gradeo_student_id: str = GRADEO_STUDENT_ID,
+    student_name: str = "Eamon Wong",
+    marking_session_id: str = GRADEO_MARKING_SESSION_ID,
+    exam_session_id: str = GRADEO_EXAM_SESSION_ID,
+    status: str = "scored",
+    exam_mark: str | None = "9",
+):
+    payload = _summary_import_payload()
+    payload["gradeo_class_id"] = gradeo_class_id
+    payload["gradeo_class_name"] = gradeo_class_name
+    payload["students"][0]["gradeo_student_id"] = gradeo_student_id
+    payload["students"][0]["student_name"] = student_name
+    row = payload["students"][0]["exam_rows"][0]
+    row["gradeo_class_id"] = gradeo_class_id
+    row["class_name"] = gradeo_class_name
+    row["gradeo_marking_session_id"] = marking_session_id
+    row["marking_session_id"] = marking_session_id
+    row["gradeo_exam_session_id"] = exam_session_id
+    row["status"] = status
+    row["exam_mark"] = exam_mark
+    row["answer_submitted"] = "Yes" if status != "not_submitted" else "No"
+    return payload
+
+
 def _empty_import_payload():
     return {
         "gradeo_class_id": GRADEO_CLASS_ID,
@@ -662,12 +690,9 @@ def test_gradeo_report_returns_null_for_unassigned_exam_cells(app_client):
     report_data = report.json()
 
     eamon = next(student for student in report_data["students"] if student["name"] == "Eamon Wong")
-    noah = next(student for student in report_data["students"] if student["name"] == "Noah Ould")
-
     assert eamon["results"][GRADEO_MARKING_SESSION_ID]["status"] == "scored"
     assert eamon["completion_rate"] == 1.0
-    assert noah["results"][GRADEO_MARKING_SESSION_ID] is None
-    assert noah["completion_rate"] is None
+    assert report_data["hidden_students"] == [{"id": OUT_OF_SCOPE_USER_ID + 1, "name": "Noah Ould"}]
 
 
 def test_gradeo_same_canonical_exam_can_exist_in_multiple_sessions_within_one_class(app_client):
@@ -694,6 +719,152 @@ def test_gradeo_same_canonical_exam_can_exist_in_multiple_sessions_within_one_cl
     eamon = next(student for student in data["students"] if student["name"] == "Eamon Wong")
     assert eamon["results"]["marking-session-1"]["exam_mark"] == 9.0
     assert eamon["results"]["marking-session-2"]["exam_mark"] == 8.0
+
+
+def test_gradeo_report_dedupes_same_marking_session_across_mapped_classes(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": SECOND_GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx duplicate",
+        },
+    )
+
+    first = app_client.post("/api/admin/gradeo/imports", json=_summary_import_payload())
+    second = app_client.post(
+        "/api/admin/gradeo/imports",
+        json=_summary_import_payload_for(
+            gradeo_class_id=SECOND_GRADEO_CLASS_ID,
+            gradeo_class_name="12 encx duplicate",
+        ),
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert _scalar("SELECT COUNT(*) FROM gradeo_class_exam_assignments") == 2
+
+    report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
+    assert report.status_code == 200
+    data = report.json()
+    assert [exam["id"] for exam in data["exams"]] == [GRADEO_MARKING_SESSION_ID]
+    assert {item["gradeo_class_id"] for item in data["gradeo_classes"]} == {GRADEO_CLASS_ID, SECOND_GRADEO_CLASS_ID}
+
+    eamon = next(student for student in data["students"] if student["name"] == "Eamon Wong")
+    assert set(eamon["results"]) == {GRADEO_MARKING_SESSION_ID}
+    assert eamon["results"][GRADEO_MARKING_SESSION_ID]["status"] == "scored"
+
+
+def test_gradeo_report_uses_newest_imported_duplicate_result_state(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": SECOND_GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx duplicate",
+        },
+    )
+
+    scored = app_client.post("/api/admin/gradeo/imports", json=_summary_import_payload())
+    awaiting = app_client.post(
+        "/api/admin/gradeo/imports",
+        json=_summary_import_payload_for(
+            gradeo_class_id=SECOND_GRADEO_CLASS_ID,
+            gradeo_class_name="12 encx duplicate",
+            status="awaiting_marking",
+            exam_mark=None,
+        ),
+    )
+    assert scored.status_code == 201
+    assert awaiting.status_code == 201
+    seed(
+        """
+        UPDATE gradeo_assignment_results gar
+        SET last_imported_at = '2026-01-01T00:00:00+00:00'
+        FROM gradeo_class_exam_assignments gcea
+        WHERE gar.gradeo_class_exam_assignment_id = gcea.id
+          AND gcea.gradeo_class_id = :gradeo_class_id
+        """,
+        {"gradeo_class_id": GRADEO_CLASS_ID},
+    )
+    seed(
+        """
+        UPDATE gradeo_assignment_results gar
+        SET last_imported_at = '2026-01-02T00:00:00+00:00'
+        FROM gradeo_class_exam_assignments gcea
+        WHERE gar.gradeo_class_exam_assignment_id = gcea.id
+          AND gcea.gradeo_class_id = :gradeo_class_id
+        """,
+        {"gradeo_class_id": SECOND_GRADEO_CLASS_ID},
+    )
+
+    report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
+    assert report.status_code == 200
+    data = report.json()
+    eamon = next(student for student in data["students"] if student["name"] == "Eamon Wong")
+    result = eamon["results"][GRADEO_MARKING_SESSION_ID]
+    assert result["status"] == "awaiting_marking"
+    assert result["exam_mark"] is None
+
+
+def test_gradeo_report_includes_students_from_different_mapped_classes(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload_with_second_student())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": SECOND_GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx duplicate",
+        },
+    )
+
+    first = app_client.post("/api/admin/gradeo/imports", json=_summary_import_payload())
+    second = app_client.post(
+        "/api/admin/gradeo/imports",
+        json=_summary_import_payload_for(
+            gradeo_class_id=SECOND_GRADEO_CLASS_ID,
+            gradeo_class_name="12 encx duplicate",
+            gradeo_student_id=SECOND_GRADEO_STUDENT_ID,
+            student_name="Noah Ould",
+        ),
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+
+    report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
+    assert report.status_code == 200
+    data = report.json()
+    students_by_name = {student["name"]: student for student in data["students"]}
+    assert students_by_name["Eamon Wong"]["results"][GRADEO_MARKING_SESSION_ID]["status"] == "scored"
+    assert students_by_name["Noah Ould"]["results"][GRADEO_MARKING_SESSION_ID]["status"] == "scored"
 
 
 def test_gradeo_same_canonical_exam_can_exist_in_multiple_classes(app_client):

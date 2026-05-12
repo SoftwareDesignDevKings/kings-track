@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from pathlib import Path
-import re
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +24,11 @@ from app.gradeo.source import extension_source_adapter
 
 router = APIRouter(prefix="/admin/gradeo", tags=["gradeo-admin"], dependencies=[Depends(require_admin)])
 logger = logging.getLogger("app.gradeo.extension")
-SNAPSHOT_DIR = Path("/app/debug_snapshots/gradeo")
+
+# Payload cap for the import route. The bridge serialises potentially large
+# Gradeo class payloads through the user's session; reject anything obviously
+# oversized to bound DB/memory pressure.
+IMPORT_MAX_BYTES = 25 * 1024 * 1024
 
 
 def _to_iso(value):
@@ -139,22 +140,6 @@ class GradeoImportBatchIn(GradeoImportPreflightIn):
     students: list[GradeoImportStudentIn]
 
 
-class GradeoExtensionLogIn(BaseModel):
-    timestamp: str | None = None
-    scope: str
-    event: str
-    details: dict | None = None
-
-
-class GradeoExtensionSnapshotIn(BaseModel):
-    page: str
-    title: str | None = None
-    scope: str
-    reason: str
-    html: str
-    metadata: dict | None = None
-
-
 @router.get("/student-directory")
 async def get_gradeo_student_directory_status(db: AsyncSession = Depends(get_db)):
     status_data = await get_student_directory_status(db)
@@ -194,50 +179,6 @@ async def post_gradeo_student_directory(
     return {
         **summary,
         "last_synced_at": _to_iso(summary["last_synced_at"]),
-    }
-
-
-@router.post("/extension-log", status_code=status.HTTP_202_ACCEPTED)
-async def ingest_gradeo_extension_log(
-    body: GradeoExtensionLogIn,
-    user: dict = Depends(require_admin),
-):
-    logger.info(
-        "extension_log scope=%s event=%s user=%s timestamp=%s details=%s",
-        body.scope,
-        body.event,
-        user["email"],
-        body.timestamp,
-        body.details or {},
-    )
-    return {"accepted": True}
-
-
-@router.post("/extension-snapshot", status_code=status.HTTP_201_CREATED)
-async def ingest_gradeo_extension_snapshot(
-    body: GradeoExtensionSnapshotIn,
-    user: dict = Depends(require_admin),
-):
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", f"{body.scope}-{body.reason}").strip("-").lower() or "snapshot"
-    filename = f"{timestamp}-{slug}.html"
-    path = SNAPSHOT_DIR / filename
-    path.write_text(body.html, encoding="utf-8")
-
-    logger.info(
-        "extension_snapshot scope=%s reason=%s user=%s page=%s path=%s metadata=%s",
-        body.scope,
-        body.reason,
-        user["email"],
-        body.page,
-        str(path),
-        body.metadata or {},
-    )
-    return {
-        "saved": True,
-        "path": str(path),
-        "filename": filename,
     }
 
 
@@ -370,16 +311,8 @@ async def create_gradeo_mapping(body: GradeoMappingIn, db: AsyncSession = Depend
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     await db.execute(
-        text(
-            """
-            DELETE FROM gradeo_class_mappings
-            WHERE canvas_course_id = :canvas_course_id OR gradeo_class_id = :gradeo_class_id
-            """
-        ),
-        {
-            "canvas_course_id": body.canvas_course_id,
-            "gradeo_class_id": body.gradeo_class_id,
-        },
+        text("DELETE FROM gradeo_class_mappings WHERE gradeo_class_id = :gradeo_class_id"),
+        {"gradeo_class_id": body.gradeo_class_id},
     )
     await db.execute(
         text(
@@ -403,6 +336,15 @@ async def delete_gradeo_mapping(canvas_course_id: int, db: AsyncSession = Depend
     await db.commit()
 
 
+@router.delete("/mappings/by-gradeo-class/{gradeo_class_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_gradeo_mapping_by_class(gradeo_class_id: str, db: AsyncSession = Depends(get_db)):
+    await db.execute(
+        text("DELETE FROM gradeo_class_mappings WHERE gradeo_class_id = :gradeo_class_id"),
+        {"gradeo_class_id": gradeo_class_id},
+    )
+    await db.commit()
+
+
 @router.post("/mappings/auto-match")
 async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
     await cleanup_invalid_gradeo_classes(db)
@@ -419,14 +361,12 @@ async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
         )
     )
     courses = await get_whitelisted_courses(db)
-    existing_mapping_rows = await db.execute(text("SELECT canvas_course_id FROM gradeo_class_mappings"))
-    occupied_canvas_course_ids = {row[0] for row in existing_mapping_rows.fetchall()}
     matched: list[dict] = []
     unmatched: list[dict] = []
 
     for gradeo_class_id, gradeo_class_name in class_rows.fetchall():
         candidate = unique_course_candidate(gradeo_class_name, courses)
-        if not candidate or candidate["course_id"] in occupied_canvas_course_ids:
+        if not candidate:
             unmatched.append(
                 {
                     "gradeo_class_id": gradeo_class_id,
@@ -441,8 +381,8 @@ async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
                 """
                 INSERT INTO gradeo_class_mappings (canvas_course_id, gradeo_class_id, gradeo_class_name, created_at)
                 VALUES (:canvas_course_id, :gradeo_class_id, :gradeo_class_name, NOW())
-                ON CONFLICT (canvas_course_id) DO UPDATE SET
-                    gradeo_class_id = EXCLUDED.gradeo_class_id,
+                ON CONFLICT (gradeo_class_id) DO UPDATE SET
+                    canvas_course_id = EXCLUDED.canvas_course_id,
                     gradeo_class_name = EXCLUDED.gradeo_class_name
                 """
             ),
@@ -460,7 +400,6 @@ async def auto_match_gradeo_mappings(db: AsyncSession = Depends(get_db)):
                 "gradeo_class_name": gradeo_class_name,
             }
         )
-        occupied_canvas_course_ids.add(candidate["course_id"])
 
     await db.commit()
     return {"matched": matched, "unmatched": unmatched}
@@ -496,9 +435,16 @@ async def preflight_gradeo_import(body: GradeoImportPreflightIn, db: AsyncSessio
 @router.post("/imports", status_code=status.HTTP_201_CREATED)
 async def create_gradeo_import(
     body: GradeoImportBatchIn,
+    request: Request,
     user: dict = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > IMPORT_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Import payload exceeds {IMPORT_MAX_BYTES} bytes",
+        )
     started_at = perf_counter()
     logger.info(
         "gradeo_import_route_started class_id=%s class_name=%s students=%s user=%s extension_version=%s",

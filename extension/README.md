@@ -13,17 +13,21 @@ pipeline.
 
 ## Setup
 
-1. Load the `extension/` folder as an unpacked extension in Chrome or Firefox.
-2. Open the popup and save:
+1. Install/build the extension package:
+   - `cd extension`
+   - `npm install --include=dev`
+   - `npm run build`
+2. Load the generated `extension/dist/` folder as an unpacked extension in Chrome or Firefox.
+3. Open the popup and save:
    - Kings Track API base URL, for example `https://your-backend.example.com/api`
    - Supabase URL
    - Supabase anon key
-3. Sign in with Google from the popup.
-4. Save a fresh copied Gradeo request in the `Gradeo API headers` field.
-5. Run `Sync classes`.
-6. Link Gradeo classes to Canvas courses in Kings Track.
-7. Run `Sync students`.
-8. Run `Import mapped classes`.
+4. Sign in with Google from the popup.
+5. Save a fresh copied Gradeo request in the `Gradeo API headers` field.
+6. Run `Sync classes`.
+7. Link Gradeo classes to Canvas courses in Kings Track.
+8. Run `Sync students`.
+9. Run `Import mapped classes`.
 
 ### Local testing
 
@@ -41,6 +45,8 @@ call `/auth/me` without a bearer token.
 
 ## Notes
 
+- Extension source lives in `src/**/*.ts`; browser-loadable files are emitted to
+  `dist/` by the local esbuild pipeline.
 - The visible popup flow is API-first and does not require opening a specific
   Gradeo page, as long as your browser still has a valid Gradeo session.
 - The old Gradeo content-script scraping code is still present in the repo for

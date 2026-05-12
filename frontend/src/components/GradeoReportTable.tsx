@@ -2,6 +2,7 @@ import type { GradeoCourseReport, GradeoExam, GradeoQuestionResult, GradeoResult
 
 interface Props {
   report: GradeoCourseReport
+  hiddenStudents?: Array<{ id: number; name: string }>
 }
 
 function CompletionBar({ value }: { value: number | null }) {
@@ -22,6 +23,14 @@ const statusDotConfig: Record<GradeoResultStatus, { dot: string; ring: string; l
   not_submitted: { dot: 'bg-slate-200', ring: 'ring-slate-100', label: 'Not submitted' },
   awaiting_marking: { dot: 'bg-amber-400', ring: 'ring-amber-200', label: 'Awaiting marking' },
   scored: { dot: 'bg-emerald-400', ring: 'ring-emerald-200', label: 'Scored' },
+}
+
+function CheckIcon({ className = 'h-2.5 w-2.5' }: { className?: string }) {
+  return (
+    <svg className={`${className} text-white`} fill="none" viewBox="0 0 10 10" aria-hidden="true">
+      <path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
 }
 
 function buildQuestionTooltip(exam: GradeoExam, questions: GradeoQuestionResult[]) {
@@ -74,9 +83,11 @@ function GradeoCell({
   return (
     <div
       title={title}
-      className={`h-5 w-5 mx-auto rounded-full ${cfg.dot} ring-2 ${cfg.ring} cursor-default`}
+      className={`h-5 w-5 mx-auto rounded-full flex items-center justify-center ${cfg.dot} ring-2 ${cfg.ring} cursor-default`}
       aria-label={`${examName}: ${cfg.label}`}
-    />
+    >
+      {status === 'scored' && <CheckIcon />}
+    </div>
   )
 }
 
@@ -92,7 +103,7 @@ function UnassignedCell({ examName }: { examName: string }) {
   )
 }
 
-export default function GradeoReportTable({ report }: Props) {
+export default function GradeoReportTable({ report, hiddenStudents = [] }: Props) {
   const exams = report.exams ?? []
   const students = report.students ?? []
 
@@ -113,11 +124,14 @@ export default function GradeoReportTable({ report }: Props) {
   }
 
   return (
+    <>
     <div className="activity-table-wrapper border border-slate-200 rounded-xl overflow-hidden">
       <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
         <span className="font-medium">Legend:</span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-emerald-200 inline-block" />
+          <span className="h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-emerald-200 inline-flex items-center justify-center">
+            <CheckIcon className="h-2 w-2" />
+          </span>
           Scored
         </span>
         <span className="inline-flex items-center gap-1.5">
@@ -203,5 +217,14 @@ export default function GradeoReportTable({ report }: Props) {
         </table>
       </div>
     </div>
+    {hiddenStudents.length > 0 && (
+      <p
+        className="text-xs text-slate-400 px-4 py-3 cursor-help"
+        title={hiddenStudents.map(s => s.name).join('\n')}
+      >
+        {hiddenStudents.length} student{hiddenStudents.length === 1 ? '' : 's'} hidden — not in Gradeo roster for this class
+      </p>
+    )}
+    </>
   )
 }

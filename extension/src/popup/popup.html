@@ -26,8 +26,7 @@
 
       body {
         margin: 0;
-        min-width: 360px;
-        max-width: 392px;
+        width: 380px;
         background: var(--bg);
         color: var(--text);
         font-family: Inter, system-ui, sans-serif;
@@ -97,7 +96,7 @@
 
       .view {
         display: none;
-        gap: 12px;
+        gap: 8px;
       }
 
       .view.active {
@@ -115,7 +114,16 @@
       }
 
       .panel.compact {
-        gap: 10px;
+        gap: 0;
+      }
+
+      .panel.compact > * + * {
+        margin-top: 8px;
+      }
+
+      .panel.compact > .signal-row,
+      .panel.compact > .signal-row + * {
+        margin-top: 0;
       }
 
       .status-row,
@@ -135,7 +143,13 @@
       .status-title {
         font-size: 17px;
         font-weight: 600;
-        line-height: 1.15;
+        line-height: 1.2;
+        height: calc(1.2em * 1);
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        line-clamp: 1;
       }
 
       .status-detail,
@@ -145,6 +159,19 @@
         font-size: 12px;
         line-height: 1.45;
         color: var(--muted);
+      }
+
+      .status-detail {
+        height: calc(1.45em * 2);
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        line-clamp: 2;
+      }
+
+      .home-note {
+        min-height: calc(1.45em * 1);
       }
 
       .panel-title {
@@ -185,7 +212,10 @@
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
+        margin-top: -4px;
+        margin-bottom: -4px;
       }
+
 
       .signal {
         display: inline-flex;
@@ -378,13 +408,11 @@
             <div id="statePill" class="status-chip">Idle</div>
           </div>
 
-          <div class="signal-row">
-            <span id="configPill" class="signal">King's Track</span>
-            <span id="authPill" class="signal">API Key</span>
-            <span id="headersPill" class="signal">Gradeo Headers</span>
-          </div>
-
           <p id="homeNote" class="home-note">Open Settings to connect.</p>
+
+          <div class="action-grid">
+            <button id="openBridgeTab" class="secondary action-button" type="button">Open Bridge tab</button>
+          </div>
         </section>
 
         <section class="panel">
@@ -414,8 +442,7 @@
           </div>
 
           <div class="signal-row">
-            <span id="settingsConfigPill" class="signal">King's Track</span>
-            <span id="settingsAuthPill" class="signal">API Key</span>
+            <span id="settingsBridgePill" class="signal">Bridge tab</span>
             <span id="settingsHeadersPill" class="signal">Gradeo Headers</span>
           </div>
 
@@ -423,13 +450,8 @@
 
           <div class="field-grid">
             <label>
-              API base URL
-              <input id="apiBaseUrl" placeholder="https://kings-track.onrender.com/api" />
-            </label>
-
-            <label>
-              Extension API key
-              <input id="extensionApiKey" type="password" placeholder="ktx_..." />
+              Kings Track Dashboard URL
+              <input id="frontendUrl" placeholder="http://localhost:5173" />
             </label>
 
             <label>

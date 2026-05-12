@@ -3,6 +3,7 @@ import Overview from './pages/Overview'
 import CourseDetail from './pages/CourseDetail'
 import Login from './pages/Login'
 import Admin from './pages/Admin'
+import ExtensionBridge from './pages/ExtensionBridge'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
         <Route path="/courses/:courseId" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+        <Route path="/extension-bridge" element={<ProtectedRoute><ExtensionBridge /></ProtectedRoute>} />
       </Routes>
     </BrowserRouter>
   )

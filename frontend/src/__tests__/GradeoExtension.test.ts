@@ -23,7 +23,7 @@ describe('Gradeo extension utilities', () => {
   })
 
   it('parses Gradeo CSV rows into a student import payload', async () => {
-    await import('../../../extension/src/shared/csv.js')
+    await import('../../../extension/src/shared/csv.ts')
     const ext = (globalThis as any).KingsTrackExtension
 
     const studentImport = ext.buildStudentImport(csvFixture, { id: 'fallback', name: 'Fallback Student' })
@@ -53,7 +53,7 @@ describe('Gradeo extension utilities', () => {
       </table>
     `
 
-    await import('../../../extension/src/content/schoolStudents.parsers.js')
+    await import('../../../extension/src/content/schoolStudents.parsers.ts')
     const ext = (globalThis as any).KingsTrackExtension
     const students = ext.extractStudentDirectoryFromDocument(document)
 
@@ -72,8 +72,8 @@ describe('Gradeo extension utilities', () => {
   })
 
   it('walks a selected class and emits per-student progress during reporting sync', async () => {
-    await import('../../../extension/src/shared/csv.js')
-    await import('../../../extension/src/content/reporting.sync.js')
+    await import('../../../extension/src/shared/csv.ts')
+    await import('../../../extension/src/content/reporting.sync.ts')
     const ext = (globalThis as any).KingsTrackExtension
 
     const selectedStudents: string[] = []
@@ -134,7 +134,7 @@ describe('Gradeo extension utilities', () => {
       }),
     }) as unknown as typeof fetch
 
-    await import('../../../extension/src/background/index.js')
+    await import('../../../extension/src/background/index.ts')
     const ext = (globalThis as any).KingsTrackExtension
     const cache = new Map()
     const ctx = {
@@ -169,7 +169,7 @@ describe('Gradeo extension utilities', () => {
     }
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('Gradeo unavailable')) as unknown as typeof fetch
 
-    await import('../../../extension/src/background/index.js')
+    await import('../../../extension/src/background/index.ts')
     const ext = (globalThis as any).KingsTrackExtension
     const topics = await ext.__gradeoBackgroundTest.getTopicLabelsForMarkingSession(
       {
@@ -205,8 +205,8 @@ describe('Gradeo extension utilities', () => {
       text: vi.fn().mockResolvedValue(csvFixture),
     }) as unknown as typeof fetch
 
-    await import('../../../extension/src/shared/csv.js')
-    await import('../../../extension/src/background/index.js')
+    await import('../../../extension/src/shared/csv.ts')
+    await import('../../../extension/src/background/index.ts')
     const ext = (globalThis as any).KingsTrackExtension
     const cache = new Map()
     const ctx = {
@@ -245,8 +245,8 @@ describe('Gradeo extension utilities', () => {
     }
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('CSV unavailable')) as unknown as typeof fetch
 
-    await import('../../../extension/src/shared/csv.js')
-    await import('../../../extension/src/background/index.js')
+    await import('../../../extension/src/shared/csv.ts')
+    await import('../../../extension/src/background/index.ts')
     const ext = (globalThis as any).KingsTrackExtension
     const rows = await ext.__gradeoBackgroundTest.getCsvRowsForMarkingSession(
       {
@@ -263,42 +263,6 @@ describe('Gradeo extension utilities', () => {
       'background',
       'gradeo_marking_session_csv_failed',
       expect.objectContaining({ markingSessionId: 'marking-session-2' }),
-    )
-  })
-
-  it('times out a stalled backend request instead of waiting forever', async () => {
-    vi.useFakeTimers()
-    ;(globalThis as any).KingsTrackExtension = {
-      getConfig: vi.fn().mockResolvedValue({
-        apiBaseUrl: 'https://kings-track.test/api',
-        extensionApiKey: 'extension-key',
-        apiTimeoutMs: 1000,
-      }),
-    }
-
-    globalThis.fetch = vi.fn((_url: string, options?: RequestInit) => new Promise((_resolve, reject) => {
-      options?.signal?.addEventListener('abort', () => {
-        reject(options.signal?.reason || new DOMException('Aborted', 'AbortError'))
-      }, { once: true })
-    })) as typeof fetch
-
-    await import('../../../extension/src/shared/auth.js')
-    const ext = (globalThis as any).KingsTrackExtension
-
-    const request = ext.fetchApi('/auth/me', { timeoutMs: 1000 })
-    const rejection = expect(request).rejects.toThrow(/timed out/i)
-
-    await vi.advanceTimersByTimeAsync(1100)
-
-    await rejection
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://kings-track.test/api/auth/me',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          'Content-Type': 'application/json',
-          'X-Extension-Api-Key': 'extension-key',
-        }),
-      }),
     )
   })
 })

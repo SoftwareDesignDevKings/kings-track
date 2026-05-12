@@ -1,10 +1,8 @@
 import jwt
 from jwt import PyJWKClient, PyJWKClientError
-from hashlib import sha256
 import logging
-from time import perf_counter
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,56 +69,8 @@ async def _resolve_local_dev_user(db: AsyncSession) -> dict:
     }
 
 
-def _hash_extension_api_key(api_key: str) -> str:
-    return sha256(api_key.encode("utf-8")).hexdigest()
-
-
-async def _resolve_extension_api_key_user(api_key: str, db: AsyncSession) -> dict | None:
-    started_at = perf_counter()
-    result = await db.execute(
-        text("""
-            SELECT id, email, role, created_at
-            FROM app_users
-            WHERE extension_api_key_hash = :key_hash
-        """),
-        {"key_hash": _hash_extension_api_key(api_key)},
-    )
-    row = result.fetchone()
-    if not row:
-        logger.info(
-            "extension_key_lookup_result found=false duration_ms=%s",
-            round((perf_counter() - started_at) * 1000, 1),
-        )
-        return None
-
-    await db.execute(
-        text("""
-            UPDATE app_users
-            SET extension_api_key_last_used_at = CURRENT_TIMESTAMP
-            WHERE id = :user_id
-        """),
-        {"user_id": row[0]},
-    )
-    await db.commit()
-    logger.info(
-        "extension_key_lookup_result found=true user_id=%s email=%s duration_ms=%s",
-        row[0],
-        row[1],
-        round((perf_counter() - started_at) * 1000, 1),
-    )
-
-    return {
-        "id": row[0],
-        "email": row[1],
-        "role": row[2],
-        "created_at": row[3],
-        "auth_source": "extension_api_key",
-    }
-
-
 async def require_auth(
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
-    extension_api_key: str | None = Header(default=None, alias="X-Extension-Api-Key"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -128,26 +78,6 @@ async def require_auth(
     Returns the app_user row as a dict with keys: id, email, role, created_at.
     Raises 401 if the token is invalid, 403 if the user is not registered.
     """
-    if extension_api_key:
-        auth_started_at = perf_counter()
-        logger.info("require_auth_extension_key_started")
-        user = await _resolve_extension_api_key_user(extension_api_key, db)
-        if user:
-            logger.info(
-                "require_auth_extension_key_succeeded email=%s duration_ms=%s",
-                user["email"],
-                round((perf_counter() - auth_started_at) * 1000, 1),
-            )
-            return user
-        logger.info(
-            "require_auth_extension_key_failed duration_ms=%s",
-            round((perf_counter() - auth_started_at) * 1000, 1),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid extension API key",
-        )
-
     if settings.local_auth_enabled:
         return await _resolve_local_dev_user(db)
 

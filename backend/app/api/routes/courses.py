@@ -578,36 +578,54 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
             SELECT gradeo_class_id, gradeo_class_name
             FROM gradeo_class_mappings
             WHERE canvas_course_id = :course_id
+            ORDER BY created_at NULLS LAST, id
             """
         ),
         {"course_id": course_id},
     )
-    mapping_row = mapping_result.fetchone()
-    if not mapping_row:
+    mapping_rows = mapping_result.fetchall()
+    if not mapping_rows:
         return {"mapped": False}
 
-    gradeo_class_id, gradeo_class_name = mapping_row
+    gradeo_classes = [
+        {
+            "gradeo_class_id": row[0],
+            "gradeo_class_name": row[1],
+        }
+        for row in mapping_rows
+    ]
+    gradeo_class_ids = [item["gradeo_class_id"] for item in gradeo_classes]
+    gradeo_class_id = gradeo_classes[0]["gradeo_class_id"]
+    gradeo_class_name = gradeo_classes[0]["gradeo_class_name"]
 
     latest_run_result = await db.execute(
         text(
             """
             SELECT completed_at, unmatched_students
-            FROM gradeo_import_runs
-            WHERE run_type = 'class_import'
-              AND status = 'completed'
-              AND gradeo_class_id = :gradeo_class_id
-            ORDER BY id DESC
-            LIMIT 1
+            FROM (
+                SELECT DISTINCT ON (gradeo_class_id)
+                    gradeo_class_id,
+                    completed_at,
+                    unmatched_students
+                FROM gradeo_import_runs
+                WHERE run_type = 'class_import'
+                  AND status = 'completed'
+                  AND gradeo_class_id IN :gradeo_class_ids
+                ORDER BY gradeo_class_id, id DESC
+            ) latest_runs
             """
-        ),
-        {"gradeo_class_id": gradeo_class_id},
+        ).bindparams(bindparam("gradeo_class_ids", expanding=True)),
+        {"gradeo_class_ids": gradeo_class_ids},
     )
-    latest_run_row = latest_run_result.fetchone()
+    latest_run_rows = latest_run_result.fetchall()
+    last_imported_at = max((row[0] for row in latest_run_rows if row[0] is not None), default=None)
+    unmatched_students_count = sum(row[1] or 0 for row in latest_run_rows)
 
     exams_result = await db.execute(
         text(
             """
             SELECT
+                id,
                 gradeo_marking_session_id,
                 exam_name,
                 class_average,
@@ -615,29 +633,53 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
                 syllabus_grade,
                 bands,
                 outcomes,
-                topics
+                topics,
+                updated_at
             FROM gradeo_class_exam_assignments
-            WHERE gradeo_class_id = :gradeo_class_id
-            ORDER BY exam_name, gradeo_marking_session_id
+            WHERE gradeo_class_id IN :gradeo_class_ids
+            ORDER BY exam_name, gradeo_marking_session_id, id
             """
-        ),
-        {"gradeo_class_id": gradeo_class_id},
+        ).bindparams(bindparam("gradeo_class_ids", expanding=True)),
+        {"gradeo_class_ids": gradeo_class_ids},
     )
     exams_raw = exams_result.fetchall()
+    exams_by_marking_session: dict[str, dict] = {}
+    exam_sort_keys: dict[str, tuple[str, str]] = {}
+    exam_tiebreakers: dict[str, tuple[bool, object, int]] = {}
+    for row in exams_raw:
+        (
+            assignment_id,
+            gradeo_marking_session_id,
+            exam_name,
+            class_average,
+            syllabus_title,
+            syllabus_grade,
+            bands,
+            outcomes,
+            topics,
+            updated_at,
+        ) = row
+        candidate_tiebreaker = (updated_at is not None, updated_at, -assignment_id)
+        if (
+            gradeo_marking_session_id not in exams_by_marking_session
+            or candidate_tiebreaker > exam_tiebreakers[gradeo_marking_session_id]
+        ):
+            exams_by_marking_session[gradeo_marking_session_id] = {
+                "id": gradeo_marking_session_id,
+                "name": exam_name,
+                "class_average": float(class_average) if class_average is not None else None,
+                "syllabus_title": syllabus_title,
+                "syllabus_grade": syllabus_grade,
+                "bands": _split_csv_list(bands),
+                "outcomes": _split_csv_list(outcomes),
+                "topics": _split_csv_list(topics),
+            }
+            exam_tiebreakers[gradeo_marking_session_id] = candidate_tiebreaker
+        exam_sort_keys.setdefault(gradeo_marking_session_id, (exam_name, gradeo_marking_session_id))
     exams = [
-        {
-            "id": row[0],
-            "name": row[1],
-            "class_average": float(row[2]) if row[2] is not None else None,
-            "syllabus_title": row[3],
-            "syllabus_grade": row[4],
-            "bands": _split_csv_list(row[5]),
-            "outcomes": _split_csv_list(row[6]),
-            "topics": _split_csv_list(row[7]),
-        }
-        for row in exams_raw
+        exams_by_marking_session[gradeo_marking_session_id]
+        for gradeo_marking_session_id in sorted(exams_by_marking_session, key=lambda key: exam_sort_keys[key])
     ]
-    all_exam_ids = [exam["id"] for exam in exams]
 
     students_result = await db.execute(
         text(
@@ -664,19 +706,21 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
                 gar.marks_available,
                 gar.class_average,
                 gar.gradeo_student_id,
-                gar.gradeo_class_exam_assignment_id
+                gar.gradeo_class_exam_assignment_id,
+                gar.last_imported_at
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
             WHERE gar.canvas_course_id = :course_id
-              AND gcea.gradeo_class_id = :gradeo_class_id
+              AND gcea.gradeo_class_id IN :gradeo_class_ids
             """
-        ),
-        {"course_id": course_id, "gradeo_class_id": gradeo_class_id},
+        ).bindparams(bindparam("gradeo_class_ids", expanding=True)),
+        {"course_id": course_id, "gradeo_class_ids": gradeo_class_ids},
     )
     results_lookup: dict[int, dict[str, dict]] = {}
     question_results_by_key: dict[tuple[int, str], list[dict]] = {}
     assignment_ids: set[int] = set()
     gradeo_student_ids: set[str] = set()
+    status_priority = {"not_submitted": 0, "awaiting_marking": 1, "scored": 2}
     for row in results_result.fetchall():
         (
             user_id,
@@ -687,17 +731,37 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
             class_average,
             gradeo_student_id,
             assignment_id,
+            last_imported_at,
         ) = row
         gradeo_student_ids.add(gradeo_student_id)
         assignment_ids.add(assignment_id)
-        results_lookup.setdefault(user_id, {})[gradeo_marking_session_id] = {
+        candidate_result = {
             "status": status,
             "exam_mark": float(exam_mark) if exam_mark is not None else None,
             "marks_available": float(marks_available) if marks_available is not None else None,
             "class_average": float(class_average) if class_average is not None else None,
             "gradeo_student_id": gradeo_student_id,
             "assignment_id": assignment_id,
+            "last_imported_at": last_imported_at,
         }
+        user_results = results_lookup.setdefault(user_id, {})
+        existing_result = user_results.get(gradeo_marking_session_id)
+        # TODO: Prefer Gradeo's latest student submission/attempt timestamp here once
+        # we import it. last_imported_at is only our best available freshness proxy.
+        candidate_tiebreaker = (
+            last_imported_at is not None,
+            last_imported_at,
+            status_priority.get(status, 0),
+            -assignment_id,
+        )
+        existing_tiebreaker = (
+            existing_result["last_imported_at"] is not None,
+            existing_result["last_imported_at"],
+            status_priority.get(existing_result["status"], 0),
+            -existing_result["assignment_id"],
+        ) if existing_result else None
+        if existing_tiebreaker is None or candidate_tiebreaker > existing_tiebreaker:
+            user_results[gradeo_marking_session_id] = candidate_result
 
     if gradeo_student_ids and assignment_ids:
         question_result_rows = await db.execute(
@@ -747,6 +811,7 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
             )
 
     students = []
+    hidden_students = []
     for row in students_raw:
         user_id, name, sortable_name = row
         user_results = results_lookup.get(user_id, {})
@@ -772,6 +837,10 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
             else:
                 results[exam["id"]] = None
 
+        if exams and not any(v is not None for v in results.values()):
+            hidden_students.append({"id": user_id, "name": name})
+            continue
+
         completion_rate = (completed / assigned) if assigned else None
         students.append(
             {
@@ -787,8 +856,10 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
         "mapped": True,
         "gradeo_class_id": gradeo_class_id,
         "gradeo_class_name": gradeo_class_name,
-        "last_imported_at": _to_iso(latest_run_row[0]) if latest_run_row else None,
-        "unmatched_students_count": latest_run_row[1] if latest_run_row else 0,
+        "gradeo_classes": gradeo_classes,
+        "last_imported_at": _to_iso(last_imported_at),
+        "unmatched_students_count": unmatched_students_count,
         "exams": exams,
         "students": students,
+        "hidden_students": hidden_students,
     }

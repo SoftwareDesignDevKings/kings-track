@@ -24,34 +24,6 @@
     await browser.storage.local.set({ [LOG_KEY]: [] })
   }
 
-  ext.sendDebugLog = async function sendDebugLog(entry) {
-    if (!ext.fetchApi) {
-      return
-    }
-    try {
-      await ext.fetchApi('/admin/gradeo/extension-log', {
-        method: 'POST',
-        body: JSON.stringify(entry),
-      })
-    } catch (error) {
-      console.warn('[KingsTrack][debug][upload-failed]', error)
-    }
-  }
-
-  ext.sendDebugSnapshot = async function sendDebugSnapshot(snapshot) {
-    if (!ext.fetchApi) {
-      return
-    }
-    try {
-      await ext.fetchApi('/admin/gradeo/extension-snapshot', {
-        method: 'POST',
-        body: JSON.stringify(snapshot),
-      })
-    } catch (error) {
-      console.warn('[KingsTrack][debug][snapshot-upload-failed]', error)
-    }
-  }
-
   ext.logDebug = async function logDebug(scope, event, details) {
     const entry = {
       timestamp: new Date().toISOString(),

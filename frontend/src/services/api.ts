@@ -4,8 +4,7 @@ import type {
   WhitelistedCourse, AvailableCourse,
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
-  GradeoImportRun, GradeoCourseReport,
-  ExtensionApiKeyStatus, ExtensionApiKeyResponse,
+  GradeoImportRun, GradeoCourseReport, GradeoTopicBands,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -179,39 +178,6 @@ export function useRemoveUser() {
   })
 }
 
-export function useExtensionApiKeyStatus() {
-  return useQuery<ExtensionApiKeyStatus>({
-    queryKey: ['admin-extension-api-key'],
-    queryFn: () => fetchJSON<ExtensionApiKeyStatus>('/admin/extension-api-key'),
-  })
-}
-
-export function useGenerateExtensionApiKey() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () =>
-      fetchJSON<ExtensionApiKeyResponse>('/admin/extension-api-key', {
-        method: 'POST',
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-extension-api-key'] })
-    },
-  })
-}
-
-export function useRevokeExtensionApiKey() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () =>
-      fetchJSON<void>('/admin/extension-api-key', {
-        method: 'DELETE',
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-extension-api-key'] })
-    },
-  })
-}
-
 // ─── Admin — whitelist ────────────────────────────────────────────────────────
 
 export function useWhitelist() {
@@ -304,6 +270,15 @@ export function useGradeoReport(courseId: number) {
   return useQuery<GradeoCourseReport>({
     queryKey: ['gradeo-report', courseId],
     queryFn: () => fetchJSON<GradeoCourseReport>(`/courses/${courseId}/gradeo`),
+    staleTime: 60_000,
+    enabled: !isNaN(courseId),
+  })
+}
+
+export function useGradeoTopicBands(courseId: number) {
+  return useQuery<GradeoTopicBands>({
+    queryKey: ['gradeo-topic-bands', courseId],
+    queryFn: () => fetchJSON<GradeoTopicBands>(`/courses/${courseId}/gradeo/topic-bands`),
     staleTime: 60_000,
     enabled: !isNaN(courseId),
   })
@@ -423,6 +398,19 @@ export function useDeleteGradeoMapping() {
   return useMutation({
     mutationFn: (canvasCourseId: number) =>
       fetchJSON<void>(`/admin/gradeo/mappings/${canvasCourseId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gradeo-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-classes'] })
+      queryClient.invalidateQueries({ queryKey: ['gradeo-report'] })
+    },
+  })
+}
+
+export function useDeleteGradeoMappingByClass() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (gradeoClassId: string) =>
+      fetchJSON<void>(`/admin/gradeo/mappings/by-gradeo-class/${encodeURIComponent(gradeoClassId)}`, { method: 'DELETE' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gradeo-mappings'] })
       queryClient.invalidateQueries({ queryKey: ['gradeo-classes'] })

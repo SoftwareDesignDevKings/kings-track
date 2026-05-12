@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Kings Track Gradeo Importer",
-  "version": "0.1.0",
-  "description": "Connect to Kings Track with an extension API key and import Gradeo student-directory and reporting data.",
+  "version": "0.2.0",
+  "description": "Push Gradeo data into the Kings Track dashboard via an open bridge tab — no API key required.",
   "permissions": [
     "activeTab",
     "storage",
@@ -68,6 +68,18 @@
         "src/shared/dom.js",
         "src/content/reporting.sync.js",
         "src/content/reporting.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://*/extension-bridge*"
+      ],
+      "js": [
+        "vendor/webextension-polyfill.js",
+        "src/content/bridge.js"
       ],
       "run_at": "document_idle"
     }

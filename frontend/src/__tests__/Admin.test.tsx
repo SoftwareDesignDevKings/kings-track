@@ -7,9 +7,6 @@ vi.mock('../services/api', () => ({
   useAdminUsers: vi.fn(),
   useAddUser: vi.fn(),
   useRemoveUser: vi.fn(),
-  useExtensionApiKeyStatus: vi.fn(),
-  useGenerateExtensionApiKey: vi.fn(),
-  useRevokeExtensionApiKey: vi.fn(),
   useCourses: vi.fn(),
   useWhitelist: vi.fn(),
   useAvailableCourses: vi.fn(),
@@ -27,6 +24,7 @@ vi.mock('../services/api', () => ({
   useGradeoMappings: vi.fn(),
   useCreateGradeoMapping: vi.fn(),
   useDeleteGradeoMapping: vi.fn(),
+  useDeleteGradeoMappingByClass: vi.fn(),
   useAutoMatchGradeo: vi.fn(),
   useHealth: vi.fn(),
   useCanvasHealth: vi.fn(() => ({ data: undefined })),
@@ -37,9 +35,6 @@ import {
   useAdminUsers,
   useAddUser,
   useRemoveUser,
-  useExtensionApiKeyStatus,
-  useGenerateExtensionApiKey,
-  useRevokeExtensionApiKey,
   useCourses,
   useWhitelist,
   useAvailableCourses,
@@ -57,6 +52,7 @@ import {
   useGradeoMappings,
   useCreateGradeoMapping,
   useDeleteGradeoMapping,
+  useDeleteGradeoMappingByClass,
   useAutoMatchGradeo,
   useHealth,
 } from '../services/api'
@@ -76,17 +72,6 @@ describe('Admin', () => {
     vi.mocked(useAdminUsers).mockReturnValue({ data: [], isLoading: false } as any)
     vi.mocked(useAddUser).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useRemoveUser).mockReturnValue({ ...baseMutation } as any)
-    vi.mocked(useExtensionApiKeyStatus).mockReturnValue({
-      data: {
-        has_key: true,
-        key_hint: 'ktx_abcd...wxyz',
-        created_at: '2026-03-31T08:30:00Z',
-        last_used_at: '2026-03-31T09:20:00Z',
-      },
-      isLoading: false,
-    } as any)
-    vi.mocked(useGenerateExtensionApiKey).mockReturnValue({ ...baseMutation } as any)
-    vi.mocked(useRevokeExtensionApiKey).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useCourses).mockReturnValue({
       data: [
         {
@@ -178,6 +163,7 @@ describe('Admin', () => {
     } as any)
     vi.mocked(useCreateGradeoMapping).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useDeleteGradeoMapping).mockReturnValue({ ...baseMutation } as any)
+    vi.mocked(useDeleteGradeoMappingByClass).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useAutoMatchGradeo).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useHealth).mockReturnValue({
       data: { status: 'ok', canvas_configured: true, edstem_configured: true },

@@ -112,7 +112,7 @@
   }
 
   function getReportingResultsTable() {
-    const tables = Array.from(document.querySelectorAll('table'))
+    const tables = Array.from<any>(document.querySelectorAll('table'))
     return tables.find(table => {
       if (!isVisible(table)) {
         return false
@@ -171,7 +171,7 @@
 
   function readResultsPageState() {
     const table = getReportingResultsTable()
-    const rows = table ? Array.from(table.querySelectorAll('tbody tr')).filter(isVisible) : []
+    const rows = table ? Array.from<any>(table.querySelectorAll('tbody tr')).filter(isVisible) : []
     const names = rows.map(row => stableText(row.querySelector('td')))
 
     return {
@@ -214,7 +214,7 @@
     const firstButton = getFirstResultsPageButton()
     if (!isDisabled(firstButton)) {
       const previousSignature = readResultsPageState().signature
-      firstButton.click()
+      ;(firstButton as HTMLElement).click()
       await waitForResultsPageChange(previousSignature)
       return
     }
@@ -222,7 +222,7 @@
     const pageOneButton = getPaginatorRoot()?.querySelector('[aria-label="Page 1"]')
     if (!isDisabled(pageOneButton)) {
       const previousSignature = readResultsPageState().signature
-      pageOneButton.click()
+      ;(pageOneButton as HTMLElement).click()
       await waitForResultsPageChange(previousSignature)
     }
   }
@@ -236,7 +236,7 @@
       return { status: 'awaiting_marking', examMark: null }
     }
 
-    const primaryValue = Array.from(cell.querySelectorAll('p, span'))
+    const primaryValue = Array.from<any>(cell.querySelectorAll('p, span'))
       .map(stableText)
       .find(value => value && !/[+-]\d+%/.test(value))
     const examMark = parseNumber(primaryValue || text)
@@ -254,10 +254,10 @@
       return []
     }
 
-    return Array.from(table.querySelectorAll('tbody tr'))
+    return Array.from<any>(table.querySelectorAll('tbody tr'))
       .filter(isVisible)
       .map((row, index) => {
-        const cells = Array.from(row.querySelectorAll('td'))
+        const cells = Array.from<any>(row.querySelectorAll('td'))
         if (cells.length < 5) {
           return null
         }
@@ -306,7 +306,7 @@
       }
       seen.add(state.signature)
 
-      nextButton.click()
+      ;(nextButton as HTMLElement).click()
       await waitForResultsPageChange(state.signature)
     }
 
@@ -315,7 +315,7 @@
 
   async function waitForOpenMenu(timeoutMs) {
     return waitFor(() => {
-      const panels = Array.from(document.querySelectorAll('[role="menu"], .p-menu-overlay, .p-overlaypanel'))
+      const panels = Array.from<any>(document.querySelectorAll('[role="menu"], .p-menu-overlay, .p-overlaypanel'))
       return panels.find(panel => isVisible(panel))
     }, timeoutMs || 1200)
   }
@@ -376,7 +376,7 @@
       return null
     }
 
-    const items = Array.from(menu.querySelectorAll('a, button, [role="menuitem"], .p-menuitem-link'))
+    const items = Array.from<any>(menu.querySelectorAll('a, button, [role="menuitem"], .p-menuitem-link'))
       .filter(isVisible)
     const csvAction = items.find(item => /csv|export|download/i.test(stableText(item)))
 

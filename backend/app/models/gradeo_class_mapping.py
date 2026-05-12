@@ -10,7 +10,7 @@ class GradeoClassMapping(Base):
     __tablename__ = "gradeo_class_mappings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    canvas_course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("courses.id"), unique=True, index=True)
+    canvas_course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("courses.id"), index=True)
     gradeo_class_id: Mapped[str] = mapped_column(String, ForeignKey("gradeo_classes.gradeo_class_id"), unique=True, index=True)
     gradeo_class_name: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

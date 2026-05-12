@@ -1,95 +1,13 @@
+import { getGradeoApiContext, gradeoFetchJson, gradeoFetchText } from './gradeoApi'
+import { fetchKingsTrackApi } from './kingsTrackApi'
+import { registerMessageHandlers } from './messages'
+import { compactImportStudent } from './payload'
+import { getState, setState } from './state'
+
 (function () {
   const ext = self.KingsTrackExtension
-  const STATE_KEY = 'kingsTrackSyncState'
   const EXTENSION_VERSION = '0.1.0'
-  const GRADEO_BASE_URL = 'https://platform.gradeo.com.au'
-  const GRADEO_FETCH_TIMEOUT_MS = 45000
-  const SLOW_REQUEST_LOG_MS = 2000
   const LONG_IMPORT_TIMEOUT_MS = 5 * 60 * 1000
-
-  function createRequestId(prefix) {
-    if (globalThis.crypto?.randomUUID) {
-      return `${prefix}-${globalThis.crypto.randomUUID()}`
-    }
-    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
-  }
-
-  function stripNilValues(object) {
-    return Object.fromEntries(
-      Object.entries(object).filter(([, value]) => value != null)
-    )
-  }
-
-  function compactExamSummaryRow(row) {
-    return stripNilValues({
-      exam_name: row.exam_name,
-      gradeo_exam_id: row.gradeo_exam_id,
-      gradeo_exam_session_id: row.gradeo_exam_session_id || undefined,
-      gradeo_marking_session_id: row.gradeo_marking_session_id || undefined,
-      exam_mark: row.exam_mark,
-      marks_available: row.marks_available,
-      status: row.status,
-      answer_submitted: row.answer_submitted,
-      syllabus_id: row.syllabus_id || undefined,
-      syllabus_title: row.syllabus_title || undefined,
-      syllabus_grade: row.syllabus_grade || undefined,
-      class_average: row.class_average,
-      marking_session_id: row.marking_session_id || undefined,
-      exam_answer_sheet_id: row.exam_answer_sheet_id || undefined,
-      exam_session_start_date: row.exam_session_start_date || undefined,
-      exam_session_max_time_seconds: row.exam_session_max_time_seconds,
-      student_group_mark_average: row.student_group_mark_average,
-      bands: Array.isArray(row.bands) && row.bands.length > 0 ? row.bands : undefined,
-      outcomes: Array.isArray(row.outcomes) && row.outcomes.length > 0 ? row.outcomes : undefined,
-      topics: Array.isArray(row.topics) && row.topics.length > 0 ? row.topics : undefined,
-    })
-  }
-
-  function compactImportStudent(student) {
-    const compacted = {
-      gradeo_student_id: student.gradeo_student_id,
-      student_name: student.student_name,
-    }
-    if (Array.isArray(student.rows) && student.rows.length > 0) {
-      compacted.rows = student.rows
-    }
-    if (Array.isArray(student.exam_rows) && student.exam_rows.length > 0) {
-      compacted.exam_rows = student.exam_rows.map(compactExamSummaryRow)
-    }
-    return compacted
-  }
-
-  function rowsByStudentId(rows) {
-    const grouped = new Map()
-    rows.forEach(row => {
-      const studentId = String(row?.['Student ID'] || '').trim()
-      if (!studentId) {
-        return
-      }
-      const existing = grouped.get(studentId) || []
-      existing.push(row)
-      grouped.set(studentId, existing)
-    })
-    return grouped
-  }
-
-  function appendCsvRowsForStudent(importStudent, csvRowsByStudentId) {
-    const csvRows = csvRowsByStudentId.get(importStudent.gradeo_student_id) || []
-    csvRows.forEach(row => {
-      importStudent.rows.push(ext.toImportRow(row))
-    })
-    return csvRows.length
-  }
-
-  async function setState(state) {
-    await browser.storage.local.set({ [STATE_KEY]: state })
-    return state
-  }
-
-  async function getState() {
-    const result = await browser.storage.local.get(STATE_KEY)
-    return result[STATE_KEY] || { status: 'idle' }
-  }
 
   async function getActiveGradeoTab() {
     const tabs = await browser.tabs.query({ active: true, currentWindow: true })
@@ -103,7 +21,7 @@
   }
 
   async function waitForTabLoad(tabId) {
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         browser.tabs.onUpdated.removeListener(handleUpdate)
         reject(new Error('Timed out waiting for the Gradeo tab to finish loading'))
@@ -266,343 +184,6 @@
     throw lastError || new Error('Failed to fetch the Gradeo classes directory API')
   }
 
-  function sanitizeApiHeaders(headers) {
-    const blockedHeaders = new Set([
-      'accept-encoding',
-      'connection',
-      'content-length',
-      'cookie',
-      'host',
-      'origin',
-      'referer',
-      'sec-fetch-dest',
-      'sec-fetch-mode',
-      'sec-fetch-site',
-      'te',
-      'user-agent',
-    ])
-
-    return Object.fromEntries(
-      Object.entries(headers || {})
-        .map(([key, value]) => [String(key || '').trim(), value])
-        .filter(([key, value]) => key && value != null && String(value).trim() !== '')
-        .filter(([key]) => !blockedHeaders.has(key.toLowerCase()))
-    )
-  }
-
-  function parseRawHeaderBlock(raw) {
-    const headers = {}
-    let requestLine = null
-    String(raw || '')
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean)
-      .forEach((line, index) => {
-        if (index === 0 && /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+/i.test(line)) {
-          requestLine = line
-          return
-        }
-        const separatorIndex = line.indexOf(':')
-        if (separatorIndex <= 0) {
-          return
-        }
-        const key = line.slice(0, separatorIndex).trim()
-        const value = line.slice(separatorIndex + 1).trim()
-        if (key && value) {
-          headers[key] = value
-        }
-      })
-    return { headers, requestLine }
-  }
-
-  function readCookieValue(cookieHeader, key) {
-    if (!cookieHeader) {
-      return null
-    }
-    const match = String(cookieHeader).match(new RegExp(`${key}=([^;]+)`))
-    return match ? decodeURIComponent(match[1]) : null
-  }
-
-  function extractSchoolIdFromRaw(rawText, parsedHeaders, requestLine) {
-    const fromCookie = readCookieValue(
-      parsedHeaders.Cookie || parsedHeaders.cookie || '',
-      'admin_user_schoolId',
-    )
-    if (fromCookie) {
-      return fromCookie
-    }
-
-    const searchText = [requestLine, rawText, parsedHeaders['X-School-Id'], parsedHeaders['x-school-id']]
-      .filter(Boolean)
-      .join('\n')
-    const routeMatch = searchText.match(/\/api\/(?:student-group\/v2|school\/v2\/list\/student)\/([0-9a-f-]{36})/i)
-    return routeMatch ? routeMatch[1] : null
-  }
-
-  async function getGradeoApiContext() {
-    const config = await ext.getConfig()
-    const raw = String(config?.gradeoApiHeadersJson || '{}').trim() || '{}'
-
-    let parsedHeaders = {}
-    let requestLine = null
-    if (raw.startsWith('{')) {
-      try {
-        parsedHeaders = JSON.parse(raw)
-      } catch (error) {
-        throw new Error('Gradeo API headers are invalid JSON. Paste a valid JSON object or raw copied headers block.')
-      }
-    } else {
-      const parsed = parseRawHeaderBlock(raw)
-      parsedHeaders = parsed.headers
-      requestLine = parsed.requestLine
-    }
-
-    if (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders)) {
-      throw new Error('Gradeo API headers must be a JSON object or raw copied headers.')
-    }
-
-    const headers = sanitizeApiHeaders(parsedHeaders)
-    const authorizationHeader = Object.keys(headers).find(key => key.toLowerCase() === 'authorization')
-    if (!authorizationHeader || !String(headers[authorizationHeader]).trim()) {
-      throw new Error('Gradeo API headers are missing Authorization. Save a fresh copied request from Gradeo first.')
-    }
-
-    const schoolId = extractSchoolIdFromRaw(raw, parsedHeaders, requestLine)
-
-    await ext.logDebug('background', 'gradeo_api_context_loaded', {
-      schoolId,
-      keys: Object.keys(headers),
-    })
-
-    return {
-      headers,
-      schoolId,
-      baseUrl: GRADEO_BASE_URL,
-    }
-  }
-
-  async function gradeoFetchJson(ctx, path, scope) {
-    const url = path.startsWith('http') ? path : `${ctx.baseUrl}${path}`
-    const startedAt = Date.now()
-    await ext.logDebug('background', 'gradeo_request_started', {
-      scope: scope || 'gradeo',
-      path,
-      timeoutMs: GRADEO_FETCH_TIMEOUT_MS,
-    })
-    const controller = new AbortController()
-    const timeout = setTimeout(() => {
-      controller.abort(new Error(`Gradeo request timed out after ${GRADEO_FETCH_TIMEOUT_MS}ms`))
-    }, GRADEO_FETCH_TIMEOUT_MS)
-
-    let response
-    try {
-      response = await fetch(url, {
-        method: 'GET',
-        mode: 'cors',
-        credentials: 'include',
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-          ...ctx.headers,
-        },
-      })
-    } catch (error) {
-      await ext.logDebug('background', 'gradeo_request_failed', {
-        scope: scope || 'gradeo',
-        path,
-        durationMs: Date.now() - startedAt,
-        error: String(error),
-      })
-      if (controller.signal.aborted) {
-        throw new Error(`Gradeo request timed out after ${Math.round(GRADEO_FETCH_TIMEOUT_MS / 1000)}s for ${path}`)
-      }
-      throw error
-    } finally {
-      clearTimeout(timeout)
-    }
-
-    if (response.status === 401) {
-      throw new Error('Gradeo API returned 401. Refresh the saved Gradeo headers and make sure you are still signed in to Gradeo.')
-    }
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '')
-      await ext.logDebug('background', 'gradeo_api_request_failed', {
-        scope: scope || 'gradeo',
-        status: response.status,
-        url,
-        body: body.slice(0, 300),
-      })
-      throw new Error(`Gradeo API ${response.status} for ${path}`)
-    }
-
-    const durationMs = Date.now() - startedAt
-    if (durationMs >= SLOW_REQUEST_LOG_MS) {
-      await ext.logDebug('background', 'gradeo_request_slow', {
-        scope: scope || 'gradeo',
-        path,
-        durationMs,
-        status: response.status,
-      })
-    } else {
-      await ext.logDebug('background', 'gradeo_request_succeeded', {
-        scope: scope || 'gradeo',
-        path,
-        durationMs,
-        status: response.status,
-      })
-    }
-
-    return response.json()
-  }
-
-  async function gradeoFetchText(ctx, path, scope) {
-    const url = path.startsWith('http') ? path : `${ctx.baseUrl}${path}`
-    const startedAt = Date.now()
-    await ext.logDebug('background', 'gradeo_request_started', {
-      scope: scope || 'gradeo',
-      path,
-      timeoutMs: GRADEO_FETCH_TIMEOUT_MS,
-    })
-    const controller = new AbortController()
-    const timeout = setTimeout(() => {
-      controller.abort(new Error(`Gradeo request timed out after ${GRADEO_FETCH_TIMEOUT_MS}ms`))
-    }, GRADEO_FETCH_TIMEOUT_MS)
-
-    let response
-    try {
-      response = await fetch(url, {
-        method: 'GET',
-        mode: 'cors',
-        credentials: 'include',
-        signal: controller.signal,
-        headers: {
-          Accept: 'text/plain, */*',
-          ...ctx.headers,
-        },
-      })
-    } catch (error) {
-      await ext.logDebug('background', 'gradeo_request_failed', {
-        scope: scope || 'gradeo',
-        path,
-        durationMs: Date.now() - startedAt,
-        error: String(error),
-      })
-      if (controller.signal.aborted) {
-        throw new Error(`Gradeo request timed out after ${Math.round(GRADEO_FETCH_TIMEOUT_MS / 1000)}s for ${path}`)
-      }
-      throw error
-    } finally {
-      clearTimeout(timeout)
-    }
-
-    if (response.status === 401) {
-      throw new Error('Gradeo API returned 401. Refresh the saved Gradeo headers and make sure you are still signed in to Gradeo.')
-    }
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '')
-      await ext.logDebug('background', 'gradeo_api_request_failed', {
-        scope: scope || 'gradeo',
-        status: response.status,
-        url,
-        body: body.slice(0, 300),
-      })
-      throw new Error(`Gradeo API ${response.status} for ${path}`)
-    }
-
-    const durationMs = Date.now() - startedAt
-    await ext.logDebug('background', durationMs >= SLOW_REQUEST_LOG_MS ? 'gradeo_request_slow' : 'gradeo_request_succeeded', {
-      scope: scope || 'gradeo',
-      path,
-      durationMs,
-      status: response.status,
-    })
-
-    return response.text()
-  }
-
-  function summarizeApiResult(result) {
-    if (Array.isArray(result)) {
-      return { type: 'array', count: result.length }
-    }
-    if (result && typeof result === 'object') {
-      const summary = { type: 'object', keys: Object.keys(result).slice(0, 10) }
-      if (Number.isFinite(Number(result.count))) {
-        summary.count = Number(result.count)
-      }
-      if (Number.isFinite(Number(result.processed_students))) {
-        summary.processed_students = Number(result.processed_students)
-      }
-      if (Number.isFinite(Number(result.matched_students))) {
-        summary.matched_students = Number(result.matched_students)
-      }
-      if (Number.isFinite(Number(result.imported_exams))) {
-        summary.imported_exams = Number(result.imported_exams)
-      }
-      if (Number.isFinite(Number(result.imported_classes))) {
-        summary.imported_classes = Number(result.imported_classes)
-      }
-      if (Number.isFinite(Number(result.skipped_classes))) {
-        summary.skipped_classes = Number(result.skipped_classes)
-      }
-      return summary
-    }
-    return { type: typeof result }
-  }
-
-  async function fetchKingsTrackApi(path, options, debugDetails) {
-    const startedAt = Date.now()
-    const method = options?.method || 'GET'
-    const timeoutMs = options && Number.isFinite(Number(options.timeoutMs))
-      ? Math.max(1000, Number(options.timeoutMs))
-      : null
-    const requestId = createRequestId('kt')
-    const requestOptions = {
-      ...(options || {}),
-      headers: {
-        ...(options?.headers || {}),
-        'X-Extension-Request-Id': requestId,
-      },
-    }
-    await ext.logDebug('background', 'kings_track_request_started', {
-      requestId,
-      path,
-      method,
-      timeoutMs,
-      ...(debugDetails || {}),
-    })
-    try {
-      const result = await ext.fetchApi(path, requestOptions)
-      const durationMs = Date.now() - startedAt
-      await ext.logDebug(
-        'background',
-        durationMs >= SLOW_REQUEST_LOG_MS ? 'kings_track_request_slow' : 'kings_track_request_succeeded',
-        {
-          requestId,
-          path,
-          method,
-          durationMs,
-          timeoutMs,
-          ...(debugDetails || {}),
-          result: summarizeApiResult(result),
-        },
-      )
-      return result
-    } catch (error) {
-      await ext.logDebug('background', 'kings_track_request_failed', {
-        requestId,
-        path,
-        method,
-        durationMs: Date.now() - startedAt,
-        timeoutMs,
-        ...(debugDetails || {}),
-        error: String(error),
-      })
-      throw error
-    }
-  }
-
   function mapApiClass(item) {
     const syllabuses = Array.isArray(item?.syllabuses) ? item.syllabuses : []
     const parseNumber = value => {
@@ -697,13 +278,24 @@
   }
 
   async function ensureAdmin() {
-    const user = await ext.getCurrentUser()
-    if (!user || user.role !== 'admin') {
-      await ext.logDebug('background', 'admin_check_failed', { user: user || null })
-      throw new Error('Your Kings Track account must have admin access to use this extension.')
+    // Admin gating now lives on the dashboard bridge page — it refuses to install
+    // its listener for non-admin sessions. Here we only verify a bridge tab is
+    // available so we can fail fast with a clear message.
+    const config = await ext.getConfig()
+    const base = String(config.frontendUrl || '').trim().replace(/\/$/, '')
+    if (!base) {
+      throw new Error('Set the Kings Track Dashboard URL in Settings.')
     }
-    await ext.logDebug('background', 'admin_check_passed', { email: user.email, role: user.role })
-    return user
+    const tabs = await browser.tabs.query({})
+    const bridgeTab = (tabs || []).find(tab =>
+      typeof tab.url === 'string' && tab.url.startsWith(`${base}/extension-bridge`),
+    )
+    if (!bridgeTab) {
+      await ext.logDebug('background', 'bridge_tab_missing', { frontendUrl: base })
+      throw new Error(`Open the Kings Track Extension Bridge tab at ${base}/extension-bridge and stay signed in.`)
+    }
+    await ext.logDebug('background', 'bridge_tab_found', { frontendUrl: base, tabId: bridgeTab.id })
+    return { email: 'bridge-session', role: 'admin' }
   }
 
   async function syncStudentsApi() {
@@ -1055,6 +647,20 @@
     return request
   }
 
+  function rowsByStudentId(rows) {
+    const grouped = new Map<string, any[]>()
+    rows.forEach(row => {
+      const studentId = String(row?.['Student ID'] || '').trim()
+      if (!studentId) {
+        return
+      }
+      const existing = grouped.get(studentId) || []
+      existing.push(row)
+      grouped.set(studentId, existing)
+    })
+    return grouped
+  }
+
   async function fetchMarkingSessionCsvRows(ctx, markingSessionId) {
     const text = await gradeoFetchText(
       ctx,
@@ -1076,10 +682,18 @@
           markingSessionId,
           error: String(error),
         })
-        return new Map()
+        return new Map<string, any[]>()
       })
     cache.set(markingSessionId, request)
     return request
+  }
+
+  function appendCsvRowsForStudent(importStudent, csvRowsByStudentId) {
+    const csvRows = csvRowsByStudentId.get(importStudent.gradeo_student_id) || []
+    csvRows.forEach(row => {
+      importStudent.rows.push(ext.toImportRow(row))
+    })
+    return csvRows.length
   }
 
   async function fetchMarkingStudentStates(ctx, markingSessionId) {
@@ -1247,7 +861,7 @@
     const studentsById = new Map(students.map(student => [student.id, student]))
     const classStudentIds = new Set(students.map(student => student.id))
     const classSyllabusIds = new Set(classDetails.syllabusIds || [])
-    const importStudentsById = new Map(
+    const importStudentsById = new Map<string, any>(
       students.map(student => [
         student.id,
         {
@@ -1304,7 +918,7 @@
       })
     }
 
-    const sessions = Array.from(candidateSessions.values())
+    const sessions = Array.from<any>(candidateSessions.values())
     for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex += 1) {
       const session = sessions[sessionIndex]
       const sessionExamName = [...session.studentCandidates.values()][0]?.examTitle || null
@@ -1350,7 +964,7 @@
           examSessionId: canonicalExamSessionId,
           reason: 'syllabus_mismatch',
           examSyllabusId: canonicalSyllabusId,
-          classSyllabusIds: Array.from(classSyllabusIds),
+          classSyllabusIds: Array.from<any>(classSyllabusIds),
         })
         continue
       }
@@ -1389,11 +1003,11 @@
         getCsvRowsForMarkingSession(ctx, session.markingSessionId, csvRowsCache),
         fetchMarkingStudentStates(ctx, session.markingSessionId),
       ])
-      const markingStateByStudentId = new Map(
+      const markingStateByStudentId = new Map<string, any>(
         markingStates
           .map(item => {
             const userId = String(item?.examAnswerSheetWithUser?.user?.id || item?.markingSessionAnswerStatistics?.id || '').trim()
-            return userId ? [userId, item] : null
+            return userId ? [userId, item] as [string, any] : null
           })
           .filter(Boolean)
       )
@@ -1453,7 +1067,7 @@
       })
     }
 
-    const importStudents = Array.from(importStudentsById.values())
+    const importStudents = Array.from<any>(importStudentsById.values())
     const uploadStudents = importStudents
       .filter(student => (
         (Array.isArray(student.rows) && student.rows.length > 0) ||
@@ -1700,78 +1314,14 @@
     appendCsvRowsForStudent,
   }
 
-  browser.runtime.onMessage.addListener((message) => {
-    if (message?.type === 'kings.debug.log') {
-      const entry = message.entry || {}
-      return ext.sendDebugLog(entry)
-    }
-
-    if (message?.type === 'kings.gradeo.progress') {
-      return setState({ status: 'scraping_reporting', progress: message.progress })
-    }
-
-    if (message?.type === 'kings.popup.getContext') {
-      return Promise.all([
-        ext.getConfig(),
-        getState(),
-        ext.getCachedCurrentUser(5 * 60 * 1000).catch(() => null),
-        ext.getCachedAuthStatus(5 * 60 * 1000).catch(() => null),
-        ext.getCachedBackendStatus(5 * 60 * 1000).catch(() => null),
-      ])
-        .then(([config, state, user, authStatus, backendStatus]) => {
-          ext.refreshBackendStatus().catch(() => null)
-          ext.getCurrentUser({ maxAgeMs: 30 * 1000 }).catch(() => null)
-          return {
-            config,
-            state,
-            user,
-            authStatus,
-            backendStatus,
-          }
-        })
-    }
-
-    if (message?.type === 'kings.popup.saveConfig') {
-      ext.logDebug('popup', 'save_config_clicked', {
-        apiBaseUrl: message.config?.apiBaseUrl || '',
-        hasExtensionApiKey: Boolean(message.config?.extensionApiKey),
-      })
-      return ext.saveConfig(message.config)
-    }
-
-    if (message?.type === 'kings.popup.syncStudents' || message?.type === 'kings.popup.syncStudentDirectory') {
-      ext.logDebug('popup', 'sync_students_clicked')
-      return runVisibleAction('sync_students', syncStudentsApi)
-    }
-
-    if (message?.type === 'kings.popup.syncClasses' || message?.type === 'kings.popup.syncSchoolGroupsApi') {
-      ext.logDebug('popup', 'sync_classes_clicked')
-      return runVisibleAction('sync_classes', syncClassesApi)
-    }
-
-    if (message?.type === 'kings.popup.importMappedClasses') {
-      ext.logDebug('popup', 'import_mapped_classes_clicked')
-      return runVisibleAction('import_mapped_classes', importMappedClasses)
-    }
-
-    if (message?.type === 'kings.popup.syncSchoolGroupsScrape') {
-      ext.logDebug('popup', 'sync_school_groups_scrape_clicked')
-      return syncSchoolGroupsScrape()
-    }
-
-    if (message?.type === 'kings.popup.syncReportingClass') {
-      ext.logDebug('popup', 'sync_reporting_clicked')
-      return syncReportingClass()
-    }
-
-    if (message?.type === 'kings.popup.getDebugLogs') {
-      return ext.getDebugLogs()
-    }
-
-    if (message?.type === 'kings.popup.clearDebugLogs') {
-      return ext.clearDebugLogs()
-    }
-
-    return undefined
+  registerMessageHandlers({
+    getState,
+    setState,
+    runVisibleAction,
+    syncStudentsApi,
+    syncClassesApi,
+    importMappedClasses,
+    syncSchoolGroupsScrape,
+    syncReportingClass,
   })
 })()
