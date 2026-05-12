@@ -188,7 +188,13 @@ runtime `Authorization: Bearer ...` header used by the Gradeo web app.
   - `Topics`
 - Notes:
   - The export is keyed by `markingSessionId`, not `examSessionId`.
-  - This looks like the richest source for question-level import data.
+  - This is the richest confirmed source for per-student, per-question-part score data.
+  - Rows repeat for every student and mapped question part, including students who did not submit.
+  - `Question part ID` is the stable answer-part identifier shown in `examAnswerSheetWithUser.header.data.validAnswers`.
+  - `Mark` can be blank when a part was not submitted or has not been marked.
+  - `Exam mark` can be blank for students with no submitted/marked parts, and repeated on every row for students with an exam total.
+  - `Answer submitted?` is per part, not per exam. A completed exam can still have only some parts submitted.
+  - `Marks available`, `Bands`, `Outcomes`, and `Topics` are already resolved to labels in the CSV, so this route can support topic-level score calculations without separately resolving mapping IDs.
 
 ### Marking-session student completion summary
 
@@ -235,6 +241,8 @@ runtime `Authorization: Bearer ...` header used by the Gradeo web app.
   - This looks very useful for deriving richer per-student exam status than the reporting table alone.
   - `examSessionStatus` values observed include `COMPLETED` and `LIVE`.
   - Students without a submitted answer sheet can still appear here with `header: null`.
+  - This route does not expose awarded marks per part. It is completion/timing/submission state, not score evidence.
+  - `header.data.validAnswers[]` contains submitted answer-part ids. In the captured sample these ids match CSV `Question part ID` values for submitted parts.
   - This route is likely a better source for submission progress than the reporting matrix if we later want “started vs submitted vs finished”.
 
 ### Marking-session aggregate metadata
@@ -263,6 +271,69 @@ runtime `Authorization: Bearer ...` header used by the Gradeo web app.
 - Notes:
   - This looks useful for enriching exam metadata and understanding whether a marking session is finished/published.
   - It may also be the best source for future “exam mode” metadata such as Safe Exam Browser requirements.
+
+### Marking-session exam summary metadata
+
+- `GET /api/marking-session/summary/metadata/:markingSessionId`
+- Example:
+  - `/api/marking-session/summary/metadata/92f42f3f-1e2e-4013-85cf-f6d98d9f0781`
+- Purpose:
+  - Returns exam-summary metadata for a marking session, including syllabus and content labels.
+- Response shape:
+  - `{ examSummary: { id, title, syllabusId, syllabusTitle, examGrade, outcomeLabels, topicLabels, ... } }`
+- Useful fields confirmed:
+  - `examSummary.topicLabels[]` with `{ id, text }`
+  - `examSummary.outcomeLabels[]` with `{ id, text }`
+- Used for:
+  - `Import mapped classes`
+- Notes:
+  - The importer maps `topicLabels[].text` into the existing `topics` field on exam-summary rows.
+  - The extension caches metadata by `markingSessionId` during an import run, so this route is called at most once per unique marking session per run.
+  - Metadata failures are non-fatal; the importer logs the failure and continues with empty topics for that marking session.
+
+### Exam edit curriculum mapping
+
+- `GET /api/exam-edit/:examId/mapping`
+- Example:
+  - `/api/exam-edit/df0a4714-0a2d-43df-b1bc-d36eee28b19a/mapping`
+- Purpose:
+  - Returns the exam's section/question-part curriculum mappings and the full syllabus lookup data needed to resolve mapping IDs to labels.
+- Join path:
+  - Get `examSummary.id` from `/api/marking-session/summary/metadata/:markingSessionId`.
+  - Use that id as `:examId` in `/api/exam-edit/:examId/mapping`.
+- Response shape:
+  - `{ sections: [{ id, displayIndex, title, mappings, mappingsMerged, ... }], syllabus, topicsToOutcomes }`
+- Useful fields confirmed:
+  - `sections[].id`
+  - `sections[].displayIndex`
+  - `sections[].title`
+  - `sections[].mappings[]`
+  - `sections[].mappings[].displayIndex` — observed as the question display index.
+  - `sections[].mappings[].partDisplayIndex` — observed as the part index inside the question.
+  - `sections[].mappings[].mark` — marks available for that mapped part.
+  - `sections[].mappings[].topicIds[]`
+  - `sections[].mappings[].subtopicIds[]`
+  - `sections[].mappings[].outcomeIds[]`
+  - `sections[].mappings[].bandIds[]`
+  - `sections[].mappingsMerged[]` — aggregate mapping groups by section/question.
+  - `sections[].mappingsMerged[].partDisplayIndexList[]`
+  - `sections[].mappingsMerged[].markList[]`
+  - `sections[].mappingsMerged[].markTotal`
+  - `syllabus.id`
+  - `syllabus.title`
+  - `syllabus.grade`
+  - `syllabus.bands[]` with `{ id, level, description }`
+  - `syllabus.outcomes[]` with `{ id, title, description }`
+  - `syllabus.topics[]` with `{ id, title, displayIndex, subtopics }`
+  - `syllabus.topics[].subtopics[]` with `{ id, title, items }`
+  - `syllabus.topics[].subtopics[].items[]` with `{ id, text, displayIndex }`
+  - `topicsToOutcomes`
+- Findings:
+  - This route **does** break curriculum mapping down below exam level. In the captured `12ENC_IntelligentSystemsClass` example, the exam has one section, one question display index, and four mapped parts.
+  - Part-level `mark` values were `3, 3, 2, 3`, matching the metadata route's `examSummary.points = 11`.
+  - Part mappings use IDs only. Topic, subtopic, outcome, and band labels must be resolved through the included `syllabus` object.
+  - `mappingsMerged` is useful for question-level aggregation, but its observed `markTotal`/`markList` should not be treated as the source of truth for total marks until confirmed; use raw `mappings[].mark` for part-level evidence.
+  - This route is the strongest known source for future topic-level band prediction because it can attribute available marks to topic/subtopic/outcome/band IDs per question part.
 
 ### Marker completion summary
 
@@ -298,8 +369,12 @@ runtime `Authorization: Bearer ...` header used by the Gradeo web app.
   - `isAutomarked`
 - Notes:
   - This is promising for future question-part level import or richer marking-state displays.
-  - Observed `markingStatus` value: `NOT_STARTED`.
-  - This could help bridge from exam-summary rows to finer part-level state even without CSV.
+  - Observed `markingStatus` values include `COMPLETED` and `NOT_STARTED`.
+  - This route lines up with `/api/exam-edit/:examId/mapping` by `sectionDisplayIndex`, `questionDisplayIndex`, and `partDisplayIndex`.
+  - It also lines up with the CSV export because `partId` matches CSV `Question part ID`.
+  - This route does not expose awarded marks. Use the CSV `Mark` and `Marks available` columns for score calculations.
+  - The route expects a student with an actual answer-sheet header. Calling it for a student whose aggregate state has `examAnswerSheetWithUser.header: null` returned `400 {"message":"Exam answer sheet header AA record not found"}` in the captured sample.
+  - This could help bridge from exam-summary rows to finer part-level marking state, but the CSV export is currently the cleaner confirmed source for per-student marks.
 
 ### Class roster variation for a specific exam
 

@@ -6,17 +6,20 @@ const csvFixture = `"Exam","Exam ID","Class name","Class average","Student","Stu
 
 describe('Gradeo extension utilities', () => {
   const originalFetch = globalThis.fetch
+  const originalBrowser = (globalThis as any).browser
 
   beforeEach(() => {
     vi.resetModules()
     vi.useRealTimers()
     ;(globalThis as any).KingsTrackExtension = {}
+    ;(globalThis as any).browser = undefined
     document.body.innerHTML = ''
   })
 
   afterEach(() => {
     vi.useRealTimers()
     globalThis.fetch = originalFetch
+    ;(globalThis as any).browser = originalBrowser
   })
 
   it('parses Gradeo CSV rows into a student import payload', async () => {
@@ -104,6 +107,163 @@ describe('Gradeo extension utilities', () => {
     expect(result.students).toHaveLength(2)
     expect(progressEvents[0]).toMatchObject({ phase: 'exporting_student', current: 1, total: 2 })
     expect(progressEvents.at(-1)).toMatchObject({ phase: 'class_ready', current: 2, total: 2 })
+  })
+
+  it('extracts and caches Gradeo marking-session topic metadata', async () => {
+    ;(globalThis as any).KingsTrackExtension = {
+      logDebug: vi.fn().mockResolvedValue(undefined),
+    }
+    ;(globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+        },
+      },
+    }
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        examSummary: {
+          topicLabels: [
+            { id: 'topic-1', text: 'Secure Software Architecture' },
+            { id: 'topic-2', text: 'Programming for the Web' },
+            { id: 'blank', text: '   ' },
+          ],
+        },
+      }),
+    }) as unknown as typeof fetch
+
+    await import('../../../extension/src/background/index.js')
+    const ext = (globalThis as any).KingsTrackExtension
+    const cache = new Map()
+    const ctx = {
+      baseUrl: 'https://platform.gradeo.com.au',
+      headers: { Authorization: 'Bearer test' },
+    }
+
+    const first = await ext.__gradeoBackgroundTest.getTopicLabelsForMarkingSession(ctx, 'marking-session-1', cache)
+    const second = await ext.__gradeoBackgroundTest.getTopicLabelsForMarkingSession(ctx, 'marking-session-1', cache)
+
+    expect(first).toEqual(['Secure Software Architecture', 'Programming for the Web'])
+    expect(second).toEqual(first)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://platform.gradeo.com.au/api/marking-session/summary/metadata/marking-session-1',
+      expect.objectContaining({
+        method: 'GET',
+        credentials: 'include',
+      }),
+    )
+  })
+
+  it('falls back to empty Gradeo topics when marking-session metadata fails', async () => {
+    const logDebug = vi.fn().mockResolvedValue(undefined)
+    ;(globalThis as any).KingsTrackExtension = { logDebug }
+    ;(globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+        },
+      },
+    }
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('Gradeo unavailable')) as unknown as typeof fetch
+
+    await import('../../../extension/src/background/index.js')
+    const ext = (globalThis as any).KingsTrackExtension
+    const topics = await ext.__gradeoBackgroundTest.getTopicLabelsForMarkingSession(
+      {
+        baseUrl: 'https://platform.gradeo.com.au',
+        headers: { Authorization: 'Bearer test' },
+      },
+      'marking-session-2',
+      new Map(),
+    )
+
+    expect(topics).toEqual([])
+    expect(logDebug).toHaveBeenCalledWith(
+      'background',
+      'gradeo_marking_session_metadata_failed',
+      expect.objectContaining({ markingSessionId: 'marking-session-2' }),
+    )
+  })
+
+  it('fetches and groups Gradeo CSV rows once per marking session', async () => {
+    ;(globalThis as any).KingsTrackExtension = {
+      logDebug: vi.fn().mockResolvedValue(undefined),
+    }
+    ;(globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+        },
+      },
+    }
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: vi.fn().mockResolvedValue(csvFixture),
+    }) as unknown as typeof fetch
+
+    await import('../../../extension/src/shared/csv.js')
+    await import('../../../extension/src/background/index.js')
+    const ext = (globalThis as any).KingsTrackExtension
+    const cache = new Map()
+    const ctx = {
+      baseUrl: 'https://platform.gradeo.com.au',
+      headers: { Authorization: 'Bearer test' },
+    }
+
+    const first = await ext.__gradeoBackgroundTest.getCsvRowsForMarkingSession(ctx, 'marking-session-1', cache)
+    const second = await ext.__gradeoBackgroundTest.getCsvRowsForMarkingSession(ctx, 'marking-session-1', cache)
+
+    expect(second).toBe(first)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect(first.get('student-1')).toHaveLength(2)
+
+    const importStudent: any = {
+      gradeo_student_id: 'student-1',
+      student_name: 'Eamon Wong',
+      rows: [],
+      exam_rows: [],
+    }
+    const attached = ext.__gradeoBackgroundTest.appendCsvRowsForStudent(importStudent, first)
+    expect(attached).toBe(2)
+    expect(importStudent.rows.map((row: any) => row.gradeo_question_part_id)).toEqual(['part-1', 'part-2'])
+    expect(importStudent.rows[0].topics).toBe('Data Science')
+  })
+
+  it('falls back to empty Gradeo CSV rows when CSV enrichment fails', async () => {
+    const logDebug = vi.fn().mockResolvedValue(undefined)
+    ;(globalThis as any).KingsTrackExtension = { logDebug }
+    ;(globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+        },
+      },
+    }
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('CSV unavailable')) as unknown as typeof fetch
+
+    await import('../../../extension/src/shared/csv.js')
+    await import('../../../extension/src/background/index.js')
+    const ext = (globalThis as any).KingsTrackExtension
+    const rows = await ext.__gradeoBackgroundTest.getCsvRowsForMarkingSession(
+      {
+        baseUrl: 'https://platform.gradeo.com.au',
+        headers: { Authorization: 'Bearer test' },
+      },
+      'marking-session-2',
+      new Map(),
+    )
+
+    expect(rows).toBeInstanceOf(Map)
+    expect(rows.size).toBe(0)
+    expect(logDebug).toHaveBeenCalledWith(
+      'background',
+      'gradeo_marking_session_csv_failed',
+      expect.objectContaining({ markingSessionId: 'marking-session-2' }),
+    )
   })
 
   it('times out a stalled backend request instead of waiting forever', async () => {

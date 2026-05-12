@@ -59,6 +59,28 @@
     return compacted
   }
 
+  function rowsByStudentId(rows) {
+    const grouped = new Map()
+    rows.forEach(row => {
+      const studentId = String(row?.['Student ID'] || '').trim()
+      if (!studentId) {
+        return
+      }
+      const existing = grouped.get(studentId) || []
+      existing.push(row)
+      grouped.set(studentId, existing)
+    })
+    return grouped
+  }
+
+  function appendCsvRowsForStudent(importStudent, csvRowsByStudentId) {
+    const csvRows = csvRowsByStudentId.get(importStudent.gradeo_student_id) || []
+    csvRows.forEach(row => {
+      importStudent.rows.push(ext.toImportRow(row))
+    })
+    return csvRows.length
+  }
+
   async function setState(state) {
     await browser.storage.local.set({ [STATE_KEY]: state })
     return state
@@ -432,6 +454,72 @@
     }
 
     return response.json()
+  }
+
+  async function gradeoFetchText(ctx, path, scope) {
+    const url = path.startsWith('http') ? path : `${ctx.baseUrl}${path}`
+    const startedAt = Date.now()
+    await ext.logDebug('background', 'gradeo_request_started', {
+      scope: scope || 'gradeo',
+      path,
+      timeoutMs: GRADEO_FETCH_TIMEOUT_MS,
+    })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      controller.abort(new Error(`Gradeo request timed out after ${GRADEO_FETCH_TIMEOUT_MS}ms`))
+    }, GRADEO_FETCH_TIMEOUT_MS)
+
+    let response
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'include',
+        signal: controller.signal,
+        headers: {
+          Accept: 'text/plain, */*',
+          ...ctx.headers,
+        },
+      })
+    } catch (error) {
+      await ext.logDebug('background', 'gradeo_request_failed', {
+        scope: scope || 'gradeo',
+        path,
+        durationMs: Date.now() - startedAt,
+        error: String(error),
+      })
+      if (controller.signal.aborted) {
+        throw new Error(`Gradeo request timed out after ${Math.round(GRADEO_FETCH_TIMEOUT_MS / 1000)}s for ${path}`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    if (response.status === 401) {
+      throw new Error('Gradeo API returned 401. Refresh the saved Gradeo headers and make sure you are still signed in to Gradeo.')
+    }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      await ext.logDebug('background', 'gradeo_api_request_failed', {
+        scope: scope || 'gradeo',
+        status: response.status,
+        url,
+        body: body.slice(0, 300),
+      })
+      throw new Error(`Gradeo API ${response.status} for ${path}`)
+    }
+
+    const durationMs = Date.now() - startedAt
+    await ext.logDebug('background', durationMs >= SLOW_REQUEST_LOG_MS ? 'gradeo_request_slow' : 'gradeo_request_succeeded', {
+      scope: scope || 'gradeo',
+      path,
+      durationMs,
+      status: response.status,
+    })
+
+    return response.text()
   }
 
   function summarizeApiResult(result) {
@@ -932,6 +1020,68 @@
     )
   }
 
+  async function fetchMarkingSessionMetadata(ctx, markingSessionId) {
+    return gradeoFetchJson(
+      ctx,
+      `/api/marking-session/summary/metadata/${encodeURIComponent(markingSessionId)}`,
+      'marking_session_metadata',
+    )
+  }
+
+  function extractTopicLabels(metadata) {
+    const labels = Array.isArray(metadata?.examSummary?.topicLabels)
+      ? metadata.examSummary.topicLabels
+      : []
+    return labels
+      .map(label => String(label?.text || '').trim())
+      .filter(Boolean)
+  }
+
+  function getTopicLabelsForMarkingSession(ctx, markingSessionId, cache) {
+    if (cache.has(markingSessionId)) {
+      return cache.get(markingSessionId)
+    }
+
+    const request = fetchMarkingSessionMetadata(ctx, markingSessionId)
+      .then(extractTopicLabels)
+      .catch(error => {
+        ext.logDebug('background', 'gradeo_marking_session_metadata_failed', {
+          markingSessionId,
+          error: String(error),
+        })
+        return []
+      })
+    cache.set(markingSessionId, request)
+    return request
+  }
+
+  async function fetchMarkingSessionCsvRows(ctx, markingSessionId) {
+    const text = await gradeoFetchText(
+      ctx,
+      `/api/statistics-marking-session/download-csv/${encodeURIComponent(markingSessionId)}/`,
+      'marking_session_csv',
+    )
+    return ext.parseCsv(text)
+  }
+
+  function getCsvRowsForMarkingSession(ctx, markingSessionId, cache) {
+    if (cache.has(markingSessionId)) {
+      return cache.get(markingSessionId)
+    }
+
+    const request = fetchMarkingSessionCsvRows(ctx, markingSessionId)
+      .then(rowsByStudentId)
+      .catch(error => {
+        ext.logDebug('background', 'gradeo_marking_session_csv_failed', {
+          markingSessionId,
+          error: String(error),
+        })
+        return new Map()
+      })
+    cache.set(markingSessionId, request)
+    return request
+  }
+
   async function fetchMarkingStudentStates(ctx, markingSessionId) {
     const payload = await gradeoFetchJson(
       ctx,
@@ -969,6 +1119,7 @@
     markingState,
     classId,
     syllabusTitle,
+    topics,
   }) {
     const canonicalExamId = String(
       examAggregate?.exam?.id ||
@@ -1038,7 +1189,7 @@
       syllabus_grade: examAggregate?.exam?.grade ? String(examAggregate.exam.grade) : null,
       bands: [],
       outcomes: [],
-      topics: [],
+      topics: Array.isArray(topics) ? topics : [],
       student_id: student.id,
     }
   }
@@ -1048,6 +1199,8 @@
     className,
     classIndex,
     totalClasses,
+    topicMetadataCache,
+    csvRowsCache,
   }) {
     await setState({
       status: 'preflighting_import',
@@ -1231,7 +1384,11 @@
         continue
       }
 
-      const markingStates = await fetchMarkingStudentStates(ctx, session.markingSessionId)
+      const [topics, csvRowsByStudentId, markingStates] = await Promise.all([
+        getTopicLabelsForMarkingSession(ctx, session.markingSessionId, topicMetadataCache),
+        getCsvRowsForMarkingSession(ctx, session.markingSessionId, csvRowsCache),
+        fetchMarkingStudentStates(ctx, session.markingSessionId),
+      ])
       const markingStateByStudentId = new Map(
         markingStates
           .map(item => {
@@ -1256,6 +1413,7 @@
           markingState: markingStateByStudentId.get(assignedStudent.id) || null,
           classId,
           syllabusTitle: canonicalSyllabusId ? classDetails.syllabusTitlesById[canonicalSyllabusId] || null : null,
+          topics,
         })
         if (!examRow) {
           return
@@ -1266,6 +1424,7 @@
         if (alreadyPresent) {
           return
         }
+        appendCsvRowsForStudent(importStudent, csvRowsByStudentId)
         importStudent.exam_rows.push(examRow)
         assignedRowCount += 1
       })
@@ -1361,6 +1520,8 @@
   async function importMappedClasses() {
     const user = await ensureAdmin()
     const ctx = await getGradeoApiContext()
+    const topicMetadataCache = new Map()
+    const csvRowsCache = new Map()
 
     await setState({ status: 'loading_mappings' })
     const mappings = await fetchKingsTrackApi('/admin/gradeo/mappings', undefined, {
@@ -1404,6 +1565,8 @@
         className,
         classIndex: classIndex + 1,
         totalClasses: mappings.length,
+        topicMetadataCache,
+        csvRowsCache,
       })
       if (classImport.imported) {
         imported.push(classImport.imported)
@@ -1433,6 +1596,8 @@
     const user = await ensureAdmin()
     const selectedClass = await browser.tabs.sendMessage(tab.id, { type: 'kings.gradeo.getSelectedClass' })
     const ctx = await getGradeoApiContext()
+    const topicMetadataCache = new Map()
+    const csvRowsCache = new Map()
     await ext.logDebug('background', 'reporting_sync_started', {
       user: user.email,
       tabId: tab.id,
@@ -1444,6 +1609,8 @@
       className: selectedClass.name,
       classIndex: 1,
       totalClasses: 1,
+      topicMetadataCache,
+      csvRowsCache,
     })
     if (classImport.skipped) {
       await setState({ status: 'blocked', action: 'class_import', preflight: classImport.skipped.reason })
@@ -1523,6 +1690,14 @@
       })
       throw error
     }
+  }
+
+  ext.__gradeoBackgroundTest = {
+    extractTopicLabels,
+    getTopicLabelsForMarkingSession,
+    getCsvRowsForMarkingSession,
+    rowsByStudentId,
+    appendCsvRowsForStudent,
   }
 
   browser.runtime.onMessage.addListener((message) => {
