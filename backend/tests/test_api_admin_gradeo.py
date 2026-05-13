@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime, timezone
 
 import psycopg2
@@ -486,6 +487,120 @@ def test_gradeo_import_aggregates_exam_rows_and_is_idempotent(app_client):
     assert eamon["results"][GRADEO_MARKING_SESSION_ID]["status"] == "scored"
     assert eamon["results"][GRADEO_MARKING_SESSION_ID]["exam_mark"] == 9.0
     assert len(eamon["results"][GRADEO_MARKING_SESSION_ID]["questions"]) == 2
+    stored_topics = _scalar(
+        """
+        SELECT topics
+        FROM gradeo_assignment_question_results
+        WHERE gradeo_question_part_id = %s
+        """,
+        ("5d4f989d-1f4a-4a5e-a245-6ac3881375b5",),
+    )
+    stored_outcomes = _scalar(
+        """
+        SELECT outcomes
+        FROM gradeo_assignment_question_results
+        WHERE gradeo_question_part_id = %s
+        """,
+        ("5d4f989d-1f4a-4a5e-a245-6ac3881375b5",),
+    )
+    stored_bands = _scalar(
+        """
+        SELECT bands
+        FROM gradeo_assignment_question_results
+        WHERE gradeo_question_part_id = %s
+        """,
+        ("5d4f989d-1f4a-4a5e-a245-6ac3881375b5",),
+    )
+    assert stored_topics == "Data Science"
+    assert stored_outcomes == "EC-12-04,EC-12-08,EC-12-02"
+    assert stored_bands == "3,4,5"
+
+    updated_payload = deepcopy(_import_payload())
+    updated_payload["students"][0]["rows"][0]["topics"] = "Intelligent Systems"
+    updated_payload["students"][0]["rows"][0]["outcomes"] = "EC-12-11"
+    updated_payload["students"][0]["rows"][0]["bands"] = "4,5"
+    updated = app_client.post("/api/admin/gradeo/imports", json=updated_payload)
+    assert updated.status_code == 201
+    assert _scalar(
+        "SELECT topics FROM gradeo_assignment_question_results WHERE gradeo_question_part_id = %s",
+        ("5d4f989d-1f4a-4a5e-a245-6ac3881375b5",),
+    ) == "Intelligent Systems"
+    assert _scalar(
+        "SELECT outcomes FROM gradeo_assignment_question_results WHERE gradeo_question_part_id = %s",
+        ("5d4f989d-1f4a-4a5e-a245-6ac3881375b5",),
+    ) == "EC-12-11"
+    assert _scalar(
+        "SELECT bands FROM gradeo_assignment_question_results WHERE gradeo_question_part_id = %s",
+        ("5d4f989d-1f4a-4a5e-a245-6ac3881375b5",),
+    ) == "4,5"
+
+
+def test_gradeo_topic_band_endpoint_aggregates_question_rows(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+    payload = deepcopy(_import_payload())
+    payload["students"][0]["rows"][0]["mark"] = "2"
+    payload["students"][0]["rows"][0]["marks_available"] = "2"
+    payload["students"][0]["rows"][0]["topics"] = "Data Science,Intelligent Systems"
+    payload["students"][0]["rows"][1]["mark"] = "0"
+    payload["students"][0]["rows"][1]["marks_available"] = "8"
+    payload["students"][0]["rows"][1]["topics"] = "Intelligent Systems"
+    payload["students"][0]["rows"].append(
+        {
+            **deepcopy(payload["students"][0]["rows"][1]),
+            "gradeo_question_id": "ignored-question",
+            "gradeo_question_part_id": "ignored-part",
+            "question_part": "Part C",
+            "mark": "",
+            "marks_available": "4",
+            "topics": "Data Science",
+        }
+    )
+
+    resp = app_client.post("/api/admin/gradeo/imports", json=payload)
+    assert resp.status_code == 201
+
+    topic_bands = app_client.get(f"/api/courses/{COURSE_ID}/gradeo/topic-bands")
+    assert topic_bands.status_code == 200
+    data = topic_bands.json()
+    assert data["mapped"] is True
+    assert data["gradeo_class_id"] == GRADEO_CLASS_ID
+
+    eamon = next(student for student in data["students"] if student["name"] == "Eamon Wong")
+    data_science = eamon["topics"]["Data Science"]
+    intelligent_systems = eamon["topics"]["Intelligent Systems"]
+
+    assert data_science["earned_marks"] == pytest.approx(1.0)
+    assert data_science["available_marks"] == pytest.approx(1.0)
+    assert data_science["score_pct"] == pytest.approx(1.0)
+    assert data_science["predicted_band"] == 6
+    assert data_science["confidence"] == "low"
+    assert data_science["part_count"] == 1
+
+    assert intelligent_systems["earned_marks"] == pytest.approx(1.0)
+    assert intelligent_systems["available_marks"] == pytest.approx(9.0)
+    assert intelligent_systems["score_pct"] == pytest.approx(1 / 9)
+    assert intelligent_systems["predicted_band"] == 1
+    assert intelligent_systems["confidence"] == "low"
+    assert intelligent_systems["part_count"] == 2
+
+    summary = {topic["name"]: topic for topic in data["topics"]}
+    assert summary["Data Science"]["student_count"] == 1
+    assert summary["Data Science"]["average_score_pct"] == pytest.approx(1.0)
+
+
+def test_gradeo_topic_band_endpoint_handles_unmapped_course(app_client):
+    resp = app_client.get(f"/api/courses/{COURSE_ID}/gradeo/topic-bands")
+    assert resp.status_code == 200
+    assert resp.json() == {"mapped": False}
 
 
 def test_gradeo_import_accepts_exam_summaries_without_question_rows(app_client):

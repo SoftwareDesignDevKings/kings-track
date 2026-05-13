@@ -37,4 +37,7 @@ class GradeoAssignmentQuestionResult(Base):
     marker_name: Mapped[str | None] = mapped_column(String)
     marker_id: Mapped[str | None] = mapped_column(String)
     marking_session_link: Mapped[str | None] = mapped_column(Text)
+    bands: Mapped[str | None] = mapped_column(String)
+    outcomes: Mapped[str | None] = mapped_column(String)
+    topics: Mapped[str | None] = mapped_column(String)
     last_imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

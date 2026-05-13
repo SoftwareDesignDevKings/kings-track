@@ -4,15 +4,17 @@ import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
 import EdStemLessonTable from '../components/EdStemLessonTable'
 import GradeoReportTable from '../components/GradeoReportTable'
+import GradeoTopicBandsTable from '../components/GradeoTopicBandsTable'
 import {
   buildCanvasActivityColumns,
   getCanvasDueNowCompletionRate,
   getCanvasDueNowCount,
   prepareCanvasActivityView,
 } from '../components/activityTableModel'
-import { useCourseMatrix, useEdStemMatrix, useGradeoReport } from '../services/api'
+import { useCourseMatrix, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
 
 type TabId = 'activities' | 'edstem' | 'gradeo'
+type GradeoSubview = 'exam_results' | 'topic_bands'
 
 interface Tab {
   id: TabId
@@ -29,30 +31,21 @@ export default function CourseDetail() {
   const { courseId } = useParams<{ courseId: string }>()
   const id = Number(courseId)
   const [activeTab, setActiveTab] = useState<TabId>('activities')
+  const [selectedGradeoSubview, setSelectedGradeoSubview] = useState<GradeoSubview | null>(null)
 
   const { data: matrix, isLoading, error } = useCourseMatrix(id)
   const { data: edStemMatrix, isLoading: edStemLoading, error: edStemError } = useEdStemMatrix(id)
   const { data: gradeoReport, isLoading: gradeoLoading, error: gradeoError } = useGradeoReport(id)
-  const tabs = useMemo(() => TABS.filter(tab => {
-    if (tab.id === 'gradeo') return gradeoReport?.mapped
-    if (tab.id === 'edstem') return edStemMatrix?.mapped
-    return true
-  }), [edStemMatrix?.mapped, gradeoReport?.mapped])
+  const {
+    data: gradeoTopicBands,
+    isLoading: gradeoTopicBandsLoading,
+    error: gradeoTopicBandsError,
+  } = useGradeoTopicBands(id)
 
-  useEffect(() => {
-    if (!tabs.some(tab => tab.id === activeTab)) {
-      setActiveTab('activities')
-    }
-  }, [activeTab, tabs])
-
-  if (!courseId || isNaN(id)) {
-    return <Navigate to="/" replace />
-  }
-
-  // Summary stats derived from matrix
   const totalStudents = matrix?.students.length ?? 0
   const totalAssignments = matrix?.assignment_groups.reduce(
-    (sum, g) => sum + g.assignments.length, 0
+    (sum, group) => sum + group.assignments.length,
+    0,
   ) ?? 0
   const activityView = matrix
     ? prepareCanvasActivityView(buildCanvasActivityColumns(matrix.assignment_groups))
@@ -64,24 +57,42 @@ export default function CourseDetail() {
       0,
     ) / totalStudents
     : null
+  const hasGradeoTopicBands = Boolean(
+    gradeoTopicBands?.mapped && (gradeoTopicBands.topics?.length ?? 0) > 0,
+  )
+  const activeGradeoSubview = selectedGradeoSubview ?? (hasGradeoTopicBands ? 'topic_bands' : 'exam_results')
+  const gradeoMapped = Boolean(gradeoReport?.mapped || gradeoTopicBands?.mapped)
+  const tabs = useMemo(() => TABS.filter(tab => {
+    if (tab.id === 'gradeo') return gradeoMapped
+    if (tab.id === 'edstem') return edStemMatrix?.mapped
+    return true
+  }), [edStemMatrix?.mapped, gradeoMapped])
+
+  useEffect(() => {
+    if (!tabs.some(tab => tab.id === activeTab)) {
+      setActiveTab('activities')
+    }
+  }, [activeTab, tabs])
+
+  if (!courseId || isNaN(id)) {
+    return <Navigate to="/" replace />
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
       <Header />
 
       <main className="mx-auto flex min-h-0 w-full max-w-screen-2xl flex-1 flex-col px-4 py-6 sm:px-6">
-        {/* Breadcrumb */}
         <nav className="mb-5 flex shrink-0 items-center gap-2 text-sm text-slate-400">
           <Link to="/" className="hover:text-brand-600 transition-colors">Courses</Link>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
           <span className="text-slate-600">
-            {isLoading ? '…' : (matrix?.course_code || matrix?.course_name || 'Course')}
+            {isLoading ? '...' : (matrix?.course_code || matrix?.course_name || 'Course')}
           </span>
         </nav>
 
-        {/* Course header */}
         <div className="mb-6 flex shrink-0 flex-col gap-4 sm:flex-row sm:items-end">
           <div className="flex-1 min-w-0">
             {isLoading ? (
@@ -98,7 +109,6 @@ export default function CourseDetail() {
             )}
           </div>
 
-          {/* Summary stats */}
           {matrix && (
             <div className="grid grid-cols-3 gap-3 text-sm shrink-0 sm:flex sm:items-center sm:gap-5">
               <div className="text-center">
@@ -111,7 +121,7 @@ export default function CourseDetail() {
               </div>
               <div className="text-center">
                 <p className="text-lg font-bold text-slate-900">
-                  {avgCompletion !== null ? `${Math.round(avgCompletion * 100)}%` : '—'}
+                  {avgCompletion !== null ? `${Math.round(avgCompletion * 100)}%` : '-'}
                 </p>
                 <p className="text-xs text-slate-400">Avg completion</p>
               </div>
@@ -119,7 +129,6 @@ export default function CourseDetail() {
           )}
         </div>
 
-        {/* Tab bar */}
         <div className="mb-5 shrink-0 overflow-x-auto overflow-y-hidden border-b border-slate-200">
           <div className="flex min-w-max items-center gap-1">
             {tabs.map(tab => (
@@ -140,14 +149,13 @@ export default function CourseDetail() {
           </div>
         </div>
 
-        {/* Tab content */}
         <section className="min-h-0 min-w-0 flex-1">
           {activeTab === 'activities' && (
             <div className="flex h-full min-h-0 min-w-0 flex-col">
               {isLoading && (
                 <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
                   <div className="h-10 bg-slate-100 border-b border-slate-200" />
-                  {[1,2,3,4,5].map(i => (
+                  {[1, 2, 3, 4, 5].map(i => (
                     <div key={i} className="h-10 border-b border-slate-100 bg-white" />
                   ))}
                 </div>
@@ -166,7 +174,7 @@ export default function CourseDetail() {
               {edStemLoading && (
                 <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
                   <div className="h-10 bg-slate-100 border-b border-slate-200" />
-                  {[1,2,3,4,5].map(i => (
+                  {[1, 2, 3, 4, 5].map(i => (
                     <div key={i} className="h-10 border-b border-slate-100 bg-white" />
                   ))}
                 </div>
@@ -182,10 +190,10 @@ export default function CourseDetail() {
 
           {activeTab === 'gradeo' && (
             <div className="flex h-full min-h-0 min-w-0 flex-col">
-              {gradeoLoading && (
+              {(gradeoLoading || gradeoTopicBandsLoading) && (
                 <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
                   <div className="h-10 bg-slate-100 border-b border-slate-200" />
-                  {[1,2,3,4,5].map(i => (
+                  {[1, 2, 3, 4, 5].map(i => (
                     <div key={i} className="h-10 border-b border-slate-100 bg-white" />
                   ))}
                 </div>
@@ -195,8 +203,50 @@ export default function CourseDetail() {
                   Failed to load Gradeo data. Make sure the class has been imported from the extension.
                 </div>
               )}
-              {gradeoReport?.mapped && (
-                <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
+              {gradeoTopicBandsError && activeGradeoSubview === 'topic_bands' && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
+                  Failed to load Gradeo topic bands. Make sure the class has been imported from the extension.
+                </div>
+              )}
+              {!gradeoLoading && !gradeoTopicBandsLoading && gradeoMapped && (
+                <>
+                  <div className="mb-4 inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGradeoSubview('exam_results')}
+                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        activeGradeoSubview === 'exam_results'
+                          ? 'bg-brand-50 text-brand-700 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      Results
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGradeoSubview('topic_bands')}
+                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        activeGradeoSubview === 'topic_bands'
+                          ? 'bg-brand-50 text-brand-700 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      Topic Bands
+                    </button>
+                  </div>
+
+                  {activeGradeoSubview === 'exam_results' && gradeoReport?.mapped && (
+                    <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
+                  )}
+                  {activeGradeoSubview === 'exam_results' && !gradeoReport?.mapped && (
+                    <div className="text-center py-16 text-slate-400 text-sm">
+                      No Gradeo exams have been imported for this course yet.
+                    </div>
+                  )}
+                  {activeGradeoSubview === 'topic_bands' && gradeoTopicBands?.mapped && (
+                    <GradeoTopicBandsTable topicBands={gradeoTopicBands} />
+                  )}
+                </>
               )}
             </div>
           )}

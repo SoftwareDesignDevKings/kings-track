@@ -4,7 +4,7 @@ import type {
   WhitelistedCourse, AvailableCourse,
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
-  GradeoImportRun, GradeoCourseReport,
+  GradeoImportRun, GradeoCourseReport, GradeoTopicBands,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -270,6 +270,15 @@ export function useGradeoReport(courseId: number) {
   return useQuery<GradeoCourseReport>({
     queryKey: ['gradeo-report', courseId],
     queryFn: () => fetchJSON<GradeoCourseReport>(`/courses/${courseId}/gradeo`),
+    staleTime: 60_000,
+    enabled: !isNaN(courseId),
+  })
+}
+
+export function useGradeoTopicBands(courseId: number) {
+  return useQuery<GradeoTopicBands>({
+    queryKey: ['gradeo-topic-bands', courseId],
+    queryFn: () => fetchJSON<GradeoTopicBands>(`/courses/${courseId}/gradeo/topic-bands`),
     staleTime: 60_000,
     enabled: !isNaN(courseId),
   })

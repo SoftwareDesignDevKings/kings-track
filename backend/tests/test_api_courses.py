@@ -3,6 +3,7 @@ Tests for GET /api/courses and GET /api/courses/{id}.
 """
 import pytest
 from datetime import datetime, timedelta, timezone
+from app.api.routes.courses import _predicted_band, _topic_confidence
 from tests.conftest import seed, cleanup
 
 
@@ -26,6 +27,20 @@ def _insert_course(course_id: int, name: str = "Test Course"):
         "VALUES (:id, :name, :code, 'available', :synced_at, 0) ON CONFLICT (id) DO NOTHING",
         {"id": course_id, "name": name, "code": f"CODE{course_id}", "synced_at": now},
     )
+
+
+def test_gradeo_topic_band_threshold_helpers():
+    assert _predicted_band(0.9) == 6
+    assert _predicted_band(0.8) == 5
+    assert _predicted_band(0.7) == 4
+    assert _predicted_band(0.6) == 3
+    assert _predicted_band(0.5) == 2
+    assert _predicted_band(0.49) == 1
+
+    assert _topic_confidence(25, 3) == "high"
+    assert _topic_confidence(10, 1) == "medium"
+    assert _topic_confidence(5, 2) == "medium"
+    assert _topic_confidence(5, 1) == "low"
 
 
 def test_get_course_not_found(app_client):

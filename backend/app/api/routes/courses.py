@@ -38,6 +38,28 @@ def _split_csv_list(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _predicted_band(score_pct: float) -> int:
+    if score_pct >= 0.9:
+        return 6
+    if score_pct >= 0.8:
+        return 5
+    if score_pct >= 0.7:
+        return 4
+    if score_pct >= 0.6:
+        return 3
+    if score_pct >= 0.5:
+        return 2
+    return 1
+
+
+def _topic_confidence(available_marks: float, exam_count: int) -> str:
+    if available_marks >= 25 and exam_count >= 3:
+        return "high"
+    if available_marks >= 10 or exam_count >= 2:
+        return "medium"
+    return "low"
+
+
 @router.get("")
 async def list_courses(db: AsyncSession = Depends(get_db)):
     """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
@@ -403,6 +425,139 @@ async def get_edstem_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
         "edstem_course_id": edstem_course_id,
         "edstem_course_name": edstem_course_name,
         "modules": modules,
+        "students": students,
+    }
+
+
+@router.get("/{course_id}/gradeo/topic-bands")
+async def get_gradeo_topic_bands(course_id: int, db: AsyncSession = Depends(get_db)):
+    mapping_result = await db.execute(
+        text(
+            """
+            SELECT gradeo_class_id, gradeo_class_name
+            FROM gradeo_class_mappings
+            WHERE canvas_course_id = :course_id
+            """
+        ),
+        {"course_id": course_id},
+    )
+    mapping_row = mapping_result.fetchone()
+    if not mapping_row:
+        return {"mapped": False}
+
+    gradeo_class_id, gradeo_class_name = mapping_row
+
+    students_result = await db.execute(
+        text(
+            """
+            SELECT u.id, u.name, u.sortable_name
+            FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
+            ORDER BY u.sortable_name IS NULL, u.sortable_name
+            """
+        ),
+        {"course_id": course_id},
+    )
+    students_raw = students_result.fetchall()
+    student_aggregates: dict[int, dict[str, dict]] = {row[0]: {} for row in students_raw}
+
+    evidence_result = await db.execute(
+        text(
+            """
+            SELECT
+                gar.user_id,
+                gcea.gradeo_marking_session_id,
+                gaqr.mark,
+                gaqr.marks_available,
+                gaqr.topics
+            FROM gradeo_assignment_question_results gaqr
+            JOIN gradeo_assignment_results gar
+              ON gar.gradeo_class_exam_assignment_id = gaqr.gradeo_class_exam_assignment_id
+             AND gar.gradeo_student_id = gaqr.gradeo_student_id
+            JOIN gradeo_class_exam_assignments gcea
+              ON gcea.id = gaqr.gradeo_class_exam_assignment_id
+            WHERE gar.canvas_course_id = :course_id
+              AND gcea.gradeo_class_id = :gradeo_class_id
+              AND gaqr.mark IS NOT NULL
+              AND gaqr.marks_available IS NOT NULL
+              AND gaqr.marks_available > 0
+              AND gaqr.topics IS NOT NULL
+              AND gaqr.topics <> ''
+            """
+        ),
+        {"course_id": course_id, "gradeo_class_id": gradeo_class_id},
+    )
+
+    topic_student_scores: dict[str, list[float]] = {}
+    for row in evidence_result.fetchall():
+        user_id, marking_session_id, mark, marks_available, topics_raw = row
+        topics = _split_csv_list(topics_raw)
+        if not topics:
+            continue
+        share_count = len(topics)
+        earned_share = float(mark) / share_count
+        available_share = float(marks_available) / share_count
+        for topic in topics:
+            topic_data = student_aggregates.setdefault(user_id, {}).setdefault(
+                topic,
+                {
+                    "earned_marks": 0.0,
+                    "available_marks": 0.0,
+                    "exam_ids": set(),
+                    "part_count": 0,
+                },
+            )
+            topic_data["earned_marks"] += earned_share
+            topic_data["available_marks"] += available_share
+            topic_data["exam_ids"].add(marking_session_id)
+            topic_data["part_count"] += 1
+
+    students = []
+    for row in students_raw:
+        user_id, name, sortable_name = row
+        topics = {}
+        for topic_name, aggregate in sorted(student_aggregates.get(user_id, {}).items()):
+            available_marks = aggregate["available_marks"]
+            if available_marks <= 0:
+                continue
+            score_pct = aggregate["earned_marks"] / available_marks
+            exam_count = len(aggregate["exam_ids"])
+            topics[topic_name] = {
+                "score_pct": score_pct,
+                "predicted_band": _predicted_band(score_pct),
+                "confidence": _topic_confidence(available_marks, exam_count),
+                "earned_marks": aggregate["earned_marks"],
+                "available_marks": available_marks,
+                "exam_count": exam_count,
+                "part_count": aggregate["part_count"],
+            }
+            topic_student_scores.setdefault(topic_name, []).append(score_pct)
+
+        students.append(
+            {
+                "id": user_id,
+                "name": name,
+                "sortable_name": sortable_name,
+                "topics": topics,
+            }
+        )
+
+    topics_summary = [
+        {
+            "name": topic_name,
+            "student_count": len(scores),
+            "average_score_pct": sum(scores) / len(scores),
+        }
+        for topic_name, scores in sorted(topic_student_scores.items())
+        if scores
+    ]
+
+    return {
+        "mapped": True,
+        "gradeo_class_id": gradeo_class_id,
+        "gradeo_class_name": gradeo_class_name,
+        "topics": topics_summary,
         "students": students,
     }
 

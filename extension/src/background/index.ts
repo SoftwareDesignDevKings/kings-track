@@ -1,4 +1,4 @@
-import { getGradeoApiContext, gradeoFetchJson } from './gradeoApi'
+import { getGradeoApiContext, gradeoFetchJson, gradeoFetchText } from './gradeoApi'
 import { fetchKingsTrackApi } from './kingsTrackApi'
 import { registerMessageHandlers } from './messages'
 import { compactImportStudent } from './payload'
@@ -612,6 +612,90 @@ import { getState, setState } from './state'
     )
   }
 
+  async function fetchMarkingSessionMetadata(ctx, markingSessionId) {
+    return gradeoFetchJson(
+      ctx,
+      `/api/marking-session/summary/metadata/${encodeURIComponent(markingSessionId)}`,
+      'marking_session_metadata',
+    )
+  }
+
+  function extractTopicLabels(metadata) {
+    const labels = Array.isArray(metadata?.examSummary?.topicLabels)
+      ? metadata.examSummary.topicLabels
+      : []
+    return labels
+      .map(label => String(label?.text || '').trim())
+      .filter(Boolean)
+  }
+
+  function getTopicLabelsForMarkingSession(ctx, markingSessionId, cache) {
+    if (cache.has(markingSessionId)) {
+      return cache.get(markingSessionId)
+    }
+
+    const request = fetchMarkingSessionMetadata(ctx, markingSessionId)
+      .then(extractTopicLabels)
+      .catch(error => {
+        ext.logDebug('background', 'gradeo_marking_session_metadata_failed', {
+          markingSessionId,
+          error: String(error),
+        })
+        return []
+      })
+    cache.set(markingSessionId, request)
+    return request
+  }
+
+  function rowsByStudentId(rows) {
+    const grouped = new Map<string, any[]>()
+    rows.forEach(row => {
+      const studentId = String(row?.['Student ID'] || '').trim()
+      if (!studentId) {
+        return
+      }
+      const existing = grouped.get(studentId) || []
+      existing.push(row)
+      grouped.set(studentId, existing)
+    })
+    return grouped
+  }
+
+  async function fetchMarkingSessionCsvRows(ctx, markingSessionId) {
+    const text = await gradeoFetchText(
+      ctx,
+      `/api/statistics-marking-session/download-csv/${encodeURIComponent(markingSessionId)}/`,
+      'marking_session_csv',
+    )
+    return ext.parseCsv(text)
+  }
+
+  function getCsvRowsForMarkingSession(ctx, markingSessionId, cache) {
+    if (cache.has(markingSessionId)) {
+      return cache.get(markingSessionId)
+    }
+
+    const request = fetchMarkingSessionCsvRows(ctx, markingSessionId)
+      .then(rowsByStudentId)
+      .catch(error => {
+        ext.logDebug('background', 'gradeo_marking_session_csv_failed', {
+          markingSessionId,
+          error: String(error),
+        })
+        return new Map<string, any[]>()
+      })
+    cache.set(markingSessionId, request)
+    return request
+  }
+
+  function appendCsvRowsForStudent(importStudent, csvRowsByStudentId) {
+    const csvRows = csvRowsByStudentId.get(importStudent.gradeo_student_id) || []
+    csvRows.forEach(row => {
+      importStudent.rows.push(ext.toImportRow(row))
+    })
+    return csvRows.length
+  }
+
   async function fetchMarkingStudentStates(ctx, markingSessionId) {
     const payload = await gradeoFetchJson(
       ctx,
@@ -649,6 +733,7 @@ import { getState, setState } from './state'
     markingState,
     classId,
     syllabusTitle,
+    topics,
   }) {
     const canonicalExamId = String(
       examAggregate?.exam?.id ||
@@ -718,7 +803,7 @@ import { getState, setState } from './state'
       syllabus_grade: examAggregate?.exam?.grade ? String(examAggregate.exam.grade) : null,
       bands: [],
       outcomes: [],
-      topics: [],
+      topics: Array.isArray(topics) ? topics : [],
       student_id: student.id,
     }
   }
@@ -728,6 +813,8 @@ import { getState, setState } from './state'
     className,
     classIndex,
     totalClasses,
+    topicMetadataCache,
+    csvRowsCache,
   }) {
     await setState({
       status: 'preflighting_import',
@@ -911,7 +998,11 @@ import { getState, setState } from './state'
         continue
       }
 
-      const markingStates = await fetchMarkingStudentStates(ctx, session.markingSessionId)
+      const [topics, csvRowsByStudentId, markingStates] = await Promise.all([
+        getTopicLabelsForMarkingSession(ctx, session.markingSessionId, topicMetadataCache),
+        getCsvRowsForMarkingSession(ctx, session.markingSessionId, csvRowsCache),
+        fetchMarkingStudentStates(ctx, session.markingSessionId),
+      ])
       const markingStateByStudentId = new Map<string, any>(
         markingStates
           .map(item => {
@@ -936,6 +1027,7 @@ import { getState, setState } from './state'
           markingState: markingStateByStudentId.get(assignedStudent.id) || null,
           classId,
           syllabusTitle: canonicalSyllabusId ? classDetails.syllabusTitlesById[canonicalSyllabusId] || null : null,
+          topics,
         })
         if (!examRow) {
           return
@@ -946,6 +1038,7 @@ import { getState, setState } from './state'
         if (alreadyPresent) {
           return
         }
+        appendCsvRowsForStudent(importStudent, csvRowsByStudentId)
         importStudent.exam_rows.push(examRow)
         assignedRowCount += 1
       })
@@ -1041,6 +1134,8 @@ import { getState, setState } from './state'
   async function importMappedClasses() {
     const user = await ensureAdmin()
     const ctx = await getGradeoApiContext()
+    const topicMetadataCache = new Map()
+    const csvRowsCache = new Map()
 
     await setState({ status: 'loading_mappings' })
     const mappings = await fetchKingsTrackApi('/admin/gradeo/mappings', undefined, {
@@ -1084,6 +1179,8 @@ import { getState, setState } from './state'
         className,
         classIndex: classIndex + 1,
         totalClasses: mappings.length,
+        topicMetadataCache,
+        csvRowsCache,
       })
       if (classImport.imported) {
         imported.push(classImport.imported)
@@ -1113,6 +1210,8 @@ import { getState, setState } from './state'
     const user = await ensureAdmin()
     const selectedClass = await browser.tabs.sendMessage(tab.id, { type: 'kings.gradeo.getSelectedClass' })
     const ctx = await getGradeoApiContext()
+    const topicMetadataCache = new Map()
+    const csvRowsCache = new Map()
     await ext.logDebug('background', 'reporting_sync_started', {
       user: user.email,
       tabId: tab.id,
@@ -1124,6 +1223,8 @@ import { getState, setState } from './state'
       className: selectedClass.name,
       classIndex: 1,
       totalClasses: 1,
+      topicMetadataCache,
+      csvRowsCache,
     })
     if (classImport.skipped) {
       await setState({ status: 'blocked', action: 'class_import', preflight: classImport.skipped.reason })
@@ -1203,6 +1304,14 @@ import { getState, setState } from './state'
       })
       throw error
     }
+  }
+
+  ext.__gradeoBackgroundTest = {
+    extractTopicLabels,
+    getTopicLabelsForMarkingSession,
+    getCsvRowsForMarkingSession,
+    rowsByStudentId,
+    appendCsvRowsForStudent,
   }
 
   registerMessageHandlers({

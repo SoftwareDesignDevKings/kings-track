@@ -20,6 +20,7 @@
       "src/shared/config.js",
       "src/shared/logger.js",
       "src/shared/auth.js",
+      "src/shared/csv.js",
       "src/background/index.js"
     ],
     "service_worker": "src/background/worker.js",

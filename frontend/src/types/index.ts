@@ -296,3 +296,38 @@ export interface GradeoCourseReport {
   students?: GradeoStudentRow[]
   hidden_students?: Array<{ id: number; name: string }>
 }
+
+// ─── Gradeo topic bands ──────────────────────────────────────────────────────
+
+export type GradeoTopicBandConfidence = 'low' | 'medium' | 'high'
+
+export interface GradeoTopicSummary {
+  name: string
+  student_count: number
+  average_score_pct: number
+}
+
+export interface GradeoTopicBandCell {
+  score_pct: number
+  predicted_band: number
+  confidence: GradeoTopicBandConfidence
+  earned_marks: number
+  available_marks: number
+  exam_count: number
+  part_count: number
+}
+
+export interface GradeoTopicBandStudent {
+  id: number
+  name: string
+  sortable_name: string | null
+  topics: Record<string, GradeoTopicBandCell>
+}
+
+export interface GradeoTopicBands {
+  mapped: boolean
+  gradeo_class_id?: string
+  gradeo_class_name?: string
+  topics?: GradeoTopicSummary[]
+  students?: GradeoTopicBandStudent[]
+}

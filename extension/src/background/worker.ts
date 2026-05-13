@@ -3,5 +3,6 @@ importScripts(
   '../shared/config.js',
   '../shared/logger.js',
   '../shared/auth.js',
+  '../shared/csv.js',
   './index.js'
 )

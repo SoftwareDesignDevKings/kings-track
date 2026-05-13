@@ -193,3 +193,73 @@ export async function gradeoFetchJson(ctx: Record<string, any>, path: string, sc
 
   return response.json()
 }
+
+export async function gradeoFetchText(ctx: Record<string, any>, path: string, scope?: string) {
+  const url = path.startsWith('http') ? path : `${ctx.baseUrl}${path}`
+  const startedAt = Date.now()
+  await ext.logDebug('background', 'gradeo_request_started', {
+    scope: scope || 'gradeo',
+    path,
+    timeoutMs: GRADEO_FETCH_TIMEOUT_MS,
+  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`Gradeo request timed out after ${GRADEO_FETCH_TIMEOUT_MS}ms`))
+  }, GRADEO_FETCH_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      mode: 'cors',
+      credentials: 'include',
+      signal: controller.signal,
+      headers: {
+        Accept: 'text/plain, */*',
+        ...ctx.headers,
+      },
+    })
+  } catch (error) {
+    await ext.logDebug('background', 'gradeo_request_failed', {
+      scope: scope || 'gradeo',
+      path,
+      durationMs: Date.now() - startedAt,
+      error: String(error),
+    })
+    if (controller.signal.aborted) {
+      throw new Error(`Gradeo request timed out after ${Math.round(GRADEO_FETCH_TIMEOUT_MS / 1000)}s for ${path}`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  if (response.status === 401) {
+    throw new Error('Gradeo API returned 401. Refresh the saved Gradeo headers and make sure you are still signed in to Gradeo.')
+  }
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    await ext.logDebug('background', 'gradeo_api_request_failed', {
+      scope: scope || 'gradeo',
+      status: response.status,
+      url,
+      body: body.slice(0, 300),
+    })
+    throw new Error(`Gradeo API ${response.status} for ${path}`)
+  }
+
+  const durationMs = Date.now() - startedAt
+  await ext.logDebug(
+    'background',
+    durationMs >= SLOW_REQUEST_LOG_MS ? 'gradeo_request_slow' : 'gradeo_request_succeeded',
+    {
+      scope: scope || 'gradeo',
+      path,
+      durationMs,
+      status: response.status,
+    },
+  )
+
+  return response.text()
+}

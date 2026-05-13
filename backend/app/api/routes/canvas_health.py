@@ -10,13 +10,14 @@ import time
 
 import httpx
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.deps import require_auth
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/canvas", tags=["canvas"])
+router = APIRouter(prefix="/canvas", tags=["canvas"], dependencies=[Depends(require_auth)])
 
 PROBE_TIMEOUT_SECONDS = 8.0
 CACHE_TTL_SECONDS = 20.0
@@ -76,7 +77,7 @@ async def _probe() -> dict:
 
 @router.get("/health")
 async def canvas_health():
-    """Cheap, cached Canvas reachability check (no auth required)."""
+    """Cheap, cached Canvas reachability check."""
     global _cache, _cache_at
     now = time.monotonic()
 

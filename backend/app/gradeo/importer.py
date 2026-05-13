@@ -961,6 +961,9 @@ async def import_class_batch(
                         "marker_name": question_row.marker_name,
                         "marker_id": question_row.marker_id,
                         "marking_session_link": question_row.marking_session_link,
+                        "bands": ",".join(question_row.bands) or None,
+                        "outcomes": ",".join(question_row.outcomes) or None,
+                        "topics": ",".join(question_row.topics) or None,
                         "last_imported_at": now,
                     }
                 )
@@ -1006,13 +1009,13 @@ async def import_class_batch(
                         gradeo_class_exam_assignment_id, gradeo_student_id, gradeo_question_id, gradeo_question_part_id,
                         copyright_notice, question, question_part, question_link, mark,
                         marks_available, answer_submitted, feedback, marker_name, marker_id,
-                        marking_session_link, last_imported_at
+                        marking_session_link, bands, outcomes, topics, last_imported_at
                     )
                     VALUES (
                         :gradeo_class_exam_assignment_id, :gradeo_student_id, :gradeo_question_id, :gradeo_question_part_id,
                         :copyright_notice, :question, :question_part, :question_link, :mark,
                         :marks_available, :answer_submitted, :feedback, :marker_name, :marker_id,
-                        :marking_session_link, :last_imported_at
+                        :marking_session_link, :bands, :outcomes, :topics, :last_imported_at
                     )
                     ON CONFLICT (gradeo_class_exam_assignment_id, gradeo_student_id, gradeo_question_part_id) DO UPDATE SET
                         gradeo_question_id = EXCLUDED.gradeo_question_id,
@@ -1027,6 +1030,9 @@ async def import_class_batch(
                         marker_name = EXCLUDED.marker_name,
                         marker_id = EXCLUDED.marker_id,
                         marking_session_link = EXCLUDED.marking_session_link,
+                        bands = EXCLUDED.bands,
+                        outcomes = EXCLUDED.outcomes,
+                        topics = EXCLUDED.topics,
                         last_imported_at = EXCLUDED.last_imported_at
                     """
                 ),
