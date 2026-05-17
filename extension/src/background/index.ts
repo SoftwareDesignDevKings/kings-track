@@ -2,12 +2,62 @@ import { getGradeoApiContext, gradeoFetchJson, gradeoFetchText } from './gradeoA
 import { fetchKingsTrackApi } from './kingsTrackApi'
 import { registerMessageHandlers } from './messages'
 import { compactImportStudent } from './payload'
-import { getState, setState } from './state'
+import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } from './state'
 
 (function () {
   const ext = self.KingsTrackExtension
   const EXTENSION_VERSION = '0.1.0'
   const LONG_IMPORT_TIMEOUT_MS = 5 * 60 * 1000
+  const KEEP_ALIVE_HEARTBEAT_MS = 20 * 1000
+
+  async function tickKeepAlive(action) {
+    try {
+      if (browser.runtime.getPlatformInfo) {
+        await browser.runtime.getPlatformInfo()
+      }
+      await heartbeatActiveJob(action)
+    } catch (error) {
+      await ext.logDebug('background', 'long_action_keepalive_failed', {
+        action,
+        error: String(error),
+      })
+    }
+  }
+
+  async function withKeepAlive(action, run, options?) {
+    const heartbeatMs = options?.heartbeatMs != null
+      ? Math.max(1, Number(options.heartbeatMs) || KEEP_ALIVE_HEARTBEAT_MS)
+      : KEEP_ALIVE_HEARTBEAT_MS
+    await tickKeepAlive(action)
+    const keepAliveInterval = setInterval(() => {
+      tickKeepAlive(action)
+    }, heartbeatMs)
+
+    try {
+      return await run()
+    } finally {
+      clearInterval(keepAliveInterval)
+    }
+  }
+
+  async function runLongAction(action, callback, options?) {
+    const job = await beginActiveJob(action)
+    if (!job.started) {
+      await ext.logDebug('background', 'long_action_duplicate_ignored', {
+        action,
+        activeJob: job.state?.activeJob || null,
+        status: job.state?.status || null,
+      })
+      return job.state
+    }
+
+    await ext.logDebug('background', 'long_action_started', {
+      action,
+      activeJob: job.state.activeJob,
+    })
+
+    return withKeepAlive(action, callback, options)
+  }
 
   async function getActiveGradeoTab() {
     const tabs = await browser.tabs.query({ active: true, currentWindow: true })
@@ -1290,7 +1340,7 @@ import { getState, setState } from './state'
 
   async function runVisibleAction(action, callback) {
     try {
-      return await callback()
+      return await runLongAction(action, callback)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       await ext.logDebug('background', 'visible_action_failed', {
@@ -1307,6 +1357,12 @@ import { getState, setState } from './state'
   }
 
   ext.__gradeoBackgroundTest = {
+    runLongAction,
+    runVisibleAction,
+    tickKeepAlive,
+    withKeepAlive,
+    getState,
+    stateTest: __stateTest,
     extractTopicLabels,
     getTopicLabelsForMarkingSession,
     getCsvRowsForMarkingSession,
