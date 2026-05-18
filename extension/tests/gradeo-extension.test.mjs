@@ -12,9 +12,71 @@ async function importBuilt(relativePath) {
   await import(`${url.href}?cache=${Date.now()}-${Math.random()}`)
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function setupBrowserMock() {
+  const storageData = {}
+  const messageListeners = []
+  let platformInfoCalls = 0
+
+  globalThis.browser = {
+    runtime: {
+      onMessage: {
+        addListener(listener) {
+          messageListeners.push(listener)
+        },
+      },
+      async sendMessage() {
+        return undefined
+      },
+      async getPlatformInfo() {
+        platformInfoCalls += 1
+        return { os: 'mac', arch: 'x86-64' }
+      },
+    },
+    storage: {
+      local: {
+        async get(key) {
+          if (Array.isArray(key)) {
+            return Object.fromEntries(key.map(item => [item, storageData[item]]))
+          }
+          if (typeof key === 'string') {
+            return { [key]: storageData[key] }
+          }
+          if (key && typeof key === 'object') {
+            return { ...key, ...storageData }
+          }
+          return { ...storageData }
+        },
+        async set(values) {
+          Object.assign(storageData, values)
+        },
+      },
+    },
+    tabs: {
+      async query() {
+        return []
+      },
+    },
+  }
+
+  return {
+    storageData,
+    messageListeners,
+    get platformInfoCalls() {
+      return platformInfoCalls
+    },
+  }
+}
+
 beforeEach(() => {
   globalThis.self = globalThis
-  globalThis.KingsTrackExtension = {}
+  globalThis.KingsTrackExtension = {
+    async logDebug() {},
+  }
+  delete globalThis.browser
 })
 
 describe('Gradeo extension built utilities', () => {
@@ -112,5 +174,89 @@ describe('Gradeo extension built utilities', () => {
       { phase: 'exporting_student', current: 1, total: 2 },
     )
     assert.equal(progressEvents.at(-1).phase, 'class_ready')
+  })
+
+  it('keeps the background worker alive while a long action is running', async () => {
+    const browserMock = setupBrowserMock()
+    await importBuilt('src/background/index.js')
+    const helpers = globalThis.KingsTrackExtension.__gradeoBackgroundTest
+
+    const result = await helpers.withKeepAlive(
+      'import_mapped_classes',
+      () => delay(25).then(() => 'ok'),
+      { heartbeatMs: 5 },
+    )
+
+    assert.equal(result, 'ok')
+    assert.ok(browserMock.platformInfoCalls >= 2)
+    const callsAfterCompletion = browserMock.platformInfoCalls
+    await delay(20)
+    assert.equal(browserMock.platformInfoCalls, callsAfterCompletion)
+  })
+
+  it('returns the running state instead of starting a duplicate long action', async () => {
+    setupBrowserMock()
+    await importBuilt('src/background/index.js')
+    const helpers = globalThis.KingsTrackExtension.__gradeoBackgroundTest
+    let finish
+
+    const first = helpers.runVisibleAction(
+      'import_mapped_classes',
+      () => new Promise(resolve => {
+        finish = () => resolve('done')
+      }),
+    )
+    await delay(0)
+
+    const duplicate = await helpers.runVisibleAction('import_mapped_classes', async () => {
+      throw new Error('duplicate callback should not run')
+    })
+
+    assert.equal(duplicate.status, 'running')
+    assert.equal(duplicate.activeJob.action, 'import_mapped_classes')
+    finish()
+    assert.equal(await first, 'done')
+  })
+
+  it('writes an error state when a visible long action fails', async () => {
+    const browserMock = setupBrowserMock()
+    await importBuilt('src/background/index.js')
+    const helpers = globalThis.KingsTrackExtension.__gradeoBackgroundTest
+
+    await assert.rejects(
+      helpers.runVisibleAction('import_mapped_classes', async () => {
+        throw new Error('Gradeo exploded')
+      }),
+      /Gradeo exploded/,
+    )
+
+    const state = browserMock.storageData.kingsTrackSyncState
+    assert.equal(state.status, 'error')
+    assert.equal(state.action, 'import_mapped_classes')
+    assert.equal(state.message, 'Gradeo exploded')
+    assert.equal(state.activeJob, undefined)
+  })
+
+  it('marks a running state from an old worker as interrupted', async () => {
+    const browserMock = setupBrowserMock()
+    browserMock.storageData.kingsTrackSyncState = {
+      status: 'importing_class',
+      action: 'import_mapped_classes',
+      activeJob: {
+        action: 'import_mapped_classes',
+        startedAt: new Date().toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+        workerInstanceId: 'previous-worker',
+      },
+    }
+    await importBuilt('src/background/index.js')
+    const helpers = globalThis.KingsTrackExtension.__gradeoBackgroundTest
+
+    const state = await helpers.getState()
+
+    assert.equal(state.status, 'error')
+    assert.equal(state.action, 'import_mapped_classes')
+    assert.equal(state.interrupted, true)
+    assert.match(state.message, /background worker restarted/)
   })
 })

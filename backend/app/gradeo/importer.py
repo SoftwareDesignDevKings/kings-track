@@ -105,6 +105,8 @@ def _value_conflicts(existing: str | None, incoming: str | None) -> bool:
 
 
 def merge_exam_aggregate(existing: GradeoExamAggregate, incoming: GradeoExamAggregate) -> GradeoExamAggregate:
+    incoming_is_summary = not incoming.question_rows
+
     for field_name in ("gradeo_exam_id", "gradeo_exam_session_id", "gradeo_marking_session_id", "gradeo_class_id", "syllabus_id"):
         existing_value = getattr(existing, field_name)
         incoming_value = getattr(incoming, field_name)
@@ -117,11 +119,17 @@ def merge_exam_aggregate(existing: GradeoExamAggregate, incoming: GradeoExamAggr
         existing.exam_name = incoming.exam_name
     if existing.class_name is None and incoming.class_name is not None:
         existing.class_name = incoming.class_name
-    if existing.class_average is None and incoming.class_average is not None:
+    if incoming_is_summary and incoming.class_average is not None:
         existing.class_average = incoming.class_average
-    if existing.exam_mark is None and incoming.exam_mark is not None:
+    elif existing.class_average is None and incoming.class_average is not None:
+        existing.class_average = incoming.class_average
+    if incoming_is_summary:
         existing.exam_mark = incoming.exam_mark
-    if existing.marks_available is None and incoming.marks_available is not None:
+    elif existing.exam_mark is None and incoming.exam_mark is not None:
+        existing.exam_mark = incoming.exam_mark
+    if incoming_is_summary and incoming.marks_available is not None:
+        existing.marks_available = incoming.marks_available
+    elif existing.marks_available is None and incoming.marks_available is not None:
         existing.marks_available = incoming.marks_available
     if existing.syllabus_title is None and incoming.syllabus_title is not None:
         existing.syllabus_title = incoming.syllabus_title
@@ -133,10 +141,14 @@ def merge_exam_aggregate(existing: GradeoExamAggregate, incoming: GradeoExamAggr
         existing.outcomes = list(dict.fromkeys([*existing.outcomes, *incoming.outcomes]))
     if incoming.topics:
         existing.topics = list(dict.fromkeys([*existing.topics, *incoming.topics]))
-    if STATUS_PRIORITY.get(incoming.status, 0) > STATUS_PRIORITY.get(existing.status, 0):
+    if incoming_is_summary:
+        existing.status = incoming.status
+        existing.unmarked_question_count = incoming.unmarked_question_count
+    elif STATUS_PRIORITY.get(incoming.status, 0) > STATUS_PRIORITY.get(existing.status, 0):
         existing.status = incoming.status
     existing.answer_submitted_count = max(existing.answer_submitted_count, incoming.answer_submitted_count)
-    existing.unmarked_question_count = max(existing.unmarked_question_count, incoming.unmarked_question_count)
+    if not incoming_is_summary:
+        existing.unmarked_question_count = max(existing.unmarked_question_count, incoming.unmarked_question_count)
     if incoming.question_rows:
         existing.question_rows.extend(incoming.question_rows)
     return existing
