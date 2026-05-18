@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import Header from '../components/Header'
 import CanvasOutageBanner from '../components/CanvasOutageBanner'
@@ -38,6 +37,63 @@ function StatusBar({ value }: { value: number }) {
     </div>
   )
 }
+
+type TabId = 'sync' | 'users' | 'courses' | 'integrations'
+
+function TabIcon({ id, className }: { id: TabId; className?: string }) {
+  const common = {
+    className: className ?? 'h-4 w-4',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    viewBox: '0 0 24 24',
+  }
+  switch (id) {
+    case 'sync':
+      return (
+        <svg {...common}>
+          <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-7.5-4" />
+          <path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 7.5 4" />
+          <path d="M21 3v5h-5" />
+          <path d="M3 21v-5h5" />
+        </svg>
+      )
+    case 'users':
+      return (
+        <svg {...common}>
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      )
+    case 'courses':
+      return (
+        <svg {...common}>
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        </svg>
+      )
+    case 'integrations':
+      return (
+        <svg {...common}>
+          <path d="M9 2v6" />
+          <path d="M15 2v6" />
+          <path d="M6 8h12v3a6 6 0 0 1-12 0V8z" />
+          <path d="M12 17v5" />
+        </svg>
+      )
+  }
+}
+
+const TABS: { id: TabId; label: string; blurb: string }[] = [
+  { id: 'sync', label: 'Sync', blurb: 'Monitor Canvas sync status and course coverage.' },
+  { id: 'users', label: 'Users', blurb: 'Control who can access the dashboard.' },
+  { id: 'courses', label: 'Courses', blurb: 'Choose which courses are visible in the dashboard.' },
+  { id: 'integrations', label: 'Integrations', blurb: 'Connect the Gradeo extension and map EdStem & Gradeo courses.' },
+]
 
 export default function Admin() {
   const queryClient = useQueryClient()
@@ -89,6 +145,7 @@ export default function Admin() {
   const [gradeoCanvasId, setGradeoCanvasId] = useState<number | ''>('')
   const [gradeoClassId, setGradeoClassId] = useState<string>('')
   const [autoMatchedCourse, setAutoMatchedCourse] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<TabId>('sync')
 
   function handleCreateEdStemMapping(e: React.FormEvent) {
     e.preventDefault()
@@ -197,13 +254,37 @@ export default function Admin() {
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-slate-900">Settings</h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Manage users, extension access, and course visibility.
+            {TABS.find(t => t.id === activeTab)?.blurb}
           </p>
+        </div>
+
+        <div className="mb-6 border-b border-slate-200">
+          <nav className="-mb-px flex flex-wrap gap-1" aria-label="Settings sections">
+            {TABS.map(tab => {
+              const active = activeTab === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  aria-current={active ? 'page' : undefined}
+                  className={`inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                    active
+                      ? 'border-brand-600 text-brand-700'
+                      : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'
+                  }`}
+                >
+                  <TabIcon id={tab.id} />
+                  {tab.label}
+                </button>
+              )
+            })}
+          </nav>
         </div>
 
         <div className="space-y-8">
           {/* ── Data Sync ──────────────────────────────────────────── */}
-          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <section className={`rounded-xl border border-slate-200 bg-white overflow-hidden ${activeTab === 'sync' ? '' : 'hidden'}`}>
             <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">Data Sync</h3>
@@ -370,7 +451,7 @@ export default function Admin() {
           </section>
 
           {/* ── Users ──────────────────────────────────────────────── */}
-          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <section className={`rounded-xl border border-slate-200 bg-white overflow-hidden ${activeTab === 'users' ? '' : 'hidden'}`}>
             <div className="px-5 py-4 border-b border-slate-100">
               <h3 className="text-sm font-semibold text-slate-900">Users</h3>
               <p className="text-xs text-slate-500 mt-0.5">Control who can access the dashboard.</p>
@@ -456,41 +537,8 @@ export default function Admin() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <h3 className="text-sm font-semibold text-slate-900">Gradeo Extension</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Open the bridge tab while running syncs from the Gradeo browser extension.
-              </p>
-            </div>
-            <div className="px-5 py-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="text-sm font-semibold text-slate-900">How it works</p>
-                <ol className="mt-3 space-y-2 text-sm text-slate-600 list-decimal list-inside">
-                  <li>Open the Extension Bridge tab and stay signed in as admin.</li>
-                  <li>In the extension popup, set the dashboard URL and paste fresh Gradeo headers.</li>
-                  <li>Run sync actions from the popup. Data is forwarded through your session — no API key needed.</li>
-                </ol>
-              </div>
-              <div className="rounded-xl border border-brand-200 bg-brand-50/50 px-4 py-4 flex flex-col justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">Extension Bridge</p>
-                  <p className="mt-1 text-xs text-slate-600">
-                    The bridge listens for the extension and forwards requests to the backend.
-                  </p>
-                </div>
-                <Link
-                  to="/extension-bridge"
-                  className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700"
-                >
-                  Open Bridge
-                </Link>
-              </div>
-            </div>
-          </section>
-
           {/* ── Course Whitelist ───────────────────────────────────── */}
-          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <section className={`rounded-xl border border-slate-200 bg-white overflow-hidden ${activeTab === 'courses' ? '' : 'hidden'}`}>
             <div className="px-5 py-4 border-b border-slate-100">
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <h3 className="text-sm font-semibold text-slate-900 flex-1">Course Whitelist</h3>
@@ -586,13 +634,10 @@ export default function Admin() {
           </section>
 
           {/* ── EdStem Course Mapping ───────────────────────────────── */}
-          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <section className={`rounded-xl border border-slate-200 bg-white overflow-hidden ${activeTab === 'integrations' ? '' : 'hidden'}`}>
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">EdStem Course Mapping</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Link Canvas courses to their EdStem counterparts for lesson tracking.
-                </p>
               </div>
               {health?.edstem_configured && (
                 <button
@@ -687,13 +732,10 @@ export default function Admin() {
           </section>
 
           {/* ── Gradeo Class Mapping ───────────────────────────────── */}
-          <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <section className={`rounded-xl border border-slate-200 bg-white overflow-hidden ${activeTab === 'integrations' ? '' : 'hidden'}`}>
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">Gradeo Import Pipeline</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Manage the Gradeo student directory, class links, and recent imports from the browser extension.
-                </p>
               </div>
               <button
                 onClick={() => autoMatchGradeo.mutate()}
@@ -705,47 +747,21 @@ export default function Admin() {
             </div>
 
             <div className="px-5 py-5 border-b border-slate-100 bg-slate-50/60">
-              <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">Student directory status</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Refresh the directory from Gradeo&apos;s <code className="rounded bg-slate-100 px-1">/admin/schoolStudents</code> page before importing class data.
-                      </p>
-                    </div>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                      gradeoStudentDirectory?.stale ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                    }`}>
-                      {gradeoStudentDirectory?.stale ? 'Refresh needed' : 'Fresh'}
-                    </span>
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-sm font-semibold text-slate-900">Student directory status</p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Matched students</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">{gradeoStudentDirectory?.matched_students ?? 0}</p>
                   </div>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Matched students</p>
-                      <p className="mt-1 text-lg font-semibold text-slate-900">{gradeoStudentDirectory?.matched_students ?? 0}</p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Last refresh</p>
-                      <p className="mt-1 text-sm font-medium text-slate-700">
-                        {gradeoStudentDirectory?.last_synced_at
-                          ? new Date(gradeoStudentDirectory.last_synced_at).toLocaleString()
-                          : 'Never'}
-                      </p>
-                    </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Last refresh</p>
+                    <p className="mt-1 text-sm font-medium text-slate-700">
+                      {gradeoStudentDirectory?.last_synced_at
+                        ? new Date(gradeoStudentDirectory.last_synced_at).toLocaleString()
+                        : 'Never'}
+                    </p>
                   </div>
-                </div>
-
-                <div className="rounded-xl border border-brand-200 bg-brand-50/50 px-4 py-4">
-                  <p className="text-sm font-semibold text-slate-900">Admin workflow</p>
-                  <ol className="mt-3 space-y-2 text-sm text-slate-600 list-decimal list-inside">
-                    <li>Open Gradeo&apos;s student directory and run the extension refresh.</li>
-                    <li>Map discovered Gradeo classes to whitelisted Kings Track courses.</li>
-                    <li>Open Gradeo reporting on a selected class and import the full class from the extension.</li>
-                  </ol>
-                  <p className="mt-3 text-xs text-slate-500">
-                    Imports stay separate from Canvas and appear in the Gradeo course tab once a class has been linked and imported.
-                  </p>
                 </div>
               </div>
             </div>
