@@ -57,9 +57,13 @@
     return dataRows.map(values => Object.fromEntries(header.map((key, idx) => [key, values[idx] || ''])))
   }
 
-  function toImportRow(row) {
+  function toImportRow(row, canonicalMarkingSessionId) {
     const markingSessionLink = row['Marking session link']
-    const markingSessionId = String(markingSessionLink || '').split('/').filter(Boolean).pop() || null
+    const markingSessionId = (
+      String(canonicalMarkingSessionId || '').trim() ||
+      String(markingSessionLink || '').split('/').filter(Boolean).pop() ||
+      null
+    )
     return {
       exam_name: row.Exam,
       gradeo_exam_id: row['Exam ID'],
@@ -96,7 +100,7 @@
     return {
       gradeo_student_id: firstRow['Student ID'] || fallbackStudent.id,
       student_name: firstRow.Student || fallbackStudent.name,
-      rows: rows.map(toImportRow),
+      rows: rows.map(row => toImportRow(row)),
     }
   }
 

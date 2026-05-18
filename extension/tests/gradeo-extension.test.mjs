@@ -90,7 +90,19 @@ describe('Gradeo extension built utilities', () => {
     assert.equal(studentImport.student_name, 'Eamon Wong')
     assert.equal(studentImport.rows.length, 2)
     assert.equal(studentImport.rows[0].gradeo_exam_id, 'exam-1')
+    assert.equal(studentImport.rows[0].gradeo_marking_session_id, 'script-1')
     assert.equal(studentImport.rows[1].feedback, 'Good work')
+  })
+
+  it('stamps CSV imports with the canonical marking-session id when provided', async () => {
+    await importBuilt('src/shared/csv.js')
+    const ext = globalThis.KingsTrackExtension
+    const [row] = ext.parseCsv(csvFixture)
+
+    const importRow = ext.toImportRow(row, 'marking-session-1')
+
+    assert.equal(importRow.gradeo_marking_session_id, 'marking-session-1')
+    assert.equal(importRow.marking_session_link, 'https://platform.gradeo.com.au/script/script-1')
   })
 
   it('extracts Gradeo student IDs and emails from the school-students page', async () => {

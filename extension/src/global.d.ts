@@ -42,7 +42,7 @@ interface KingsTrackExtensionApi {
   selectDropdownOption: (ariaLabel: string, optionSelector: string | { id?: string; name?: string }) => Promise<void>
   findActionByText: (pattern: RegExp) => Element | undefined
   parseCsv: (text: string) => AnyRecord[]
-  toImportRow: (row: AnyRecord) => AnyRecord
+  toImportRow: (row: AnyRecord, canonicalMarkingSessionId?: string | null) => AnyRecord
   buildStudentImportFromRows: (rows: AnyRecord[], fallbackStudent: { id: string; name: string }) => ImportStudent
   buildStudentImport: (csvText: string, fallbackStudent: { id: string; name: string }) => ImportStudent
   runReportingSync: (deps: AnyRecord) => Promise<AnyRecord>

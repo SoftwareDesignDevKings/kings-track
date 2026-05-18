@@ -32,6 +32,7 @@ describe('Gradeo extension utilities', () => {
     expect(studentImport.student_name).toBe('Eamon Wong')
     expect(studentImport.rows).toHaveLength(2)
     expect(studentImport.rows[0].gradeo_exam_id).toBe('exam-1')
+    expect(studentImport.rows[0].gradeo_marking_session_id).toBe('script-1')
     expect(studentImport.rows[1].feedback).toBe('Good work')
   })
 
@@ -227,9 +228,13 @@ describe('Gradeo extension utilities', () => {
       rows: [],
       exam_rows: [],
     }
-    const attached = ext.__gradeoBackgroundTest.appendCsvRowsForStudent(importStudent, first)
+    const attached = ext.__gradeoBackgroundTest.appendCsvRowsForStudent(importStudent, first, 'marking-session-1')
     expect(attached).toBe(2)
     expect(importStudent.rows.map((row: any) => row.gradeo_question_part_id)).toEqual(['part-1', 'part-2'])
+    expect(importStudent.rows.map((row: any) => row.gradeo_marking_session_id)).toEqual([
+      'marking-session-1',
+      'marking-session-1',
+    ])
     expect(importStudent.rows[0].topics).toBe('Data Science')
   })
 
