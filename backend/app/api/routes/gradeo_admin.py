@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from time import perf_counter
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
@@ -137,6 +138,8 @@ class GradeoImportPreflightIn(BaseModel):
 
 class GradeoImportBatchIn(GradeoImportPreflightIn):
     extension_version: str | None = None
+    import_scope: Literal["class", "marking_sessions"] = "class"
+    scope_marking_session_ids: list[str] = []
     students: list[GradeoImportStudentIn]
 
 
@@ -458,6 +461,8 @@ async def create_gradeo_import(
         gradeo_class_id=body.gradeo_class_id,
         gradeo_class_name=body.gradeo_class_name,
         extension_version=body.extension_version,
+        import_scope=body.import_scope,
+        scope_marking_session_ids=body.scope_marking_session_ids,
         students=[student.model_dump() for student in body.students],
     )
     try:

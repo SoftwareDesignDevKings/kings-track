@@ -377,6 +377,72 @@ describe('Gradeo extension utilities', () => {
     })
   })
 
+  it('resolves targeted Gradeo task syncs by id or exact normalized name', async () => {
+    ;(globalThis as any).KingsTrackExtension = {
+      logDebug: vi.fn().mockResolvedValue(undefined),
+    }
+    ;(globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+        },
+      },
+    }
+
+    await import('../../../extension/src/background/index.ts')
+    const helpers = (globalThis as any).KingsTrackExtension.__gradeoBackgroundTest
+    const sessions = [
+      { markingSessionId: '11111111-1111-1111-1111-111111111111', examTitle: '11ENC_Cycle4' },
+      { markingSessionId: '22222222-2222-2222-2222-222222222222', examTitle: '11ENC_Cycle5' },
+    ]
+
+    expect(helpers.resolveTargetMarkingSessionIds(sessions, '11111111-1111-1111-1111-111111111111', [])).toEqual({
+      ids: ['11111111-1111-1111-1111-111111111111'],
+      error: null,
+    })
+    expect(helpers.resolveTargetMarkingSessionIds(sessions, '11 ENC Cycle 5', [])).toEqual({
+      ids: ['22222222-2222-2222-2222-222222222222'],
+      error: null,
+    })
+    expect(helpers.resolveTargetMarkingSessionIds(sessions, 'missing task', []).error).toContain('Task not found')
+    expect(helpers.resolveTargetMarkingSessionIds(
+      [...sessions, { markingSessionId: '33333333-3333-3333-3333-333333333333', examTitle: '11ENC Cycle5' }],
+      '11ENC_Cycle5',
+      [],
+    ).error).toContain('Task is ambiguous')
+  })
+
+  it('builds scoped Gradeo import payloads for targeted task syncs', async () => {
+    ;(globalThis as any).KingsTrackExtension = {
+      logDebug: vi.fn().mockResolvedValue(undefined),
+    }
+    ;(globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+        },
+      },
+    }
+
+    await import('../../../extension/src/background/index.ts')
+    const helpers = (globalThis as any).KingsTrackExtension.__gradeoBackgroundTest
+    const payload = JSON.parse(helpers.buildClassImportRequestBody({
+      classId: 'class-1',
+      className: '2026_11encx',
+      scope: 'marking_sessions',
+      scopeMarkingSessionIds: ['session-1', 'session-1', 'session-2'],
+      uploadStudents: [{ gradeo_student_id: 'student-1', student_name: 'Eamon Wong' }],
+    }))
+
+    expect(payload).toMatchObject({
+      gradeo_class_id: 'class-1',
+      gradeo_class_name: '2026_11encx',
+      import_scope: 'marking_sessions',
+      scope_marking_session_ids: ['session-1', 'session-2'],
+    })
+    expect(payload.students).toHaveLength(1)
+  })
+
   it('falls back to no marking rows when Gradeo marking items fail for a student', async () => {
     const logDebug = vi.fn().mockResolvedValue(undefined)
     ;(globalThis as any).KingsTrackExtension = { logDebug }

@@ -6,7 +6,10 @@ interface BackgroundActions {
   runVisibleAction: (action: string, callback: () => Promise<any>) => Promise<any>
   syncStudentsApi: () => Promise<any>
   syncClassesApi: () => Promise<any>
+  fetchGradeoMappings: () => Promise<any>
   importMappedClasses: () => Promise<any>
+  importSingleMappedClass: (classId: string, className: string) => Promise<any>
+  importMappedClassTask: (classId: string, className: string, taskQuery: string) => Promise<any>
   syncSchoolGroupsScrape: () => Promise<any>
   syncReportingClass: () => Promise<any>
 }
@@ -71,6 +74,31 @@ export function registerMessageHandlers(actions: BackgroundActions) {
     if (message?.type === 'kings.popup.importMappedClasses') {
       ext.logDebug('popup', 'import_mapped_classes_clicked')
       return actions.runVisibleAction('import_mapped_classes', actions.importMappedClasses)
+    }
+
+    if (message?.type === 'kings.popup.getGradeoMappings') {
+      return actions.fetchGradeoMappings()
+    }
+
+    if (message?.type === 'kings.popup.importMappedClass') {
+      ext.logDebug('popup', 'import_mapped_class_clicked', {
+        classId: message.classId || null,
+        className: message.className || null,
+      })
+      return actions.runVisibleAction('import_mapped_class', () =>
+        actions.importSingleMappedClass(message.classId, message.className)
+      )
+    }
+
+    if (message?.type === 'kings.popup.importMappedClassTask') {
+      ext.logDebug('popup', 'import_mapped_class_task_clicked', {
+        classId: message.classId || null,
+        className: message.className || null,
+        taskQuery: message.taskQuery || null,
+      })
+      return actions.runVisibleAction('import_mapped_class_task', () =>
+        actions.importMappedClassTask(message.classId, message.className, message.taskQuery)
+      )
     }
 
     if (message?.type === 'kings.popup.syncSchoolGroupsScrape') {

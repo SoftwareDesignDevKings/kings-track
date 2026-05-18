@@ -34,6 +34,7 @@
 
       button,
       input,
+      select,
       textarea {
         font: inherit;
       }
@@ -327,6 +328,7 @@
       }
 
       input,
+      select,
       textarea {
         width: 100%;
         border: 1px solid #cbd5e1;
@@ -338,6 +340,7 @@
       }
 
       input:focus,
+      select:focus,
       textarea:focus {
         outline: none;
         border-color: #93c5fd;
@@ -427,6 +430,34 @@
             <button id="syncClasses" class="primary action-button" type="button">Sync classes</button>
             <button id="syncStudents" class="primary action-button" type="button">Sync students</button>
             <button id="importMappedClasses" class="primary action-button" type="button">Import mapped classes</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Targeted re-sync</h2>
+              <p class="panel-caption">Refresh one mapped class or task.</p>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <label>
+              Gradeo class
+              <select id="targetClassSelect">
+                <option value="">Loading mappings...</option>
+              </select>
+            </label>
+            <label>
+              Task name or marking session ID
+              <input id="targetTaskQuery" type="text" placeholder="11ENC_Cycle4 or marking-session-id" />
+            </label>
+            <p id="targetedSyncNote" class="field-note">Mapped classes load from Kings Track.</p>
+          </div>
+
+          <div class="action-grid">
+            <button id="importMappedClass" class="primary action-button" type="button">Re-sync class</button>
+            <button id="importMappedClassTask" class="primary action-button" type="button">Re-sync task</button>
           </div>
         </section>
       </main>
