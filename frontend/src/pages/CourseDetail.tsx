@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useParams, Link, Navigate } from 'react-router-dom'
+import { useEffect, useMemo } from 'react'
+import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
 import EdStemLessonTable from '../components/EdStemLessonTable'
@@ -27,11 +27,31 @@ const TABS: Tab[] = [
   { id: 'edstem', label: 'EdStem' },
 ]
 
+function getTabFromSearch(value: string | null): TabId {
+  if (value === 'gradeo' || value === 'edstem') return value
+  return 'activities'
+}
+
+function getTabSearchValue(tab: TabId) {
+  return tab === 'activities' ? 'canvas' : tab
+}
+
+function getGradeoSubviewFromSearch(value: string | null): GradeoSubview | null {
+  if (value === 'topic-bands' || value === 'topic_bands') return 'topic_bands'
+  if (value === 'results' || value === 'exam-results' || value === 'exam_results') return 'exam_results'
+  return null
+}
+
+function getGradeoSubviewSearchValue(subview: GradeoSubview) {
+  return subview === 'topic_bands' ? 'topic-bands' : 'results'
+}
+
 export default function CourseDetail() {
   const { courseId } = useParams<{ courseId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
   const id = Number(courseId)
-  const [activeTab, setActiveTab] = useState<TabId>('activities')
-  const [selectedGradeoSubview, setSelectedGradeoSubview] = useState<GradeoSubview | null>(null)
+  const activeTab = getTabFromSearch(searchParams.get('tab'))
+  const selectedGradeoSubview = getGradeoSubviewFromSearch(searchParams.get('gradeo'))
 
   const { data: matrix, isLoading, error } = useCourseMatrix(id)
   const { data: edStemMatrix, isLoading: edStemLoading, error: edStemError } = useEdStemMatrix(id)
@@ -57,22 +77,51 @@ export default function CourseDetail() {
       0,
     ) / totalStudents
     : null
-  const hasGradeoTopicBands = Boolean(
-    gradeoTopicBands?.mapped && (gradeoTopicBands.topics?.length ?? 0) > 0,
-  )
-  const activeGradeoSubview = selectedGradeoSubview ?? (hasGradeoTopicBands ? 'topic_bands' : 'exam_results')
+  const activeGradeoSubview = activeTab === 'gradeo'
+    ? selectedGradeoSubview ?? 'exam_results'
+    : 'exam_results'
   const gradeoMapped = Boolean(gradeoReport?.mapped || gradeoTopicBands?.mapped)
   const tabs = useMemo(() => TABS.filter(tab => {
     if (tab.id === 'gradeo') return gradeoMapped
     if (tab.id === 'edstem') return edStemMatrix?.mapped
     return true
   }), [edStemMatrix?.mapped, gradeoMapped])
+  const tabAvailabilityLoaded = !edStemLoading && !gradeoLoading && !gradeoTopicBandsLoading
+
+  function setCourseView(tab: TabId, gradeoSubview: GradeoSubview = activeGradeoSubview) {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+
+      if (tab === 'activities') {
+        next.delete('tab')
+        next.delete('gradeo')
+        return next
+      }
+
+      next.set('tab', getTabSearchValue(tab))
+
+      if (tab === 'gradeo') {
+        next.set('gradeo', getGradeoSubviewSearchValue(gradeoSubview))
+      } else {
+        next.delete('gradeo')
+      }
+
+      return next
+    }, { replace: true })
+  }
 
   useEffect(() => {
+    if (!tabAvailabilityLoaded) return
+
     if (!tabs.some(tab => tab.id === activeTab)) {
-      setActiveTab('activities')
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev)
+        next.delete('tab')
+        next.delete('gradeo')
+        return next
+      }, { replace: true })
     }
-  }, [activeTab, tabs])
+  }, [activeTab, setSearchParams, tabAvailabilityLoaded, tabs])
 
   if (!courseId || isNaN(id)) {
     return <Navigate to="/" replace />
@@ -134,7 +183,7 @@ export default function CourseDetail() {
             {tabs.map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => setCourseView(tab.id)}
                 className={`
                   px-4 py-2.5 text-sm font-medium border-b-2 transition-colors
                   ${activeTab === tab.id
@@ -213,7 +262,7 @@ export default function CourseDetail() {
                   <div className="mb-4 inline-flex rounded-lg border border-slate-200 bg-white p-1">
                     <button
                       type="button"
-                      onClick={() => setSelectedGradeoSubview('exam_results')}
+                      onClick={() => setCourseView('gradeo', 'exam_results')}
                       className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                         activeGradeoSubview === 'exam_results'
                           ? 'bg-brand-50 text-brand-700 shadow-sm'
@@ -224,7 +273,7 @@ export default function CourseDetail() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setSelectedGradeoSubview('topic_bands')}
+                      onClick={() => setCourseView('gradeo', 'topic_bands')}
                       className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                         activeGradeoSubview === 'topic_bands'
                           ? 'bg-brand-50 text-brand-700 shadow-sm'
