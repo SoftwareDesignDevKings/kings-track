@@ -57,7 +57,7 @@
     return dataRows.map(values => Object.fromEntries(header.map((key, idx) => [key, values[idx] || ''])))
   }
 
-  function toImportRow(row, canonicalMarkingSessionId) {
+  function toImportRow(row, canonicalMarkingSessionId = null) {
     const markingSessionLink = row['Marking session link']
     const markingSessionId = (
       String(canonicalMarkingSessionId || '').trim() ||

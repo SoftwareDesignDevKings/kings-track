@@ -293,6 +293,16 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     return Number.isFinite(number) ? number : null
   }
 
+  function compactListValue(value) {
+    if (Array.isArray(value)) {
+      return value
+        .map(item => String(item || '').trim())
+        .filter(Boolean)
+        .join(',')
+    }
+    return String(value || '').trim() || null
+  }
+
   function normalizeExamSummaryRow(item, className) {
     const examName = String(item?.examTitle || '').trim()
     const examSessionId = String(item?.examSessionId || '').trim()
@@ -697,6 +707,62 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     return request
   }
 
+  async function fetchMarkingSessionQuestions(ctx, markingSessionId) {
+    const payload = await gradeoFetchJson(
+      ctx,
+      `/api/marking-session/question/${encodeURIComponent(markingSessionId)}`,
+      'marking_session_questions',
+    )
+    return Array.isArray(payload) ? payload : []
+  }
+
+  function questionMetadataByPartId(questions) {
+    const metadata = new Map<string, any>()
+    ;(Array.isArray(questions) ? questions : []).forEach(question => {
+      const questionId = String(question?.id || '').trim()
+      const questionTitle = String(question?.title || '').trim() || null
+      const copyrightNotice = String(question?.copyrightText || '').trim() || null
+      ;(Array.isArray(question?.parts) ? question.parts : []).forEach(part => {
+        const partId = String(part?.id || '').trim()
+        if (!partId) {
+          return
+        }
+        const syllabus = part?.metadata?.syllabus || null
+        metadata.set(partId, {
+          gradeo_question_id: questionId || null,
+          question: questionTitle,
+          question_part: String(part?.title || '').trim() || null,
+          gradeo_question_part_id: partId,
+          question_link: questionId ? `https://platform.gradeo.com.au/question/${questionId}` : null,
+          marks_available: parseOptionalNumber(part?.metadata?.mark),
+          syllabus_id: String(syllabus?.id || question?.syllabusId || '').trim() || null,
+          syllabus_title: String(syllabus?.title || '').trim() || null,
+          syllabus_grade: syllabus?.grade != null ? String(syllabus.grade) : null,
+          copyright_notice: copyrightNotice,
+        })
+      })
+    })
+    return metadata
+  }
+
+  function getQuestionMetadataForMarkingSession(ctx, markingSessionId, cache) {
+    if (cache.has(markingSessionId)) {
+      return cache.get(markingSessionId)
+    }
+
+    const request = fetchMarkingSessionQuestions(ctx, markingSessionId)
+      .then(questionMetadataByPartId)
+      .catch(error => {
+        ext.logDebug('background', 'gradeo_marking_session_questions_failed', {
+          markingSessionId,
+          error: String(error),
+        })
+        return new Map<string, any>()
+      })
+    cache.set(markingSessionId, request)
+    return request
+  }
+
   function rowsByStudentId(rows) {
     const grouped = new Map<string, any[]>()
     rows.forEach(row => {
@@ -707,6 +773,17 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
       const existing = grouped.get(studentId) || []
       existing.push(row)
       grouped.set(studentId, existing)
+    })
+    return grouped
+  }
+
+  function rowsByQuestionPartId(rows) {
+    const grouped = new Map<string, any>()
+    ;(Array.isArray(rows) ? rows : []).forEach(row => {
+      const partId = String(row?.['Question part ID'] || row?.gradeo_question_part_id || '').trim()
+      if (partId && !grouped.has(partId)) {
+        grouped.set(partId, row)
+      }
     })
     return grouped
   }
@@ -744,6 +821,137 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
       importStudent.rows.push(ext.toImportRow(row, markingSessionId))
     })
     return csvRows.length
+  }
+
+  async function fetchMarkingItemsForStudent(ctx, markingSessionId, studentId) {
+    const payload = await gradeoFetchJson(
+      ctx,
+      `/api/marking-session/question-part-by-student/${encodeURIComponent(markingSessionId)}/${encodeURIComponent(studentId)}`,
+      'marking_session_student_question_parts',
+    )
+    return Array.isArray(payload) ? payload : []
+  }
+
+  async function getMarkingItemsForStudent(ctx, markingSessionId, studentId, studentName) {
+    try {
+      return await fetchMarkingItemsForStudent(ctx, markingSessionId, studentId)
+    } catch (error) {
+      await ext.logDebug('background', 'gradeo_marking_items_failed', {
+        markingSessionId,
+        studentId,
+        studentName,
+        error: String(error),
+      })
+      return []
+    }
+  }
+
+  function getPrimaryMarkingItem(item) {
+    const direct = item?.markingSessionMarkingItem || null
+    if (direct) {
+      return direct
+    }
+    const markingItems = Array.isArray(item?.markingSessionMarkingItemList)
+      ? item.markingSessionMarkingItemList
+      : []
+    return markingItems.find(markingItem => markingItem?.markerType === 'LEAD') || markingItems[0] || null
+  }
+
+  function buildMarkerName(markingItem, fallbackCsvRow) {
+    const fromMarkingItem = [markingItem?.markerFirstName, markingItem?.markerLastName]
+      .map(part => String(part || '').trim())
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+    return fromMarkingItem || fallbackCsvRow?.['Marker name'] || null
+  }
+
+  function buildAuthoritativeQuestionRowsForStudent({
+    examRow,
+    markingItems,
+    questionMetadataByPartId,
+    csvRowsByPartId,
+  }) {
+    return (Array.isArray(markingItems) ? markingItems : [])
+      .map(item => {
+        const markingItem = getPrimaryMarkingItem(item)
+        const partId = String(
+          item?.partId ||
+          markingItem?.partId ||
+          item?.examAnswerSheetItem?.partId ||
+          '',
+        ).trim()
+        if (!partId) {
+          return null
+        }
+        const questionMetadata = questionMetadataByPartId.get(partId) || {}
+        const csvRow = csvRowsByPartId.get(partId) || {}
+        const answerSubmitted = Boolean(
+          markingItem?.isSubmitted ||
+          (item?.examAnswerSheetItem && markingItem?.answerNotSubmitted !== true),
+        )
+        return {
+          exam_name: examRow.exam_name,
+          gradeo_exam_id: examRow.gradeo_exam_id,
+          gradeo_exam_session_id: examRow.gradeo_exam_session_id,
+          gradeo_marking_session_id: examRow.gradeo_marking_session_id,
+          gradeo_class_id: examRow.gradeo_class_id,
+          class_name: examRow.class_name,
+          class_average: examRow.class_average,
+          syllabus_id: questionMetadata.syllabus_id || examRow.syllabus_id,
+          question: csvRow.Question || questionMetadata.question || null,
+          gradeo_question_id: csvRow['Question ID'] || questionMetadata.gradeo_question_id || null,
+          question_part: csvRow['Question part'] || questionMetadata.question_part || null,
+          gradeo_question_part_id: partId,
+          question_link: csvRow['Question link'] || questionMetadata.question_link || null,
+          mark: parseOptionalNumber(markingItem?.mark),
+          marks_available: questionMetadata.marks_available ?? parseOptionalNumber(csvRow['Marks available']),
+          answer_submitted: answerSubmitted,
+          feedback: markingItem?.feedbackText ?? csvRow.Feedback ?? null,
+          marker_name: buildMarkerName(markingItem, csvRow),
+          marker_id: markingItem?.markerId || csvRow['Marker ID'] || null,
+          marking_session_link: csvRow['Marking session link'] || `https://platform.gradeo.com.au/script/${examRow.gradeo_marking_session_id}`,
+          exam_mark: null,
+          syllabus_title: questionMetadata.syllabus_title || examRow.syllabus_title,
+          syllabus_grade: questionMetadata.syllabus_grade || examRow.syllabus_grade,
+          bands: compactListValue(csvRow.Bands),
+          outcomes: compactListValue(csvRow.Outcomes),
+          topics: compactListValue(csvRow.Topics),
+          copyright_notice: csvRow.Copyright || questionMetadata.copyright_notice,
+        }
+      })
+      .filter(Boolean)
+  }
+
+  function applyAuthoritativeRowsToExamSummary(examRow, questionRows) {
+    if (!Array.isArray(questionRows) || questionRows.length === 0) {
+      return examRow
+    }
+
+    const submittedRows = questionRows.filter(row => row.answer_submitted)
+    const unmarkedSubmittedRows = submittedRows.filter(row =>
+      row.mark == null && (row.marks_available == null || Number(row.marks_available) > 0)
+    )
+    const computedMarksAvailable = questionRows.reduce(
+      (total, row) => total + (Number(row.marks_available) || 0),
+      0,
+    )
+    let status = 'not_submitted'
+    let examMark = null
+    if (submittedRows.length > 0 && unmarkedSubmittedRows.length === 0) {
+      status = 'scored'
+      examMark = submittedRows.reduce((total, row) => total + (Number(row.mark) || 0), 0)
+    } else if (submittedRows.length > 0) {
+      status = 'awaiting_marking'
+    }
+
+    return {
+      ...examRow,
+      status,
+      exam_mark: examMark,
+      marks_available: computedMarksAvailable > 0 ? computedMarksAvailable : examRow.marks_available,
+      answer_submitted: submittedRows.length > 0,
+    }
   }
 
   async function fetchMarkingStudentStates(ctx, markingSessionId) {
@@ -865,6 +1073,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     totalClasses,
     topicMetadataCache,
     csvRowsCache,
+    questionMetadataCache,
   }) {
     await setState({
       status: 'preflighting_import',
@@ -908,7 +1117,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     })
     const classDetails = await fetchClassDetails(ctx, classId)
     const students = classDetails.students
-    const studentsById = new Map(students.map(student => [student.id, student]))
+    const studentsById = new Map<string, any>(students.map(student => [student.id, student]))
     const classStudentIds = new Set(students.map(student => student.id))
     const classSyllabusIds = new Set(classDetails.syllabusIds || [])
     const importStudentsById = new Map<string, any>(
@@ -1048,10 +1257,11 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
         continue
       }
 
-      const [topics, csvRowsByStudentId, markingStates] = await Promise.all([
+      const [topics, csvRowsByStudentId, markingStates, questionMetadataByPartId] = await Promise.all([
         getTopicLabelsForMarkingSession(ctx, session.markingSessionId, topicMetadataCache),
         getCsvRowsForMarkingSession(ctx, session.markingSessionId, csvRowsCache),
         fetchMarkingStudentStates(ctx, session.markingSessionId),
+        getQuestionMetadataForMarkingSession(ctx, session.markingSessionId, questionMetadataCache),
       ])
       const markingStateByStudentId = new Map<string, any>(
         markingStates
@@ -1063,11 +1273,11 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
       )
 
       let assignedRowCount = 0
-      assignedStudents.forEach(assignedStudent => {
+      for (const assignedStudent of assignedStudents) {
         const importStudent = importStudentsById.get(assignedStudent.id)
         const student = studentsById.get(assignedStudent.id)
         if (!importStudent || !student) {
-          return
+          continue
         }
         const examRow = buildAssignedExamSummaryRow({
           className,
@@ -1080,18 +1290,30 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
           topics,
         })
         if (!examRow) {
-          return
+          continue
         }
         const alreadyPresent = importStudent.exam_rows.some(
           existing => existing.gradeo_marking_session_id === examRow.gradeo_marking_session_id
         )
         if (alreadyPresent) {
-          return
+          continue
         }
-        appendCsvRowsForStudent(importStudent, csvRowsByStudentId, session.markingSessionId)
-        importStudent.exam_rows.push(examRow)
+        const markingItems = await getMarkingItemsForStudent(
+          ctx,
+          session.markingSessionId,
+          assignedStudent.id,
+          student.name,
+        )
+        const authoritativeRows = buildAuthoritativeQuestionRowsForStudent({
+          examRow,
+          markingItems,
+          questionMetadataByPartId,
+          csvRowsByPartId: rowsByQuestionPartId(csvRowsByStudentId.get(assignedStudent.id) || []),
+        })
+        importStudent.rows.push(...authoritativeRows)
+        importStudent.exam_rows.push(applyAuthoritativeRowsToExamSummary(examRow, authoritativeRows))
         assignedRowCount += 1
-      })
+      }
 
       if (assignedRowCount === 0) {
         skippedExamReasons.zero_assigned_students += 1
@@ -1186,6 +1408,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     const ctx = await getGradeoApiContext()
     const topicMetadataCache = new Map()
     const csvRowsCache = new Map()
+    const questionMetadataCache = new Map()
 
     await setState({ status: 'loading_mappings' })
     const mappings = await fetchKingsTrackApi('/admin/gradeo/mappings', undefined, {
@@ -1231,6 +1454,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
         totalClasses: mappings.length,
         topicMetadataCache,
         csvRowsCache,
+        questionMetadataCache,
       })
       if (classImport.imported) {
         imported.push(classImport.imported)
@@ -1262,6 +1486,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     const ctx = await getGradeoApiContext()
     const topicMetadataCache = new Map()
     const csvRowsCache = new Map()
+    const questionMetadataCache = new Map()
     await ext.logDebug('background', 'reporting_sync_started', {
       user: user.email,
       tabId: tab.id,
@@ -1275,6 +1500,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
       totalClasses: 1,
       topicMetadataCache,
       csvRowsCache,
+      questionMetadataCache,
     })
     if (classImport.skipped) {
       await setState({ status: 'blocked', action: 'class_import', preflight: classImport.skipped.reason })
@@ -1365,9 +1591,15 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     stateTest: __stateTest,
     extractTopicLabels,
     getTopicLabelsForMarkingSession,
+    questionMetadataByPartId,
+    getQuestionMetadataForMarkingSession,
     getCsvRowsForMarkingSession,
     rowsByStudentId,
+    rowsByQuestionPartId,
     appendCsvRowsForStudent,
+    getMarkingItemsForStudent,
+    buildAuthoritativeQuestionRowsForStudent,
+    applyAuthoritativeRowsToExamSummary,
   }
 
   registerMessageHandlers({

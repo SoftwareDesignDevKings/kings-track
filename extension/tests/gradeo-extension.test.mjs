@@ -105,6 +105,133 @@ describe('Gradeo extension built utilities', () => {
     assert.equal(importRow.marking_session_link, 'https://platform.gradeo.com.au/script/script-1')
   })
 
+  it('builds authoritative Gradeo rows from marking items over stale CSV marks', async () => {
+    setupBrowserMock()
+    await importBuilt('src/shared/csv.js')
+    await importBuilt('src/background/index.js')
+    const ext = globalThis.KingsTrackExtension
+    const helpers = ext.__gradeoBackgroundTest
+    const csvRows = ext.parseCsv(csvFixture).map(row => ({
+      ...row,
+      Mark: '',
+      'Answer submitted?': 'No',
+    }))
+    const questionMetadataByPartId = helpers.questionMetadataByPartId([
+      {
+        id: 'exam-question-1',
+        title: 'Project Management',
+        copyrightText: 'NESA Activities',
+        parts: [
+          {
+            id: 'part-1',
+            title: 'Part A',
+            metadata: {
+              mark: 2,
+              syllabus: { id: 'syllabus-1', title: 'Enterprise Computing', grade: 12 },
+            },
+          },
+        ],
+      },
+      {
+        id: 'exam-question-2',
+        title: 'Spreadsheets 2',
+        copyrightText: 'TKS2025',
+        parts: [
+          {
+            id: 'part-2',
+            title: 'Part B',
+            metadata: {
+              mark: 3,
+              syllabus: { id: 'syllabus-1', title: 'Enterprise Computing', grade: 12 },
+            },
+          },
+          {
+            id: 'part-3',
+            title: 'Part C',
+            metadata: {
+              mark: 3,
+              syllabus: { id: 'syllabus-1', title: 'Enterprise Computing', grade: 12 },
+            },
+          },
+        ],
+      },
+    ])
+    const examRow = {
+      exam_name: '12ENC_Cycle6',
+      gradeo_exam_id: 'exam-1',
+      gradeo_exam_session_id: 'exam-session-1',
+      gradeo_marking_session_id: 'marking-session-1',
+      gradeo_class_id: 'gradeo-class-1',
+      class_name: '12 encx_2026',
+      class_average: 5.625,
+      exam_mark: null,
+      marks_available: 8,
+      status: 'awaiting_marking',
+      answer_submitted: true,
+      syllabus_id: 'syllabus-1',
+      syllabus_title: 'Enterprise Computing',
+      syllabus_grade: '12',
+    }
+    const rows = helpers.buildAuthoritativeQuestionRowsForStudent({
+      examRow,
+      markingItems: [
+        {
+          partId: 'part-1',
+          examAnswerSheetItem: { partId: 'part-1' },
+          markingSessionMarkingItem: {
+            partId: 'part-1',
+            mark: 0,
+            isSubmitted: true,
+            answerNotSubmitted: false,
+            feedbackText: 'Needs work',
+            markerId: 'marker-1',
+            markerFirstName: 'TKS',
+            markerLastName: 'CST',
+          },
+        },
+        {
+          partId: 'part-2',
+          examAnswerSheetItem: { partId: 'part-2' },
+          markingSessionMarkingItem: {
+            partId: 'part-2',
+            mark: 1,
+            isSubmitted: true,
+            answerNotSubmitted: false,
+            markerId: 'marker-1',
+            markerFirstName: 'TKS',
+            markerLastName: 'CST',
+          },
+        },
+        {
+          partId: 'part-3',
+          examAnswerSheetItem: { partId: 'part-3' },
+          markingSessionMarkingItem: {
+            partId: 'part-3',
+            mark: 3,
+            isSubmitted: true,
+            answerNotSubmitted: false,
+            markerId: 'marker-1',
+            markerFirstName: 'TKS',
+            markerLastName: 'CST',
+          },
+        },
+      ],
+      questionMetadataByPartId,
+      csvRowsByPartId: helpers.rowsByQuestionPartId(csvRows),
+    })
+    const summary = helpers.applyAuthoritativeRowsToExamSummary(examRow, rows)
+
+    assert.deepEqual(rows.map(row => row.mark), [0, 1, 3])
+    assert.deepEqual(rows.map(row => row.answer_submitted), [true, true, true])
+    assert.deepEqual(rows.map(row => row.marks_available), [2, 3, 3])
+    assert.equal(rows[0].topics, 'Data Science')
+    assert.equal(rows[2].topics, null)
+    assert.equal(rows[0].feedback, 'Needs work')
+    assert.equal(summary.status, 'scored')
+    assert.equal(summary.exam_mark, 4)
+    assert.equal(summary.marks_available, 8)
+  })
+
   it('extracts Gradeo student IDs and emails from the school-students page', async () => {
     const dom = new JSDOM(`
       <table>
