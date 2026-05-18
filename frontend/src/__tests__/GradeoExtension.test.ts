@@ -238,6 +238,177 @@ describe('Gradeo extension utilities', () => {
     expect(importStudent.rows[0].topics).toBe('Data Science')
   })
 
+  it('builds authoritative Gradeo rows from marking items over stale CSV marks', async () => {
+    ;(globalThis as any).KingsTrackExtension = {
+      logDebug: vi.fn().mockResolvedValue(undefined),
+    }
+    ;(globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+        },
+      },
+    }
+
+    await import('../../../extension/src/shared/csv.ts')
+    await import('../../../extension/src/background/index.ts')
+    const ext = (globalThis as any).KingsTrackExtension
+    const csvRows = ext.parseCsv(csvFixture).map((row: any) => ({
+      ...row,
+      Mark: '',
+      'Answer submitted?': 'No',
+    }))
+    const questionMetadataByPartId = ext.__gradeoBackgroundTest.questionMetadataByPartId([
+      {
+        id: 'exam-question-1',
+        title: 'Project Management',
+        copyrightText: 'NESA Activities',
+        parts: [
+          {
+            id: 'part-1',
+            title: 'Part A',
+            metadata: {
+              mark: 2,
+              syllabus: { id: 'syllabus-1', title: 'Enterprise Computing', grade: 12 },
+            },
+          },
+        ],
+      },
+      {
+        id: 'exam-question-2',
+        title: 'Spreadsheets 2',
+        copyrightText: 'TKS2025',
+        parts: [
+          {
+            id: 'part-2',
+            title: 'Part B',
+            metadata: {
+              mark: 3,
+              syllabus: { id: 'syllabus-1', title: 'Enterprise Computing', grade: 12 },
+            },
+          },
+          {
+            id: 'part-3',
+            title: 'Part C',
+            metadata: {
+              mark: 3,
+              syllabus: { id: 'syllabus-1', title: 'Enterprise Computing', grade: 12 },
+            },
+          },
+        ],
+      },
+    ])
+    const examRow = {
+      exam_name: '12ENC_Cycle6',
+      gradeo_exam_id: 'exam-1',
+      gradeo_exam_session_id: 'exam-session-1',
+      gradeo_marking_session_id: 'marking-session-1',
+      gradeo_class_id: 'gradeo-class-1',
+      class_name: '12 encx_2026',
+      class_average: 5.625,
+      exam_mark: null,
+      marks_available: 8,
+      status: 'awaiting_marking',
+      answer_submitted: true,
+      syllabus_id: 'syllabus-1',
+      syllabus_title: 'Enterprise Computing',
+      syllabus_grade: '12',
+    }
+    const rows = ext.__gradeoBackgroundTest.buildAuthoritativeQuestionRowsForStudent({
+      examRow,
+      markingItems: [
+        {
+          partId: 'part-1',
+          examAnswerSheetItem: { partId: 'part-1' },
+          markingSessionMarkingItem: {
+            partId: 'part-1',
+            mark: 0,
+            isSubmitted: true,
+            answerNotSubmitted: false,
+            feedbackText: 'Needs work',
+            markerId: 'marker-1',
+            markerFirstName: 'TKS',
+            markerLastName: 'CST',
+          },
+        },
+        {
+          partId: 'part-2',
+          examAnswerSheetItem: { partId: 'part-2' },
+          markingSessionMarkingItem: {
+            partId: 'part-2',
+            mark: 1,
+            isSubmitted: true,
+            answerNotSubmitted: false,
+            markerId: 'marker-1',
+            markerFirstName: 'TKS',
+            markerLastName: 'CST',
+          },
+        },
+        {
+          partId: 'part-3',
+          examAnswerSheetItem: { partId: 'part-3' },
+          markingSessionMarkingItem: {
+            partId: 'part-3',
+            mark: 3,
+            isSubmitted: true,
+            answerNotSubmitted: false,
+            markerId: 'marker-1',
+            markerFirstName: 'TKS',
+            markerLastName: 'CST',
+          },
+        },
+      ],
+      questionMetadataByPartId,
+      csvRowsByPartId: ext.__gradeoBackgroundTest.rowsByQuestionPartId(csvRows),
+    })
+    const summary = ext.__gradeoBackgroundTest.applyAuthoritativeRowsToExamSummary(examRow, rows)
+
+    expect(rows.map((row: any) => row.mark)).toEqual([0, 1, 3])
+    expect(rows.map((row: any) => row.answer_submitted)).toEqual([true, true, true])
+    expect(rows.map((row: any) => row.marks_available)).toEqual([2, 3, 3])
+    expect(rows[0].topics).toBe('Data Science')
+    expect(rows[2].topics).toBeNull()
+    expect(rows[0].feedback).toBe('Needs work')
+    expect(summary).toMatchObject({
+      status: 'scored',
+      exam_mark: 4,
+      marks_available: 8,
+      answer_submitted: true,
+    })
+  })
+
+  it('falls back to no marking rows when Gradeo marking items fail for a student', async () => {
+    const logDebug = vi.fn().mockResolvedValue(undefined)
+    ;(globalThis as any).KingsTrackExtension = { logDebug }
+    ;(globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+        },
+      },
+    }
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('Marking items unavailable')) as unknown as typeof fetch
+
+    await import('../../../extension/src/background/index.ts')
+    const ext = (globalThis as any).KingsTrackExtension
+    const rows = await ext.__gradeoBackgroundTest.getMarkingItemsForStudent(
+      {
+        baseUrl: 'https://platform.gradeo.com.au',
+        headers: { Authorization: 'Bearer test' },
+      },
+      'marking-session-1',
+      'student-1',
+      'Eamon Wong',
+    )
+
+    expect(rows).toEqual([])
+    expect(logDebug).toHaveBeenCalledWith(
+      'background',
+      'gradeo_marking_items_failed',
+      expect.objectContaining({ markingSessionId: 'marking-session-1', studentId: 'student-1' }),
+    )
+  })
+
   it('falls back to empty Gradeo CSV rows when CSV enrichment fails', async () => {
     const logDebug = vi.fn().mockResolvedValue(undefined)
     ;(globalThis as any).KingsTrackExtension = { logDebug }

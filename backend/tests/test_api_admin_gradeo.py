@@ -685,6 +685,56 @@ def test_gradeo_report_keeps_true_unmarked_question_rows_awaiting(app_client):
     assert len(result["questions"]) == 2
 
 
+def test_gradeo_report_scores_authoritative_marking_item_rows_with_zero_marks(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+
+    payload = deepcopy(_import_payload())
+    payload["students"][0]["exam_rows"] = deepcopy(_summary_import_payload()["students"][0]["exam_rows"])
+    payload["students"][0]["exam_rows"][0]["status"] = "awaiting_marking"
+    payload["students"][0]["exam_rows"][0]["exam_mark"] = None
+    payload["students"][0]["exam_rows"][0]["marks_available"] = "8"
+    payload["students"][0]["rows"][0]["mark"] = "0"
+    payload["students"][0]["rows"][0]["marks_available"] = "2"
+    payload["students"][0]["rows"][0]["exam_mark"] = None
+    payload["students"][0]["rows"][1]["mark"] = "1"
+    payload["students"][0]["rows"][1]["marks_available"] = "3"
+    payload["students"][0]["rows"][1]["exam_mark"] = None
+    payload["students"][0]["rows"].append(
+        {
+            **deepcopy(payload["students"][0]["rows"][1]),
+            "gradeo_question_id": "293087a4-d5fe-4ed7-b127-89ad9cdc571e",
+            "gradeo_question_part_id": "df800c33-495d-44c7-804b-327c4c096d61",
+            "question": "Level 0 DFD",
+            "question_part": "Part A",
+            "mark": "3",
+            "marks_available": "3",
+            "exam_mark": None,
+            "feedback": "Good diagram",
+        }
+    )
+
+    resp = app_client.post("/api/admin/gradeo/imports", json=payload)
+    assert resp.status_code == 201
+
+    report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
+    assert report.status_code == 200
+    eamon = next(student for student in report.json()["students"] if student["name"] == "Eamon Wong")
+    result = eamon["results"][GRADEO_MARKING_SESSION_ID]
+    assert result["status"] == "scored"
+    assert result["exam_mark"] == 4.0
+    assert result["marks_available"] == 8.0
+    assert len(result["questions"]) == 3
+
+
 def test_gradeo_topic_band_endpoint_aggregates_question_rows(app_client):
     _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
     app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
@@ -712,6 +762,17 @@ def test_gradeo_topic_band_endpoint_aggregates_question_rows(app_client):
             "mark": "",
             "marks_available": "4",
             "topics": "Data Science",
+        }
+    )
+    payload["students"][0]["rows"].append(
+        {
+            **deepcopy(payload["students"][0]["rows"][1]),
+            "gradeo_question_id": "no-topic-question",
+            "gradeo_question_part_id": "no-topic-part",
+            "question_part": "Part D",
+            "mark": "3",
+            "marks_available": "3",
+            "topics": "",
         }
     )
 
@@ -743,6 +804,7 @@ def test_gradeo_topic_band_endpoint_aggregates_question_rows(app_client):
     assert intelligent_systems["part_count"] == 2
 
     summary = {topic["name"]: topic for topic in data["topics"]}
+    assert set(summary) == {"Data Science", "Intelligent Systems"}
     assert summary["Data Science"]["student_count"] == 1
     assert summary["Data Science"]["average_score_pct"] == pytest.approx(1.0)
 
