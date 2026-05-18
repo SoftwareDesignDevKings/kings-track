@@ -576,6 +576,35 @@ def test_gradeo_import_summary_can_clear_stale_scored_mark(app_client):
         },
     )
 
+    first = app_client.post("/api/admin/gradeo/imports", json=_summary_import_payload())
+    assert first.status_code == 201
+
+    second_payload = _summary_import_payload()
+    second_payload["students"][0]["exam_rows"][0]["status"] = "awaiting_marking"
+    second_payload["students"][0]["exam_rows"][0]["exam_mark"] = None
+
+    resp = app_client.post("/api/admin/gradeo/imports", json=second_payload)
+    assert resp.status_code == 201
+
+    report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
+    assert report.status_code == 200
+    eamon = next(student for student in report.json()["students"] if student["name"] == "Eamon Wong")
+    assert eamon["results"][GRADEO_MARKING_SESSION_ID]["status"] == "awaiting_marking"
+    assert eamon["results"][GRADEO_MARKING_SESSION_ID]["exam_mark"] is None
+
+
+def test_gradeo_import_keeps_marked_question_evidence_when_summary_lags(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+
     payload = deepcopy(_import_payload())
     payload["students"][0]["exam_rows"] = deepcopy(_summary_import_payload()["students"][0]["exam_rows"])
     payload["students"][0]["exam_rows"][0]["status"] = "awaiting_marking"
@@ -587,8 +616,11 @@ def test_gradeo_import_summary_can_clear_stale_scored_mark(app_client):
     report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
     assert report.status_code == 200
     eamon = next(student for student in report.json()["students"] if student["name"] == "Eamon Wong")
-    assert eamon["results"][GRADEO_MARKING_SESSION_ID]["status"] == "awaiting_marking"
-    assert eamon["results"][GRADEO_MARKING_SESSION_ID]["exam_mark"] is None
+    result = eamon["results"][GRADEO_MARKING_SESSION_ID]
+    assert result["status"] == "scored"
+    assert result["exam_mark"] == 9.0
+    assert result["marks_available"] == 10.0
+    assert len(result["questions"]) == 2
 
 
 def test_gradeo_topic_band_endpoint_aggregates_question_rows(app_client):
