@@ -38,6 +38,42 @@ def _split_csv_list(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _unmarked_submitted_gradeo_questions(questions: list[dict]) -> list[dict]:
+    return [
+        question
+        for question in questions
+        if question.get("answer_submitted")
+        and question.get("mark") is None
+        and (question.get("marks_available") is None or question.get("marks_available") > 0)
+    ]
+
+
+def _effective_gradeo_result(result_data: dict, questions: list[dict]) -> dict:
+    status = result_data["status"]
+    exam_mark = result_data["exam_mark"]
+    marks_available = result_data["marks_available"]
+    submitted_questions = [question for question in questions if question.get("answer_submitted")]
+
+    if (
+        status == "awaiting_marking"
+        and exam_mark is None
+        and submitted_questions
+        and not _unmarked_submitted_gradeo_questions(questions)
+    ):
+        status = "scored"
+        exam_mark = sum(question.get("mark") or 0 for question in submitted_questions)
+        if marks_available is None:
+            marks_available = sum(question.get("marks_available") or 0 for question in questions) or None
+
+    return {
+        "status": status,
+        "exam_mark": exam_mark,
+        "marks_available": marks_available,
+        "class_average": result_data["class_average"],
+        "questions": questions,
+    }
+
+
 def _predicted_band(score_pct: float) -> int:
     if score_pct >= 0.9:
         return 6
@@ -821,19 +857,15 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
         for exam in exams:
             result_data = user_results.get(exam["id"])
             if result_data:
+                questions = question_results_by_key.get(
+                    (result_data["assignment_id"], result_data["gradeo_student_id"]),
+                    [],
+                )
+                effective_result = _effective_gradeo_result(result_data, questions)
                 assigned += 1
-                if result_data["status"] != "not_submitted":
+                if effective_result["status"] != "not_submitted":
                     completed += 1
-                results[exam["id"]] = {
-                    "status": result_data["status"],
-                    "exam_mark": result_data["exam_mark"],
-                    "marks_available": result_data["marks_available"],
-                    "class_average": result_data["class_average"],
-                    "questions": question_results_by_key.get(
-                        (result_data["assignment_id"], result_data["gradeo_student_id"]),
-                        [],
-                    ),
-                }
+                results[exam["id"]] = effective_result
             else:
                 results[exam["id"]] = None
 

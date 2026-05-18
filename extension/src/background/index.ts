@@ -738,10 +738,10 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     return request
   }
 
-  function appendCsvRowsForStudent(importStudent, csvRowsByStudentId) {
+  function appendCsvRowsForStudent(importStudent, csvRowsByStudentId, markingSessionId) {
     const csvRows = csvRowsByStudentId.get(importStudent.gradeo_student_id) || []
     csvRows.forEach(row => {
-      importStudent.rows.push(ext.toImportRow(row))
+      importStudent.rows.push(ext.toImportRow(row, markingSessionId))
     })
     return csvRows.length
   }
@@ -1088,7 +1088,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
         if (alreadyPresent) {
           return
         }
-        appendCsvRowsForStudent(importStudent, csvRowsByStudentId)
+        appendCsvRowsForStudent(importStudent, csvRowsByStudentId, session.markingSessionId)
         importStudent.exam_rows.push(examRow)
         assignedRowCount += 1
       })
