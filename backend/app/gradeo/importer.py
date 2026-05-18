@@ -104,8 +104,22 @@ def _value_conflicts(existing: str | None, incoming: str | None) -> bool:
     return bool(existing and incoming and existing != incoming)
 
 
+def _has_marked_question_evidence(aggregate: GradeoExamAggregate) -> bool:
+    return (
+        aggregate.status == "scored"
+        and aggregate.answer_submitted_count > 0
+        and aggregate.unmarked_question_count == 0
+        and bool(aggregate.question_rows)
+    )
+
+
 def merge_exam_aggregate(existing: GradeoExamAggregate, incoming: GradeoExamAggregate) -> GradeoExamAggregate:
     incoming_is_summary = not incoming.question_rows
+    preserve_marked_question_evidence = (
+        incoming_is_summary
+        and incoming.exam_mark is None
+        and _has_marked_question_evidence(existing)
+    )
 
     for field_name in ("gradeo_exam_id", "gradeo_exam_session_id", "gradeo_marking_session_id", "gradeo_class_id", "syllabus_id"):
         existing_value = getattr(existing, field_name)
@@ -123,7 +137,7 @@ def merge_exam_aggregate(existing: GradeoExamAggregate, incoming: GradeoExamAggr
         existing.class_average = incoming.class_average
     elif existing.class_average is None and incoming.class_average is not None:
         existing.class_average = incoming.class_average
-    if incoming_is_summary:
+    if incoming_is_summary and not preserve_marked_question_evidence:
         existing.exam_mark = incoming.exam_mark
     elif existing.exam_mark is None and incoming.exam_mark is not None:
         existing.exam_mark = incoming.exam_mark
@@ -141,7 +155,7 @@ def merge_exam_aggregate(existing: GradeoExamAggregate, incoming: GradeoExamAggr
         existing.outcomes = list(dict.fromkeys([*existing.outcomes, *incoming.outcomes]))
     if incoming.topics:
         existing.topics = list(dict.fromkeys([*existing.topics, *incoming.topics]))
-    if incoming_is_summary:
+    if incoming_is_summary and not preserve_marked_question_evidence:
         existing.status = incoming.status
         existing.unmarked_question_count = incoming.unmarked_question_count
     elif STATUS_PRIORITY.get(incoming.status, 0) > STATUS_PRIORITY.get(existing.status, 0):
