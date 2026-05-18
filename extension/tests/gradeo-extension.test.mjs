@@ -274,6 +274,59 @@ describe('Gradeo extension built utilities', () => {
     assert.equal(payload.students.length, 1)
   })
 
+  it('falls back to Gradeo notifications when a targeted task is missing from student results', async () => {
+    setupBrowserMock()
+    await importBuilt('src/background/index.js')
+    const helpers = globalThis.KingsTrackExtension.__gradeoBackgroundTest
+    const originalFetch = globalThis.fetch
+    const markingSessionId = '0d3d4db5-fa38-4b1a-bcd1-bdd76506376d'
+
+    globalThis.fetch = async url => {
+      assert.match(String(url), /\/api\/notification\/\?limit=100&offset=0$/)
+      return new Response(JSON.stringify({
+        pgn: { total: 1 },
+        list: [
+          {
+            id: 'notification-1',
+            type: 'MARKING_SESSION_FINISHED',
+            createdDate: '2026-05-18T03:22:49.915Z',
+            content: {
+              markingSessionId,
+              examTitle: '12SEN_Cycle9',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    try {
+      const resolved = await helpers.resolveTargetMarkingSessionIdsWithFallback(
+        { baseUrl: 'https://platform.gradeo.com.au', headers: {} },
+        [],
+        '12SEN_Cycle9',
+        [],
+      )
+
+      assert.equal(resolved.error, null)
+      assert.deepEqual(resolved.ids, [markingSessionId])
+      assert.equal(resolved.fallbackSessions[0].examTitle, '12SEN_Cycle9')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    const uuidResolved = await helpers.resolveTargetMarkingSessionIdsWithFallback(
+      { baseUrl: 'https://platform.gradeo.com.au', headers: {} },
+      [],
+      '11111111-1111-1111-1111-111111111111',
+      [],
+    )
+    assert.equal(uuidResolved.error, null)
+    assert.deepEqual(uuidResolved.ids, ['11111111-1111-1111-1111-111111111111'])
+  })
+
   it('extracts Gradeo student IDs and emails from the school-students page', async () => {
     const dom = new JSDOM(`
       <table>

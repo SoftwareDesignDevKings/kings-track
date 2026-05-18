@@ -353,6 +353,86 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     return { ids, error: null }
   }
 
+  async function fetchRecentMarkingSessionNotifications(ctx, maxPages = 4) {
+    const limit = 100
+    const sessions = []
+    let offset = 0
+    let totalRows = null
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const payload = await gradeoFetchJson(
+        ctx,
+        `/api/notification/?limit=${limit}&offset=${offset}`,
+        'gradeo_notifications',
+      )
+      const rows = Array.isArray(payload?.list) ? payload.list : []
+      totalRows = parseOptionalNumber(payload?.pgn?.total) || rows.length
+
+      rows.forEach(row => {
+        const type = String(row?.type || '').trim()
+        const markingSessionId = String(row?.content?.markingSessionId || '').trim()
+        const examTitle = String(row?.content?.examTitle || '').trim()
+        if (type !== 'MARKING_SESSION_FINISHED' || !markingSessionId) {
+          return
+        }
+        sessions.push({
+          markingSessionId,
+          examTitle: examTitle || null,
+          createdDate: row?.createdDate || null,
+        })
+      })
+
+      if (rows.length === 0 || offset + rows.length >= totalRows) {
+        break
+      }
+      offset += rows.length
+    }
+
+    return sessions
+  }
+
+  async function resolveTargetMarkingSessionIdsWithFallback(ctx, sessions, taskQuery, markingSessionIds) {
+    const resolved = resolveTargetMarkingSessionIds(sessions, taskQuery, markingSessionIds)
+    if (!resolved.error) {
+      return { ...resolved, fallbackSessions: [] }
+    }
+
+    const query = String(taskQuery || '').trim()
+    if (isUuidLike(query)) {
+      return {
+        ids: [query],
+        error: null,
+        fallbackSessions: [{ markingSessionId: query, examTitle: null }],
+      }
+    }
+
+    try {
+      const notificationSessions = await fetchRecentMarkingSessionNotifications(ctx)
+      const notificationResolved = resolveTargetMarkingSessionIds(notificationSessions, taskQuery, [])
+      if (!notificationResolved.error) {
+        const idSet = new Set(notificationResolved.ids)
+        return {
+          ...notificationResolved,
+          fallbackSessions: notificationSessions.filter(session => idSet.has(session.markingSessionId)),
+        }
+      }
+      if (/ambiguous/i.test(notificationResolved.error)) {
+        return { ...notificationResolved, fallbackSessions: [] }
+      }
+    } catch (error) {
+      await ext.logDebug('background', 'targeted_task_notification_lookup_failed', {
+        taskQuery,
+        error: String(error),
+      })
+    }
+
+    return {
+      ids: [],
+      error: `Task not found in student results or recent Gradeo notifications: ${query}`,
+      fallbackSessions: [],
+    }
+  }
+
   function buildClassImportRequestBody({
     classId,
     className,
@@ -1246,8 +1326,10 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
           markingSessionId: candidate.markingSessionId,
           classId,
           className,
+          examTitle: candidate.examTitle || null,
           studentCandidates: new Map(),
         }
+        existing.examTitle = existing.examTitle || candidate.examTitle || null
         existing.studentCandidates.set(student.id, candidate)
         candidateSessions.set(candidate.markingSessionId, existing)
       })
@@ -1256,7 +1338,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     let scopedMarkingSessionIds = normalizeMarkingSessionIds(markingSessionIds)
     let sessions = Array.from<any>(candidateSessions.values())
     if (scope === 'marking_sessions') {
-      const resolved = resolveTargetMarkingSessionIds(sessions, taskQuery, scopedMarkingSessionIds)
+      const resolved = await resolveTargetMarkingSessionIdsWithFallback(ctx, sessions, taskQuery, scopedMarkingSessionIds)
       if (resolved.error) {
         await ext.logDebug('background', 'targeted_task_import_blocked', {
           classId,
@@ -1274,13 +1356,26 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
         }
       }
       scopedMarkingSessionIds = resolved.ids
+      const sessionsById = new Map(sessions.map(session => [session.markingSessionId, session]))
+      ;(resolved.fallbackSessions || []).forEach(session => {
+        if (!session?.markingSessionId || sessionsById.has(session.markingSessionId)) {
+          return
+        }
+        sessionsById.set(session.markingSessionId, {
+          markingSessionId: session.markingSessionId,
+          classId,
+          className,
+          examTitle: session.examTitle || null,
+          studentCandidates: new Map(),
+        })
+      })
       const scopedIdSet = new Set(scopedMarkingSessionIds)
-      sessions = sessions.filter(session => scopedIdSet.has(session.markingSessionId))
+      sessions = Array.from<any>(sessionsById.values()).filter(session => scopedIdSet.has(session.markingSessionId))
     }
 
     for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex += 1) {
       const session = sessions[sessionIndex]
-      const sessionExamName = [...session.studentCandidates.values()][0]?.examTitle || null
+      const sessionExamName = [...session.studentCandidates.values()][0]?.examTitle || session.examTitle || null
       await setState({
         status: 'importing_exam_sessions',
         currentClass: classIndex,
@@ -1437,6 +1532,26 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
         examSessionId: canonicalExamSessionId,
         assignedStudents: assignedRowCount,
       })
+    }
+
+    if (scope === 'marking_sessions' && importedExamCount === 0) {
+      const reason = `Task was found, but no matching assigned exam data was confirmed for ${className}. Check the mapped class selected in Targeted re-sync.`
+      await ext.logDebug('background', 'targeted_task_import_blocked', {
+        classId,
+        className,
+        taskQuery,
+        scopeMarkingSessionIds: scopedMarkingSessionIds,
+        skippedExamReasons,
+        reason,
+      })
+      return {
+        imported: null,
+        skipped: {
+          gradeo_class_id: classId,
+          gradeo_class_name: className,
+          reason,
+        },
+      }
     }
 
     const importStudents = Array.from<any>(importStudentsById.values())
@@ -1758,6 +1873,8 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     extractTopicLabels,
     normalizeTaskKey,
     resolveTargetMarkingSessionIds,
+    fetchRecentMarkingSessionNotifications,
+    resolveTargetMarkingSessionIdsWithFallback,
     buildClassImportRequestBody,
     getTopicLabelsForMarkingSession,
     questionMetadataByPartId,
