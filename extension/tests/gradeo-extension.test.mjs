@@ -232,6 +232,101 @@ describe('Gradeo extension built utilities', () => {
     assert.equal(summary.marks_available, 8)
   })
 
+  it('resolves targeted task syncs and builds scoped import payloads', async () => {
+    setupBrowserMock()
+    await importBuilt('src/background/index.js')
+    const helpers = globalThis.KingsTrackExtension.__gradeoBackgroundTest
+    const sessions = [
+      { markingSessionId: '11111111-1111-1111-1111-111111111111', examTitle: '11ENC_Cycle4' },
+      { markingSessionId: '22222222-2222-2222-2222-222222222222', examTitle: '11ENC_Cycle5' },
+    ]
+
+    assert.deepEqual(
+      helpers.resolveTargetMarkingSessionIds(sessions, '11111111-1111-1111-1111-111111111111', []),
+      { ids: ['11111111-1111-1111-1111-111111111111'], error: null },
+    )
+    assert.deepEqual(
+      helpers.resolveTargetMarkingSessionIds(sessions, '11 ENC Cycle 5', []),
+      { ids: ['22222222-2222-2222-2222-222222222222'], error: null },
+    )
+    assert.match(
+      helpers.resolveTargetMarkingSessionIds(sessions, 'missing task', []).error,
+      /Task not found/,
+    )
+    assert.match(
+      helpers.resolveTargetMarkingSessionIds(
+        [...sessions, { markingSessionId: '33333333-3333-3333-3333-333333333333', examTitle: '11ENC Cycle5' }],
+        '11ENC_Cycle5',
+        [],
+      ).error,
+      /Task is ambiguous/,
+    )
+
+    const payload = JSON.parse(helpers.buildClassImportRequestBody({
+      classId: 'class-1',
+      className: '2026_11encx',
+      scope: 'marking_sessions',
+      scopeMarkingSessionIds: ['session-1', 'session-1', 'session-2'],
+      uploadStudents: [{ gradeo_student_id: 'student-1', student_name: 'Eamon Wong' }],
+    }))
+    assert.equal(payload.import_scope, 'marking_sessions')
+    assert.deepEqual(payload.scope_marking_session_ids, ['session-1', 'session-2'])
+    assert.equal(payload.students.length, 1)
+  })
+
+  it('falls back to Gradeo notifications when a targeted task is missing from student results', async () => {
+    setupBrowserMock()
+    await importBuilt('src/background/index.js')
+    const helpers = globalThis.KingsTrackExtension.__gradeoBackgroundTest
+    const originalFetch = globalThis.fetch
+    const markingSessionId = '0d3d4db5-fa38-4b1a-bcd1-bdd76506376d'
+
+    globalThis.fetch = async url => {
+      assert.match(String(url), /\/api\/notification\/\?limit=100&offset=0$/)
+      return new Response(JSON.stringify({
+        pgn: { total: 1 },
+        list: [
+          {
+            id: 'notification-1',
+            type: 'MARKING_SESSION_FINISHED',
+            createdDate: '2026-05-18T03:22:49.915Z',
+            content: {
+              markingSessionId,
+              examTitle: '12SEN_Cycle9',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    try {
+      const resolved = await helpers.resolveTargetMarkingSessionIdsWithFallback(
+        { baseUrl: 'https://platform.gradeo.com.au', headers: {} },
+        [],
+        '12SEN_Cycle9',
+        [],
+      )
+
+      assert.equal(resolved.error, null)
+      assert.deepEqual(resolved.ids, [markingSessionId])
+      assert.equal(resolved.fallbackSessions[0].examTitle, '12SEN_Cycle9')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    const uuidResolved = await helpers.resolveTargetMarkingSessionIdsWithFallback(
+      { baseUrl: 'https://platform.gradeo.com.au', headers: {} },
+      [],
+      '11111111-1111-1111-1111-111111111111',
+      [],
+    )
+    assert.equal(uuidResolved.error, null)
+    assert.deepEqual(uuidResolved.ids, ['11111111-1111-1111-1111-111111111111'])
+  })
+
   it('extracts Gradeo student IDs and emails from the school-students page', async () => {
     const dom = new JSDOM(`
       <table>

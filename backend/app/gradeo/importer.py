@@ -405,17 +405,34 @@ async def prune_class_import_state(
     imported_assignment_ids: set[int],
     imported_result_keys: set[tuple[int, str]],
     imported_question_keys: set[tuple[int, str, str]],
+    scope_marking_session_ids: set[str] | None = None,
 ) -> None:
-    assignment_rows = await db.execute(
-        text(
-            """
-            SELECT id
-            FROM gradeo_class_exam_assignments
-            WHERE gradeo_class_id = :gradeo_class_id
-            """
-        ),
-        {"gradeo_class_id": gradeo_class_id},
-    )
+    if scope_marking_session_ids is None:
+        assignment_rows = await db.execute(
+            text(
+                """
+                SELECT id
+                FROM gradeo_class_exam_assignments
+                WHERE gradeo_class_id = :gradeo_class_id
+                """
+            ),
+            {"gradeo_class_id": gradeo_class_id},
+        )
+    else:
+        assignment_rows = await db.execute(
+            text(
+                """
+                SELECT id
+                FROM gradeo_class_exam_assignments
+                WHERE gradeo_class_id = :gradeo_class_id
+                  AND gradeo_marking_session_id IN :marking_session_ids
+                """
+            ).bindparams(bindparam("marking_session_ids", expanding=True)),
+            {
+                "gradeo_class_id": gradeo_class_id,
+                "marking_session_ids": list(scope_marking_session_ids) or ["__none__"],
+            },
+        )
     existing_assignment_ids = {row[0] for row in assignment_rows.fetchall()}
     if not existing_assignment_ids:
         return
@@ -789,14 +806,26 @@ async def import_class_batch(
 ) -> dict:
     started_at = perf_counter()
     logger.info(
-        "gradeo_import_started class_id=%s class_name=%s students=%s source_type=%s extension_version=%s triggered_by=%s",
+        "gradeo_import_started class_id=%s class_name=%s students=%s source_type=%s extension_version=%s import_scope=%s triggered_by=%s",
         batch.gradeo_class_id,
         batch.gradeo_class_name,
         len(batch.students),
         batch.source_type,
         batch.extension_version,
+        batch.import_scope,
         triggered_by,
     )
+    import_scope = batch.import_scope or "class"
+    if import_scope not in {"class", "marking_sessions"}:
+        raise ValueError(f"Unsupported Gradeo import scope: {import_scope}")
+    scope_marking_session_ids = {
+        str(marking_session_id or "").strip()
+        for marking_session_id in (batch.scope_marking_session_ids or [])
+        if str(marking_session_id or "").strip()
+    }
+    if import_scope == "marking_sessions" and not scope_marking_session_ids:
+        raise ValueError("Scoped Gradeo import requires at least one marking session id")
+
     preflight = await preflight_class_import(
         db,
         gradeo_class_id=batch.gradeo_class_id,
@@ -889,6 +918,13 @@ async def import_class_batch(
                     aggregates_by_assignment[key] = aggregate
 
             for assignment_key, aggregate in aggregates_by_assignment.items():
+                if import_scope == "marking_sessions":
+                    if not aggregate.gradeo_marking_session_id:
+                        raise ValueError(f"Scoped Gradeo import row is missing marking session id for {aggregate.exam_name}")
+                    if aggregate.gradeo_marking_session_id not in scope_marking_session_ids:
+                        raise ValueError(
+                            f"Gradeo scoped import received out-of-scope marking session {aggregate.gradeo_marking_session_id}"
+                        )
                 if aggregate.syllabus_id and class_syllabus_ids and aggregate.syllabus_id not in class_syllabus_ids:
                     raise ValueError(
                         f"Gradeo syllabus mismatch for class {batch.gradeo_class_id} and marking session {aggregate.gradeo_marking_session_id}: {aggregate.syllabus_id}"
@@ -1080,6 +1116,7 @@ async def import_class_batch(
             imported_assignment_ids=imported_assignment_ids,
             imported_result_keys=imported_result_keys,
             imported_question_keys=imported_question_keys,
+            scope_marking_session_ids=scope_marking_session_ids if import_scope == "marking_sessions" else None,
         )
     except Exception as exc:
         await finish_import_run(

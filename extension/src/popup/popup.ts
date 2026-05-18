@@ -16,6 +16,9 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
   const statusHeadline = getRequiredElement<HTMLElement>('statusHeadline')
   const statusSummary = getRequiredElement<HTMLElement>('statusSummary')
   const noticeBanner = getRequiredElement<HTMLElement>('noticeBanner')
+  const targetClassSelect = getRequiredElement<HTMLSelectElement>('targetClassSelect')
+  const targetTaskQuery = getRequiredElement<HTMLInputElement>('targetTaskQuery')
+  const targetedSyncNote = getRequiredElement<HTMLElement>('targetedSyncNote')
 
   const bridgeSignals = [
     getOptionalElement<HTMLElement>('settingsBridgePill'),
@@ -25,10 +28,13 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
   ].filter(Boolean)
 
   const configInputs: HTMLElement[] = [frontendUrl, gradeoApiHeadersJson]
-  const actionButtonIds = ['syncClasses', 'syncStudents', 'importMappedClasses']
+  const actionButtonIds = ['syncClasses', 'syncStudents', 'importMappedClasses', 'importMappedClass', 'importMappedClassTask']
 
   let noticeTimer = null
   let actionsBusy = false
+  let mappedClasses: any[] = []
+  let mappingsLoading = false
+  let mappingsLoaded = false
 
   function showView(view) {
     homeView.classList.toggle('active', view === 'home')
@@ -93,9 +99,76 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     }
   }
 
+  function blockReason(value) {
+    if (!value) return ''
+    if (typeof value === 'string') return value
+    return value.reason || value.detail || value.message || ''
+  }
+
+  function getSelectedMappedClass() {
+    const selected = mappedClasses.find(item => item.gradeo_class_id === targetClassSelect.value)
+    if (!selected) {
+      throw new Error('Choose a mapped Gradeo class.')
+    }
+    return selected
+  }
+
+  function renderMappedClasses() {
+    const previousValue = targetClassSelect.value
+    targetClassSelect.innerHTML = ''
+    if (mappedClasses.length === 0) {
+      const option = document.createElement('option')
+      option.value = ''
+      option.textContent = mappingsLoaded ? 'No mapped classes' : 'Loading mappings...'
+      targetClassSelect.appendChild(option)
+      return
+    }
+
+    mappedClasses.forEach(item => {
+      const option = document.createElement('option')
+      option.value = item.gradeo_class_id
+      option.textContent = `${item.gradeo_class_name} -> ${item.canvas_course_code || item.canvas_course_name || item.canvas_course_id}`
+      targetClassSelect.appendChild(option)
+    })
+    if (previousValue && mappedClasses.some(item => item.gradeo_class_id === previousValue)) {
+      targetClassSelect.value = previousValue
+    }
+  }
+
+  async function ensureMappingsLoaded(ready) {
+    if (!ready) {
+      mappedClasses = []
+      mappingsLoaded = false
+      mappingsLoading = false
+      renderMappedClasses()
+      return
+    }
+    if (mappingsLoaded || mappingsLoading) {
+      return
+    }
+    mappingsLoading = true
+    renderMappedClasses()
+    try {
+      const rows = await browser.runtime.sendMessage({ type: 'kings.popup.getGradeoMappings' })
+      mappedClasses = Array.isArray(rows) ? rows : []
+      mappingsLoaded = true
+    } catch (error) {
+      mappedClasses = []
+      mappingsLoaded = false
+      showNotice('warn', error.message || String(error))
+    } finally {
+      mappingsLoading = false
+      renderMappedClasses()
+    }
+  }
+
   function updateActionAvailability(ready) {
     if (actionsBusy) return
-    setButtonsBusy(actionButtonIds, !ready)
+    setButtonsBusy(['syncClasses', 'syncStudents', 'importMappedClasses'], !ready)
+    const targetReady = ready && mappedClasses.length > 0
+    setButtonsBusy(['importMappedClass', 'importMappedClassTask'], !targetReady)
+    targetClassSelect.disabled = !targetReady
+    targetTaskQuery.disabled = !targetReady
   }
 
   function buildStateSummary(state) {
@@ -126,7 +199,7 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     if (status === 'blocked') {
       return {
         headline: 'Blocked',
-        summary: safeState.preflight?.reason || safeState.blocked?.reason || '',
+        summary: blockReason(safeState.preflight) || blockReason(safeState.blocked),
       }
     }
 
@@ -285,7 +358,17 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     const note = buildHomeNote(configReady, bridgeOpen, headersReady)
     homeNote.textContent = note
     homeNote.style.display = note ? '' : 'none'
-    updateActionAvailability(configReady && bridgeOpen && headersReady)
+    const baseReady = configReady && bridgeOpen && headersReady
+    updateActionAvailability(baseReady)
+    if (!baseReady) {
+      targetedSyncNote.textContent = 'Connect the bridge and Gradeo headers first.'
+    } else if (mappingsLoading) {
+      targetedSyncNote.textContent = 'Loading mapped classes...'
+    } else if (mappedClasses.length === 0) {
+      targetedSyncNote.textContent = 'No mapped classes found in Kings Track.'
+    } else {
+      targetedSyncNote.textContent = `${mappedClasses.length} mapped classes available.`
+    }
 
     const status = context.state?.status || 'idle'
     const summary = buildStateSummary(context.state)
@@ -298,6 +381,10 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
 
   async function refresh() {
     const context = await browser.runtime.sendMessage({ type: 'kings.popup.getContext' })
+    const config = context.config || {}
+    const configReady = Boolean(String(config.frontendUrl || '').trim())
+    const headersReady = hasSavedHeaders(config)
+    await ensureMappingsLoaded(configReady && Boolean(context.bridgeTabOpen) && headersReady)
     renderState(context)
   }
 
@@ -315,11 +402,11 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     await refresh()
   }
 
-  async function runAction(messageType) {
+  async function runAction(messageType, payload = {}) {
     actionsBusy = true
     setButtonsBusy(actionButtonIds, true)
     try {
-      await browser.runtime.sendMessage({ type: messageType })
+      await browser.runtime.sendMessage({ type: messageType, ...payload })
     } catch (error) {
       showNotice('warn', error.message || String(error))
     } finally {
@@ -365,6 +452,31 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
 
   document.getElementById('importMappedClasses').addEventListener('click', async () => {
     await runAction('kings.popup.importMappedClasses')
+  })
+
+  document.getElementById('importMappedClass').addEventListener('click', async () => {
+    try {
+      const selected = getSelectedMappedClass()
+      await runAction('kings.popup.importMappedClass', {
+        classId: selected.gradeo_class_id,
+        className: selected.gradeo_class_name,
+      })
+    } catch (error) {
+      showNotice('warn', error.message || String(error))
+    }
+  })
+
+  document.getElementById('importMappedClassTask').addEventListener('click', async () => {
+    try {
+      const selected = getSelectedMappedClass()
+      await runAction('kings.popup.importMappedClassTask', {
+        classId: selected.gradeo_class_id,
+        className: selected.gradeo_class_name,
+        taskQuery: targetTaskQuery.value,
+      })
+    } catch (error) {
+      showNotice('warn', error.message || String(error))
+    }
   })
 
   refresh()

@@ -10,7 +10,15 @@ from app.gradeo.types import GradeoExamSummaryRow, GradeoImportBatch, GradeoQues
 class GradeoSourceAdapter(Protocol):
     source_name: str
 
-    def to_import_batch(self, gradeo_class_id: str, gradeo_class_name: str, extension_version: str | None, students: list[dict]) -> GradeoImportBatch:
+    def to_import_batch(
+        self,
+        gradeo_class_id: str,
+        gradeo_class_name: str,
+        extension_version: str | None,
+        students: list[dict],
+        import_scope: str = "class",
+        scope_marking_session_ids: list[str] | None = None,
+    ) -> GradeoImportBatch:
         ...
 
 
@@ -40,12 +48,20 @@ class ExtensionGradeoSourceAdapter:
         gradeo_class_name: str,
         extension_version: str | None,
         students: list[dict],
+        import_scope: str = "class",
+        scope_marking_session_ids: list[str] | None = None,
     ) -> GradeoImportBatch:
         return GradeoImportBatch(
             gradeo_class_id=gradeo_class_id,
             gradeo_class_name=gradeo_class_name,
             source_type=self.source_name,
             extension_version=extension_version,
+            import_scope=import_scope,
+            scope_marking_session_ids=[
+                value
+                for value in (self._coerce_text(item) for item in (scope_marking_session_ids or []))
+                if value
+            ],
             students=[
                 GradeoStudentImport(
                     gradeo_student_id=item["gradeo_student_id"],

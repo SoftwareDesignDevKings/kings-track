@@ -73,6 +73,8 @@ class GradeoImportBatch:
     source_type: str
     extension_version: str | None
     students: list[GradeoStudentImport]
+    import_scope: str = "class"
+    scope_marking_session_ids: list[str] | None = None
 
 
 @dataclass(slots=True)

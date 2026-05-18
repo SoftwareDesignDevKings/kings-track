@@ -882,6 +882,89 @@ def test_gradeo_reimport_prunes_stale_assignments_and_question_rows(app_client):
     assert eamon["results"] == {}
 
 
+def test_gradeo_scoped_task_import_updates_one_session_without_pruning_others(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+
+    first = app_client.post("/api/admin/gradeo/imports", json=_multi_session_summary_import_payload())
+    assert first.status_code == 201
+    assert _scalar("SELECT COUNT(*) FROM gradeo_class_exam_assignments") == 2
+
+    scoped_payload = _summary_import_payload()
+    scoped_payload["import_scope"] = "marking_sessions"
+    scoped_payload["scope_marking_session_ids"] = [GRADEO_MARKING_SESSION_ID]
+    scoped_payload["students"][0]["exam_rows"][0]["exam_mark"] = "6"
+    scoped_payload["students"][0]["exam_rows"][0]["marks_available"] = "10"
+
+    second = app_client.post("/api/admin/gradeo/imports", json=scoped_payload)
+    assert second.status_code == 201
+
+    assert _scalar("SELECT COUNT(*) FROM gradeo_class_exam_assignments") == 2
+    report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
+    assert report.status_code == 200
+    eamon = next(student for student in report.json()["students"] if student["name"] == "Eamon Wong")
+    assert set(eamon["results"]) == {GRADEO_MARKING_SESSION_ID, "marking-session-2"}
+    assert eamon["results"][GRADEO_MARKING_SESSION_ID]["exam_mark"] == 6.0
+    assert eamon["results"]["marking-session-2"]["exam_mark"] == 8.0
+
+
+def test_gradeo_scoped_task_import_prunes_only_requested_session(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+
+    first = app_client.post("/api/admin/gradeo/imports", json=_multi_session_summary_import_payload())
+    assert first.status_code == 201
+
+    scoped_payload = _empty_import_payload()
+    scoped_payload["import_scope"] = "marking_sessions"
+    scoped_payload["scope_marking_session_ids"] = [GRADEO_MARKING_SESSION_ID]
+
+    second = app_client.post("/api/admin/gradeo/imports", json=scoped_payload)
+    assert second.status_code == 201
+    assert second.json()["imported_exams"] == 0
+
+    assert _scalar("SELECT COUNT(*) FROM gradeo_class_exam_assignments") == 1
+    remaining = _scalar("SELECT gradeo_marking_session_id FROM gradeo_class_exam_assignments")
+    assert remaining == "marking-session-2"
+
+
+def test_gradeo_scoped_task_import_rejects_out_of_scope_payload(app_client):
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12 encx_2026",
+        },
+    )
+
+    payload = _summary_import_payload()
+    payload["import_scope"] = "marking_sessions"
+    payload["scope_marking_session_ids"] = ["marking-session-2"]
+
+    resp = app_client.post("/api/admin/gradeo/imports", json=payload)
+    assert resp.status_code == 400
+    assert "out-of-scope marking session" in resp.json()["detail"]
+
+
 def test_gradeo_report_returns_null_for_unassigned_exam_cells(app_client):
     _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
     app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload_with_second_student())

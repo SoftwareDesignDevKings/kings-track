@@ -303,6 +303,153 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     return String(value || '').trim() || null
   }
 
+  function normalizeTaskKey(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '')
+  }
+
+  function isUuidLike(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '').trim())
+  }
+
+  function normalizeMarkingSessionIds(ids) {
+    return Array.from(new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map(id => String(id || '').trim())
+        .filter(Boolean)
+    ))
+  }
+
+  function resolveTargetMarkingSessionIds(sessions, taskQuery, markingSessionIds) {
+    const explicitIds = normalizeMarkingSessionIds(markingSessionIds)
+    if (explicitIds.length > 0) {
+      return { ids: explicitIds, error: null }
+    }
+
+    const query = String(taskQuery || '').trim()
+    if (!query) {
+      return { ids: [], error: 'Enter a Gradeo task name or marking session ID.' }
+    }
+
+    const sessionRows = Array.isArray(sessions) ? sessions : []
+    const matches = isUuidLike(query)
+      ? sessionRows.filter(session => session.markingSessionId === query)
+      : sessionRows.filter(session => normalizeTaskKey(session.examTitle) === normalizeTaskKey(query))
+
+    if (matches.length === 0) {
+      return { ids: [], error: `Task not found: ${query}` }
+    }
+
+    const ids = normalizeMarkingSessionIds(matches.map(session => session.markingSessionId))
+    if (ids.length > 1) {
+      const detail = matches
+        .map(session => `${session.examTitle || 'Untitled task'} (${session.markingSessionId})`)
+        .join(', ')
+      return { ids: [], error: `Task is ambiguous: ${detail}` }
+    }
+
+    return { ids, error: null }
+  }
+
+  async function fetchRecentMarkingSessionNotifications(ctx, maxPages = 4) {
+    const limit = 100
+    const sessions = []
+    let offset = 0
+    let totalRows = null
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const payload = await gradeoFetchJson(
+        ctx,
+        `/api/notification/?limit=${limit}&offset=${offset}`,
+        'gradeo_notifications',
+      )
+      const rows = Array.isArray(payload?.list) ? payload.list : []
+      totalRows = parseOptionalNumber(payload?.pgn?.total) || rows.length
+
+      rows.forEach(row => {
+        const type = String(row?.type || '').trim()
+        const markingSessionId = String(row?.content?.markingSessionId || '').trim()
+        const examTitle = String(row?.content?.examTitle || '').trim()
+        if (type !== 'MARKING_SESSION_FINISHED' || !markingSessionId) {
+          return
+        }
+        sessions.push({
+          markingSessionId,
+          examTitle: examTitle || null,
+          createdDate: row?.createdDate || null,
+        })
+      })
+
+      if (rows.length === 0 || offset + rows.length >= totalRows) {
+        break
+      }
+      offset += rows.length
+    }
+
+    return sessions
+  }
+
+  async function resolveTargetMarkingSessionIdsWithFallback(ctx, sessions, taskQuery, markingSessionIds) {
+    const resolved = resolveTargetMarkingSessionIds(sessions, taskQuery, markingSessionIds)
+    if (!resolved.error) {
+      return { ...resolved, fallbackSessions: [] }
+    }
+
+    const query = String(taskQuery || '').trim()
+    if (isUuidLike(query)) {
+      return {
+        ids: [query],
+        error: null,
+        fallbackSessions: [{ markingSessionId: query, examTitle: null }],
+      }
+    }
+
+    try {
+      const notificationSessions = await fetchRecentMarkingSessionNotifications(ctx)
+      const notificationResolved = resolveTargetMarkingSessionIds(notificationSessions, taskQuery, [])
+      if (!notificationResolved.error) {
+        const idSet = new Set(notificationResolved.ids)
+        return {
+          ...notificationResolved,
+          fallbackSessions: notificationSessions.filter(session => idSet.has(session.markingSessionId)),
+        }
+      }
+      if (/ambiguous/i.test(notificationResolved.error)) {
+        return { ...notificationResolved, fallbackSessions: [] }
+      }
+    } catch (error) {
+      await ext.logDebug('background', 'targeted_task_notification_lookup_failed', {
+        taskQuery,
+        error: String(error),
+      })
+    }
+
+    return {
+      ids: [],
+      error: `Task not found in student results or recent Gradeo notifications: ${query}`,
+      fallbackSessions: [],
+    }
+  }
+
+  function buildClassImportRequestBody({
+    classId,
+    className,
+    scope = 'class',
+    scopeMarkingSessionIds = [],
+    uploadStudents = [],
+  }) {
+    return JSON.stringify({
+      gradeo_class_id: classId,
+      gradeo_class_name: className,
+      extension_version: EXTENSION_VERSION,
+      import_scope: scope,
+      scope_marking_session_ids: scope === 'marking_sessions' ? normalizeMarkingSessionIds(scopeMarkingSessionIds) : [],
+      students: uploadStudents,
+    })
+  }
+
   function normalizeExamSummaryRow(item, className) {
     const examName = String(item?.examTitle || '').trim()
     const examSessionId = String(item?.examSessionId || '').trim()
@@ -356,6 +503,12 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     }
     await ext.logDebug('background', 'bridge_tab_found', { frontendUrl: base, tabId: bridgeTab.id })
     return { email: 'bridge-session', role: 'admin' }
+  }
+
+  function fetchGradeoMappings() {
+    return fetchKingsTrackApi('/admin/gradeo/mappings', undefined, {
+      scope: 'mapping_fetch',
+    })
   }
 
   async function syncStudentsApi() {
@@ -1074,6 +1227,9 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     topicMetadataCache,
     csvRowsCache,
     questionMetadataCache,
+    scope = 'class',
+    taskQuery = null,
+    markingSessionIds = [],
   }) {
     await setState({
       status: 'preflighting_import',
@@ -1170,17 +1326,56 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
           markingSessionId: candidate.markingSessionId,
           classId,
           className,
+          examTitle: candidate.examTitle || null,
           studentCandidates: new Map(),
         }
+        existing.examTitle = existing.examTitle || candidate.examTitle || null
         existing.studentCandidates.set(student.id, candidate)
         candidateSessions.set(candidate.markingSessionId, existing)
       })
     }
 
-    const sessions = Array.from<any>(candidateSessions.values())
+    let scopedMarkingSessionIds = normalizeMarkingSessionIds(markingSessionIds)
+    let sessions = Array.from<any>(candidateSessions.values())
+    if (scope === 'marking_sessions') {
+      const resolved = await resolveTargetMarkingSessionIdsWithFallback(ctx, sessions, taskQuery, scopedMarkingSessionIds)
+      if (resolved.error) {
+        await ext.logDebug('background', 'targeted_task_import_blocked', {
+          classId,
+          className,
+          taskQuery,
+          reason: resolved.error,
+        })
+        return {
+          imported: null,
+          skipped: {
+            gradeo_class_id: classId,
+            gradeo_class_name: className,
+            reason: resolved.error,
+          },
+        }
+      }
+      scopedMarkingSessionIds = resolved.ids
+      const sessionsById = new Map(sessions.map(session => [session.markingSessionId, session]))
+      ;(resolved.fallbackSessions || []).forEach(session => {
+        if (!session?.markingSessionId || sessionsById.has(session.markingSessionId)) {
+          return
+        }
+        sessionsById.set(session.markingSessionId, {
+          markingSessionId: session.markingSessionId,
+          classId,
+          className,
+          examTitle: session.examTitle || null,
+          studentCandidates: new Map(),
+        })
+      })
+      const scopedIdSet = new Set(scopedMarkingSessionIds)
+      sessions = Array.from<any>(sessionsById.values()).filter(session => scopedIdSet.has(session.markingSessionId))
+    }
+
     for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex += 1) {
       const session = sessions[sessionIndex]
-      const sessionExamName = [...session.studentCandidates.values()][0]?.examTitle || null
+      const sessionExamName = [...session.studentCandidates.values()][0]?.examTitle || session.examTitle || null
       await setState({
         status: 'importing_exam_sessions',
         currentClass: classIndex,
@@ -1339,6 +1534,26 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
       })
     }
 
+    if (scope === 'marking_sessions' && importedExamCount === 0) {
+      const reason = `Task was found, but no matching assigned exam data was confirmed for ${className}. Check the mapped class selected in Targeted re-sync.`
+      await ext.logDebug('background', 'targeted_task_import_blocked', {
+        classId,
+        className,
+        taskQuery,
+        scopeMarkingSessionIds: scopedMarkingSessionIds,
+        skippedExamReasons,
+        reason,
+      })
+      return {
+        imported: null,
+        skipped: {
+          gradeo_class_id: classId,
+          gradeo_class_name: className,
+          reason,
+        },
+      }
+    }
+
     const importStudents = Array.from<any>(importStudentsById.values())
     const uploadStudents = importStudents
       .filter(student => (
@@ -1346,11 +1561,12 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
         (Array.isArray(student.exam_rows) && student.exam_rows.length > 0)
       ))
       .map(compactImportStudent)
-    const requestBody = JSON.stringify({
-      gradeo_class_id: classId,
-      gradeo_class_name: className,
-      extension_version: EXTENSION_VERSION,
-      students: uploadStudents,
+    const requestBody = buildClassImportRequestBody({
+      classId,
+      className,
+      scope,
+      scopeMarkingSessionIds: scopedMarkingSessionIds,
+      uploadStudents,
     })
     const payloadBytes = new TextEncoder().encode(requestBody).length
     await ext.logDebug('background', 'class_import_payload_built', {
@@ -1411,9 +1627,7 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     const questionMetadataCache = new Map()
 
     await setState({ status: 'loading_mappings' })
-    const mappings = await fetchKingsTrackApi('/admin/gradeo/mappings', undefined, {
-      scope: 'mapping_fetch',
-    })
+    const mappings = await fetchGradeoMappings()
     if (!Array.isArray(mappings) || mappings.length === 0) {
       const blocked = { ready: false, reason: 'No Gradeo class mappings found in Kings Track.' }
       await setState({ status: 'blocked', action: 'import_mapped_classes', blocked })
@@ -1477,6 +1691,73 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
       user: user.email,
     })
     return result
+  }
+
+  async function importSingleMappedClass(classId, className) {
+    const user = await ensureAdmin()
+    const ctx = await getGradeoApiContext()
+    const topicMetadataCache = new Map()
+    const csvRowsCache = new Map()
+    const questionMetadataCache = new Map()
+    const normalizedClassId = String(classId || '').trim()
+    const normalizedClassName = String(className || '').trim()
+    if (!normalizedClassId || !normalizedClassName) {
+      throw new Error('Choose a mapped Gradeo class to re-sync.')
+    }
+
+    const classImport = await importMappedClass(ctx, {
+      classId: normalizedClassId,
+      className: normalizedClassName,
+      classIndex: 1,
+      totalClasses: 1,
+      topicMetadataCache,
+      csvRowsCache,
+      questionMetadataCache,
+      scope: 'class',
+    })
+    if (classImport.skipped) {
+      await setState({ status: 'blocked', action: 'import_mapped_class', preflight: classImport.skipped.reason })
+      return classImport.skipped.reason
+    }
+
+    await setState({ status: 'completed', action: 'import_mapped_class', result: classImport.imported.result, user: user.email })
+    return classImport.imported.result
+  }
+
+  async function importMappedClassTask(classId, className, taskQuery) {
+    const user = await ensureAdmin()
+    const ctx = await getGradeoApiContext()
+    const topicMetadataCache = new Map()
+    const csvRowsCache = new Map()
+    const questionMetadataCache = new Map()
+    const normalizedClassId = String(classId || '').trim()
+    const normalizedClassName = String(className || '').trim()
+    const normalizedTaskQuery = String(taskQuery || '').trim()
+    if (!normalizedClassId || !normalizedClassName) {
+      throw new Error('Choose a mapped Gradeo class to re-sync.')
+    }
+    if (!normalizedTaskQuery) {
+      throw new Error('Enter a Gradeo task name or marking session ID.')
+    }
+
+    const classImport = await importMappedClass(ctx, {
+      classId: normalizedClassId,
+      className: normalizedClassName,
+      classIndex: 1,
+      totalClasses: 1,
+      topicMetadataCache,
+      csvRowsCache,
+      questionMetadataCache,
+      scope: 'marking_sessions',
+      taskQuery: normalizedTaskQuery,
+    })
+    if (classImport.skipped) {
+      await setState({ status: 'blocked', action: 'import_mapped_class_task', preflight: classImport.skipped.reason })
+      return classImport.skipped.reason
+    }
+
+    await setState({ status: 'completed', action: 'import_mapped_class_task', result: classImport.imported.result, user: user.email })
+    return classImport.imported.result
   }
 
   async function syncReportingClass() {
@@ -1590,6 +1871,11 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     getState,
     stateTest: __stateTest,
     extractTopicLabels,
+    normalizeTaskKey,
+    resolveTargetMarkingSessionIds,
+    fetchRecentMarkingSessionNotifications,
+    resolveTargetMarkingSessionIdsWithFallback,
+    buildClassImportRequestBody,
     getTopicLabelsForMarkingSession,
     questionMetadataByPartId,
     getQuestionMetadataForMarkingSession,
@@ -1608,7 +1894,10 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     runVisibleAction,
     syncStudentsApi,
     syncClassesApi,
+    fetchGradeoMappings,
     importMappedClasses,
+    importSingleMappedClass,
+    importMappedClassTask,
     syncSchoolGroupsScrape,
     syncReportingClass,
   })
