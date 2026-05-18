@@ -262,7 +262,85 @@ describe('CourseDetail', () => {
     expect(screen.getByLabelText('12ENC_Cycle6: Not assigned')).toBeInTheDocument()
   })
 
-  it('defaults to Topic Bands on the Gradeo tab when topic-band data exists', async () => {
+  it('defaults to Results on the Gradeo tab when topic-band data exists', async () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useGradeoReport).mockReturnValue({
+      isLoading: false,
+      error: null,
+      data: {
+        mapped: true,
+        gradeo_class_id: 'gradeo-class-1',
+        gradeo_class_name: '12 encx_2026',
+        last_imported_at: '2026-03-31T10:30:00Z',
+        unmatched_students_count: 0,
+        exams: [
+          {
+            id: 'marking-session-1',
+            name: '12ENC_Cycle6',
+            class_average: 1.6,
+            syllabus_title: 'Enterprise Computing',
+            syllabus_grade: '12',
+            bands: ['3', '4'],
+            outcomes: ['EC-12-04'],
+            topics: ['Data Science'],
+          },
+        ],
+        students: [
+          {
+            id: 1,
+            name: 'Alice Smith',
+            sortable_name: 'Smith, Alice',
+            completion_rate: 1,
+            results: {
+              'marking-session-1': {
+                status: 'scored',
+                exam_mark: 9,
+                marks_available: 10,
+                class_average: 1.6,
+                questions: [],
+              },
+            },
+          },
+        ],
+      },
+    } as any)
+    vi.mocked(useGradeoTopicBands).mockReturnValue({
+      isLoading: false,
+      error: null,
+      data: {
+        mapped: true,
+        gradeo_class_id: 'gradeo-class-1',
+        gradeo_class_name: '12 encx_2026',
+        topics: [{ name: 'Data Science', student_count: 1, average_score_pct: 0.82 }],
+        students: [
+          {
+            id: 1,
+            name: 'Alice Smith',
+            sortable_name: 'Smith, Alice',
+            topics: {
+              'Data Science': {
+                score_pct: 0.82,
+                predicted_band: 5,
+                confidence: 'medium',
+                earned_marks: 18,
+                available_marks: 22,
+                exam_count: 2,
+                part_count: 7,
+              },
+            },
+          },
+        ],
+      },
+    } as any)
+
+    const user = userEvent.setup()
+    renderWithProviders(<CourseDetail />)
+    await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
+    expect(screen.getByText('12ENC_Cycle6')).toBeInTheDocument()
+    expect(screen.queryByText('B5')).not.toBeInTheDocument()
+  })
+
+  it('restores the Gradeo topic-bands subview from the course URL', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useGradeoReport).mockReturnValue({
       isLoading: false,
@@ -306,15 +384,13 @@ describe('CourseDetail', () => {
       },
     } as any)
 
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=gradeo&gradeo=topic-bands'] })
     expect(screen.getByText('B5')).toBeInTheDocument()
     expect(screen.getByText('82%')).toBeInTheDocument()
     expect(screen.getAllByText('medium').length).toBeGreaterThan(0)
   })
 
-  it('switches from Topic Bands to Results inside the Gradeo tab', async () => {
+  it('switches from Results to Topic Bands inside the Gradeo tab', async () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useGradeoReport).mockReturnValue({
       isLoading: false,
@@ -372,7 +448,8 @@ describe('CourseDetail', () => {
     const user = userEvent.setup()
     renderWithProviders(<CourseDetail />)
     await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
-    await user.click(screen.getByRole('button', { name: /^Results$/i }))
     expect(screen.getByText(/No students found/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^Topic Bands$/i }))
+    expect(screen.getByText('B5')).toBeInTheDocument()
   })
 })
