@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -9,6 +10,11 @@ from app.api.deps import require_auth
 from app.whitelist import get_effective_whitelist
 
 router = APIRouter(prefix="/courses", tags=["courses"], dependencies=[Depends(require_auth)])
+
+
+def _natural_sort_key(s: str) -> list:
+    """Split string into alternating text and integer parts for human-friendly sorting."""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', s)]
 
 
 def _to_iso(value):
@@ -553,7 +559,9 @@ async def get_gradeo_topic_bands(course_id: int, db: AsyncSession = Depends(get_
     for row in students_raw:
         user_id, name, sortable_name = row
         topics = {}
-        for topic_name, aggregate in sorted(student_aggregates.get(user_id, {}).items()):
+        for topic_name, aggregate in sorted(
+            student_aggregates.get(user_id, {}).items(), key=lambda item: _natural_sort_key(item[0])
+        ):
             available_marks = aggregate["available_marks"]
             if available_marks <= 0:
                 continue
@@ -585,7 +593,7 @@ async def get_gradeo_topic_bands(course_id: int, db: AsyncSession = Depends(get_
             "student_count": len(scores),
             "average_score_pct": sum(scores) / len(scores),
         }
-        for topic_name, scores in sorted(topic_student_scores.items())
+        for topic_name, scores in sorted(topic_student_scores.items(), key=lambda item: _natural_sort_key(item[0]))
         if scores
     ]
 
@@ -714,7 +722,10 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
         exam_sort_keys.setdefault(gradeo_marking_session_id, (exam_name, gradeo_marking_session_id))
     exams = [
         exams_by_marking_session[gradeo_marking_session_id]
-        for gradeo_marking_session_id in sorted(exams_by_marking_session, key=lambda key: exam_sort_keys[key])
+        for gradeo_marking_session_id in sorted(
+            exams_by_marking_session,
+            key=lambda key: (_natural_sort_key(exam_sort_keys[key][0]), exam_sort_keys[key][1]),
+        )
     ]
 
     students_result = await db.execute(
