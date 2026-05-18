@@ -99,6 +99,12 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     }
   }
 
+  function blockReason(value) {
+    if (!value) return ''
+    if (typeof value === 'string') return value
+    return value.reason || value.detail || value.message || ''
+  }
+
   function getSelectedMappedClass() {
     const selected = mappedClasses.find(item => item.gradeo_class_id === targetClassSelect.value)
     if (!selected) {
@@ -193,7 +199,7 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     if (status === 'blocked') {
       return {
         headline: 'Blocked',
-        summary: safeState.preflight?.reason || safeState.blocked?.reason || '',
+        summary: blockReason(safeState.preflight) || blockReason(safeState.blocked),
       }
     }
 
