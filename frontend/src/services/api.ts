@@ -269,8 +269,9 @@ export function useEdStemMatrix(courseId: number) {
 export function useGradeoReport(courseId: number) {
   return useQuery<GradeoCourseReport>({
     queryKey: ['gradeo-report', courseId],
-    queryFn: () => fetchJSON<GradeoCourseReport>(`/courses/${courseId}/gradeo`),
-    staleTime: 60_000,
+    queryFn: () => fetchJSON<GradeoCourseReport>(`/courses/${courseId}/gradeo`, { cache: 'no-store' }),
+    staleTime: 0,
+    refetchOnMount: 'always',
     enabled: !isNaN(courseId),
   })
 }
@@ -278,8 +279,9 @@ export function useGradeoReport(courseId: number) {
 export function useGradeoTopicBands(courseId: number) {
   return useQuery<GradeoTopicBands>({
     queryKey: ['gradeo-topic-bands', courseId],
-    queryFn: () => fetchJSON<GradeoTopicBands>(`/courses/${courseId}/gradeo/topic-bands`),
-    staleTime: 60_000,
+    queryFn: () => fetchJSON<GradeoTopicBands>(`/courses/${courseId}/gradeo/topic-bands`, { cache: 'no-store' }),
+    staleTime: 0,
+    refetchOnMount: 'always',
     enabled: !isNaN(courseId),
   })
 }
