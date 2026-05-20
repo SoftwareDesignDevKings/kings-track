@@ -1,0 +1,251 @@
+"""
+Canvas LMS API client.
+
+Handles:
+- Bearer token auth
+- Paginated requests (RFC 5988 Link headers)
+- Rate limit monitoring and back-off (X-Rate-Limit-Remaining)
+- Exponential retry on 429 / 403 rate-limit errors
+"""
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from typing import Any
+
+import httpx
+
+from app.canvas.pagination import parse_next_url
+
+logger = logging.getLogger(__name__)
+
+# Back off when remaining calls drop below this threshold
+RATE_LIMIT_BACKOFF_THRESHOLD = 100
+RATE_LIMIT_BACKOFF_DELAY = 1.0  # seconds
+
+
+class CanvasAPIError(Exception):
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        super().__init__(f"Canvas API error {status_code}: {message}")
+
+
+class CanvasClient:
+    def __init__(self, base_url: str, token: str):
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self._client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self):
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            headers={"Authorization": f"Bearer {self.token}"},
+        )
+        return self
+
+    async def __aexit__(self, *args):
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        retries: int = 3,
+        **kwargs,
+    ) -> httpx.Response:
+        # Accept either a full URL (next-page links) or a path relative to base_url
+        url = path if path.startswith("http") else f"{self.base_url}{path}"
+        delay = 1.0
+
+        for attempt in range(retries):
+            resp = await self._client.request(method, url, **kwargs)
+
+            # Monitor rate limit
+            remaining = resp.headers.get("X-Rate-Limit-Remaining")
+            if remaining and float(remaining) < RATE_LIMIT_BACKOFF_THRESHOLD:
+                logger.warning(
+                    "Canvas rate limit low: %s remaining — backing off %.1fs",
+                    remaining,
+                    RATE_LIMIT_BACKOFF_DELAY,
+                )
+                await asyncio.sleep(RATE_LIMIT_BACKOFF_DELAY)
+
+            if resp.status_code == 429 or (resp.status_code == 403 and "rate limit" in resp.text.lower()):
+                wait = delay * (2 ** attempt)
+                logger.warning("Rate limited by Canvas. Waiting %.1fs before retry %d.", wait, attempt + 1)
+                await asyncio.sleep(wait)
+                continue
+
+            if resp.status_code >= 400:
+                raise CanvasAPIError(resp.status_code, resp.text[:200])
+
+            return resp
+
+        raise CanvasAPIError(429, "Exceeded retry limit due to rate limiting")
+
+    async def get_paginated(
+        self,
+        path: str,
+        params: dict | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """
+        Yield items from a paginated Canvas endpoint.
+        Follows Link header 'next' URLs automatically.
+        Processes one page at a time to keep memory usage low.
+        """
+        url: str | None = f"{self.base_url}{path}"
+        first_request = True
+
+        while url:
+            if first_request:
+                resp = await self._request("GET", path, params=params)
+                first_request = False
+            else:
+                # For subsequent pages, use the full URL from Link header
+                # Route through _request() for retry/backoff/error handling
+                resp = await self._request("GET", url)
+
+            data = resp.json()
+            if isinstance(data, list):
+                for item in data:
+                    yield item
+            elif isinstance(data, dict):
+                # Some endpoints wrap in a key
+                for item in data.get("data", [data]):
+                    yield item
+
+            url = parse_next_url(resp.headers.get("Link"))
+
+    # -------------------------------------------------------------------------
+    # Typed convenience methods
+    # -------------------------------------------------------------------------
+
+    async def list_courses(self) -> list[dict]:
+        """
+        Return active courses visible to the configured token.
+
+        For teacher-scoped tokens, Canvas exposes those via `/api/v1/courses`.
+        For account-admin tokens that are not enrolled in the courses, that
+        endpoint can be empty, so we fall back to account course listings.
+        """
+        courses: list[dict] = []
+        async for course in self.get_paginated(
+            "/api/v1/courses",
+            params={
+                "enrollment_type": "teacher",
+                "state[]": "available",
+                "per_page": 100,
+                "include[]": ["term", "total_students"],
+            },
+        ):
+            courses.append(course)
+
+        if courses:
+            return courses
+
+        return await self.list_admin_courses()
+
+    async def list_manageable_accounts(self) -> list[dict]:
+        """Return accounts the current user can manage as an admin."""
+        accounts = []
+        async for account in self.get_paginated("/api/v1/manageable_accounts"):
+            accounts.append(account)
+        return accounts
+
+    async def list_accounts(self) -> list[dict]:
+        """Return accounts visible to the current user."""
+        accounts = []
+        async for account in self.get_paginated("/api/v1/accounts"):
+            accounts.append(account)
+        return accounts
+
+    async def list_account_courses(self, account_id: int) -> list[dict]:
+        """Return active courses for a specific Canvas account."""
+        courses = []
+        async for course in self.get_paginated(
+            f"/api/v1/accounts/{account_id}/courses",
+            params={
+                "state[]": "available",
+                "per_page": 100,
+                "include[]": ["term", "total_students"],
+            },
+        ):
+            courses.append(course)
+        return courses
+
+    async def list_admin_courses(self) -> list[dict]:
+        """Return active courses visible via admin-accessible Canvas accounts."""
+        accounts = await self.list_manageable_accounts()
+        if not accounts:
+            accounts = await self.list_accounts()
+        seen_course_ids: set[int] = set()
+        courses: list[dict] = []
+
+        for account in accounts:
+            account_id = account.get("id")
+            if account_id is None:
+                continue
+            for course in await self.list_account_courses(int(account_id)):
+                try:
+                    course_id = int(course["id"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if course_id in seen_course_ids:
+                    continue
+                seen_course_ids.add(course_id)
+                courses.append(course)
+
+        return courses
+
+    def list_enrollments(self, course_id: int, since: str | None = None) -> AsyncIterator[dict]:
+        """Yield active student enrollments including grade data."""
+        params: dict[str, Any] = {
+            "type[]": "StudentEnrollment",
+            "state[]": "active",
+            "per_page": 100,
+            "include[]": ["grades", "email"],
+        }
+        if since:
+            params["updated_after"] = since
+        return self.get_paginated(
+            f"/api/v1/courses/{course_id}/enrollments",
+            params=params,
+        )
+
+    def list_assignments(self, course_id: int) -> AsyncIterator[dict]:
+        """Yield all published assignments with their group names."""
+        return self.get_paginated(
+            f"/api/v1/courses/{course_id}/assignments",
+            params={
+                "per_page": 100,
+                "include[]": ["assignment_group", "score_statistics"],
+                "order_by": "position",
+            },
+        )
+
+    async def list_assignment_groups(self, course_id: int) -> list[dict]:
+        """Return assignment groups (needed to resolve group names)."""
+        groups = []
+        async for group in self.get_paginated(
+            f"/api/v1/courses/{course_id}/assignment_groups",
+            params={"per_page": 100},
+        ):
+            groups.append(group)
+        return groups
+
+    def list_submissions(self, course_id: int, since: str | None = None) -> AsyncIterator[dict]:
+        """
+        Yield all student submissions for all assignments in a course.
+        Uses the bulk endpoint to minimise API calls.
+        """
+        params: dict[str, Any] = {
+            "student_ids[]": "all",
+            "per_page": 100,
+        }
+        if since:
+            params["submitted_since"] = since
+        return self.get_paginated(
+            f"/api/v1/courses/{course_id}/students/submissions",
+            params=params,
+        )
