@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     reminder_test_mode_enabled: bool = True
     reminder_test_recipient_email: str = "liam22840@gmail.com"
 
+    # Microsoft Teams / Graph API
+    teams_tenant_id: str = ""
+    teams_client_id: str = ""
+    teams_client_secret: str = ""
+    teams_organizer_emails: str = ""
+
     # Attendance watcher
     watch_folder: str = ""
     processed_folder: str = "./processed"
@@ -81,6 +87,14 @@ class Settings(BaseSettings):
     @property
     def redis_configured(self) -> bool:
         return bool(self.redis_url)
+
+    @property
+    def teams_configured(self) -> bool:
+        return bool(self.teams_tenant_id and self.teams_client_id and self.teams_client_secret)
+
+    @property
+    def teams_organizer_list(self) -> list[str]:
+        return [e.strip() for e in self.teams_organizer_emails.split(",") if e.strip()]
 
 
 settings = Settings()
