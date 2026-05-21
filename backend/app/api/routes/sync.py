@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import text
 
+from app.config import settings
 from app.db import AsyncSessionLocal
 from app.sync.engine import sync_engine
 from app.api.deps import require_auth
@@ -27,6 +28,16 @@ async def trigger_sync(background_tasks: BackgroundTasks):
     background_tasks.add_task(_run_sync)
 
     return {"status": "started", "message": "Sync triggered"}
+
+
+@router.get("/trigger")
+async def sync_trigger(type: str = "incremental"):
+    """Cron-safe sync trigger. On Vercel, called by Vercel Cron Jobs.
+    On Azure/Docker, the background scheduler handles this automatically.
+    """
+    if type == "full":
+        return await sync_engine.full_sync()
+    return await sync_engine.incremental_sync()
 
 
 @router.get("/status")

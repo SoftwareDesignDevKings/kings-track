@@ -1,6 +1,6 @@
 """
 Sync engine — orchestrates full and incremental Canvas data sync into local database.
-Processes one course at a time to keep memory usage within 256MB Fly.io limit.
+Processes one course at a time to keep memory usage low.
 """
 import asyncio
 import inspect
@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
+from app.cache import get_redis
 from app.canvas.client import CanvasClient, CanvasAPIError
 from app.config import settings
 from app.db import AsyncSessionLocal
@@ -52,6 +53,9 @@ async def _log_sync(db, entity_type: str, course_id: int | None, status: str, re
 
 
 class SyncEngine:
+    LOCK_KEY = "kings:sync:running"
+    PROGRESS_KEY = "kings:sync:progress"
+
     def __init__(self):
         self._running = False
         self._task: asyncio.Task | None = None
@@ -61,6 +65,25 @@ class SyncEngine:
     @property
     def is_running(self) -> bool:
         return self._running
+
+    async def _acquire_lock(self) -> bool:
+        r = await get_redis()
+        if r:
+            ttl = (settings.vercel_function_timeout * 2) if settings.is_serverless else 1800
+            acquired = await r.set(self.LOCK_KEY, "1", nx=True, ex=ttl)
+            if acquired:
+                self._running = True
+            return bool(acquired)
+        if self._running:
+            return False
+        self._running = True
+        return True
+
+    async def _release_lock(self) -> None:
+        r = await get_redis()
+        if r:
+            await r.delete(self.LOCK_KEY)
+        self._running = False
 
     @property
     def progress(self) -> dict | None:
@@ -159,6 +182,7 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d enrollments failed: %s", course_id, exc)
                 course_results["enrollments_error"] = str(exc)
+                await db.rollback()
                 self._mark_step_completed()
 
             # Assignments (no incremental support in Canvas API)
@@ -171,6 +195,7 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d assignments failed: %s", course_id, exc)
                 course_results["assignments_error"] = str(exc)
+                await db.rollback()
                 self._mark_step_completed()
 
             # Submissions
@@ -183,6 +208,7 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d submissions failed: %s", course_id, exc)
                 course_results["submissions_error"] = str(exc)
+                await db.rollback()
                 self._mark_step_completed()
 
             # Compute metrics (DB-only, no API calls)
@@ -195,8 +221,8 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d metrics failed: %s", course_id, exc)
                 course_results["metrics_error"] = str(exc)
+                await db.rollback()
                 self._mark_step_completed()
-
 
             # EdStem lesson progress (optional — only runs if token is configured)
             if settings.edstem_configured:
@@ -211,6 +237,7 @@ class SyncEngine:
                 except Exception as exc:
                     logger.error("  Course %d edstem failed: %s", course_id, exc)
                     course_results["edstem_error"] = str(exc)
+                    await db.rollback()
                     self._mark_step_completed()
 
 
@@ -231,15 +258,15 @@ class SyncEngine:
 
         Processes one course at a time to minimise memory usage.
         """
-        if self._running:
+        if not await self._acquire_lock():
             logger.info("Sync already in progress — skipping")
             return {"status": "already_running"}
 
         if not settings.canvas_configured:
+            await self._release_lock()
             logger.warning("Canvas API not configured — skipping sync")
             return {"status": "not_configured", "message": "Set CANVAS_API_URL and CANVAS_API_TOKEN"}
 
-        self._running = True
         started_at = datetime.now(timezone.utc)
         results: dict = {"sync_type": "full"}
         self._begin_progress("full", started_at, total_courses=0, includes_edstem=settings.edstem_configured)
@@ -272,7 +299,7 @@ class SyncEngine:
             logger.exception("Unexpected error during sync: %s", exc)
             results["error"] = str(exc)
         finally:
-            self._running = False
+            await self._release_lock()
 
         elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
         results["elapsed_seconds"] = round(elapsed, 1)
@@ -302,10 +329,6 @@ class SyncEngine:
         Skips course sync (rarely changes) and enrollment deletion (can't safely delete
         without seeing the full list).
         """
-        if self._running:
-            logger.info("Sync already in progress — skipping")
-            return {"status": "already_running"}
-
         if not settings.canvas_configured:
             logger.warning("Canvas API not configured — skipping sync")
             return {"status": "not_configured"}
@@ -314,7 +337,10 @@ class SyncEngine:
             logger.info("No previous full sync — running full sync instead")
             return await self.full_sync()
 
-        self._running = True
+        if not await self._acquire_lock():
+            logger.info("Sync already in progress — skipping")
+            return {"status": "already_running"}
+
         started_at = datetime.now(timezone.utc)
         since = self._last_full_sync_at.strftime("%Y-%m-%dT%H:%M:%SZ")
         results: dict = {"sync_type": "incremental", "since": since}
@@ -350,7 +376,7 @@ class SyncEngine:
             logger.exception("Unexpected error during incremental sync: %s", exc)
             results["error"] = str(exc)
         finally:
-            self._running = False
+            await self._release_lock()
 
         elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
         results["elapsed_seconds"] = round(elapsed, 1)

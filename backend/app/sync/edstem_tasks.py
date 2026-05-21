@@ -31,30 +31,66 @@ async def sync_edstem_lessons(client: EdStemClient, db: AsyncSession, canvas_cou
     """
     Sync EdStem lesson progress for a Canvas course.
 
-    1. Look up the edstem_course_mapping for this canvas_course_id. If none, return 0.
-    2. Fetch and upsert lesson metadata into edstem_lessons.
-    3. Fetch per-student lesson_user_summaries and upsert into edstem_lesson_progress.
+    A single Canvas course may map to multiple EdStem courses (e.g. when
+    students are split across EdStem sections).  We iterate over all
+    mappings and aggregate the results.
 
-    Returns the number of progress records upserted.
+    Per mapping:
+    1. Fetch and upsert lesson metadata into edstem_lessons.
+    2. Fetch per-student lesson_user_summaries and upsert into edstem_lesson_progress.
+
+    Returns the total number of progress records upserted across all mapped EdStem courses.
     """
-    # 1. Look up mapping
+    # Look up all mappings for this canvas course
     result = await db.execute(
         text("SELECT edstem_course_id FROM edstem_course_mappings WHERE canvas_course_id = :cid"),
         {"cid": canvas_course_id},
     )
-    row = result.fetchone()
-    if not row:
+    edstem_course_ids: list[int] = [row[0] for row in result.fetchall()]
+    if not edstem_course_ids:
         return 0
 
-    edstem_course_id: int = row[0]
+    # Build email → canvas user_id map once (shared across all EdStem courses)
+    result = await db.execute(
+        text("""
+            SELECT u.email, u.id
+            FROM users u
+            JOIN enrollments e ON e.user_id = u.id
+            WHERE e.course_id = :course_id
+              AND e.role = 'StudentEnrollment'
+              AND u.email IS NOT NULL
+        """),
+        {"course_id": canvas_course_id},
+    )
+    email_to_canvas_id: dict[str, int] = {
+        row[0].lower(): row[1] for row in result.fetchall()
+    }
+
+    total_count = 0
+
+    for edstem_course_id in edstem_course_ids:
+        count = await _sync_single_edstem_course(
+            client, db, edstem_course_id, email_to_canvas_id,
+        )
+        total_count += count
+
+    return total_count
+
+
+async def _sync_single_edstem_course(
+    client: EdStemClient,
+    db: AsyncSession,
+    edstem_course_id: int,
+    email_to_canvas_id: dict[str, int],
+) -> int:
+    """Sync lessons and progress for a single EdStem course, matching students by email."""
     now = _now()
 
-    # 2. Fetch and upsert lessons
+    # Fetch and upsert lessons
     lessons_data = await client.get_lessons(edstem_course_id)
     lessons: list[dict] = lessons_data.get("lessons", [])
     modules: list[dict] = lessons_data.get("modules", [])
 
-    # Build module_id → name map
     module_names: dict[int, str] = {m["id"]: m.get("name", "") for m in modules}
 
     for lesson in lessons:
@@ -84,7 +120,7 @@ async def sync_edstem_lessons(client: EdStemClient, db: AsyncSession, canvas_cou
                 "module_id": lesson.get("module_id"),
                 "module_name": module_names.get(lesson.get("module_id")) if lesson.get("module_id") else None,
                 "lesson_type": lesson.get("type"),
-                "is_interactive": False,  # will be updated below after we know interactive_lessons
+                "is_interactive": False,
                 "slide_count": lesson.get("slide_count"),
                 "position": lesson.get("index"),
                 "synced_at": now,
@@ -93,12 +129,11 @@ async def sync_edstem_lessons(client: EdStemClient, db: AsyncSession, canvas_cou
 
     await db.commit()
 
-    # 3. Fetch per-student summaries
+    # Fetch per-student summaries
     summaries = await client.get_lesson_user_summaries(edstem_course_id)
     edstem_users: list[dict] = summaries.get("users", [])
     interactive_lesson_ids: set[int] = set(summaries.get("interactive_lessons", []))
 
-    # Mark interactive lessons
     if interactive_lesson_ids:
         await db.execute(
             text("""
@@ -110,23 +145,7 @@ async def sync_edstem_lessons(client: EdStemClient, db: AsyncSession, canvas_cou
         )
         await db.commit()
 
-    # Build email → canvas user_id map for enrolled students in this course
-    result = await db.execute(
-        text("""
-            SELECT u.email, u.id
-            FROM users u
-            JOIN enrollments e ON e.user_id = u.id
-            WHERE e.course_id = :course_id
-              AND e.role = 'StudentEnrollment'
-              AND u.email IS NOT NULL
-        """),
-        {"course_id": canvas_course_id},
-    )
-    email_to_canvas_id: dict[str, int] = {
-        row[0].lower(): row[1] for row in result.fetchall()
-    }
-
-    # Collect all lesson IDs for this course to determine not_started
+    # Collect all lesson IDs for this EdStem course
     result = await db.execute(
         text("SELECT id FROM edstem_lessons WHERE edstem_course_id = :edstem_course_id"),
         {"edstem_course_id": edstem_course_id},
@@ -143,13 +162,12 @@ async def sync_edstem_lessons(client: EdStemClient, db: AsyncSession, canvas_cou
         email = (edstem_user.get("email") or "").lower()
         canvas_user_id = email_to_canvas_id.get(email)
         if not canvas_user_id:
-            continue  # no matching Canvas user — skip
+            continue
 
         completed: dict[str, str] = edstem_user.get("completed", {}) or {}
         interactive_completed: dict[str, str] = edstem_user.get("interactive_completed", {}) or {}
         viewed: set[int] = set(edstem_user.get("viewed", []) or [])
 
-        # Merge all completed lesson IDs (both regular and interactive)
         all_completed_map: dict[str, str] = {**completed, **interactive_completed}
 
         for lesson_id in all_lesson_ids:
@@ -173,7 +191,6 @@ async def sync_edstem_lessons(client: EdStemClient, db: AsyncSession, canvas_cou
                 "synced_at": now,
             })
 
-        # Commit in batches of 100
         if len(batch) >= 100:
             await _upsert_progress_batch(db, batch)
             count += len(batch)

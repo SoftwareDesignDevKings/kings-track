@@ -98,14 +98,17 @@ async def sync_enrollments(canvas: CanvasClient, db: AsyncSession, course_id: in
             },
         )
 
-        # Upsert enrollment
+        # Upsert enrollment — use (course_id, user_id, role) for conflict resolution
+        # because Canvas can return multiple enrollment records with different IDs
+        # for the same student/course/role (e.g. re-enrollments).
         await db.execute(
             text("""
                 INSERT INTO enrollments (id, course_id, user_id, role, enrollment_state, last_activity_at,
                     current_score, current_grade, final_score, final_grade)
                 VALUES (:id, :course_id, :user_id, :role, :enrollment_state, :last_activity_at,
                     :current_score, :current_grade, :final_score, :final_grade)
-                ON CONFLICT (id) DO UPDATE SET
+                ON CONFLICT (course_id, user_id, role) DO UPDATE SET
+                    id = EXCLUDED.id,
                     enrollment_state = EXCLUDED.enrollment_state,
                     last_activity_at = EXCLUDED.last_activity_at,
                     current_score = EXCLUDED.current_score,

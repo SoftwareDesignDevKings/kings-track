@@ -5,6 +5,7 @@ A lightweight HEAD/GET against the configured Canvas host that distinguishes
 The frontend polls this so it can render a global outage banner.
 """
 import asyncio
+import json
 import logging
 import time
 
@@ -13,6 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends
 
 from app.api.deps import require_auth
+from app.cache import get_redis
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,7 @@ router = APIRouter(prefix="/canvas", tags=["canvas"], dependencies=[Depends(requ
 
 PROBE_TIMEOUT_SECONDS = 8.0
 CACHE_TTL_SECONDS = 20.0
+HEALTH_CACHE_KEY = "kings:canvas:health"
 
 _cache: dict | None = None
 _cache_at: float = 0.0
@@ -79,13 +82,39 @@ async def _probe() -> dict:
 async def canvas_health():
     """Cheap, cached Canvas reachability check."""
     global _cache, _cache_at
+
+    r = await get_redis()
+
+    # Try Redis cache first
+    if r:
+        try:
+            cached = await r.get(HEALTH_CACHE_KEY)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    # In-memory fallback (useful on Vercel warm instances)
     now = time.monotonic()
+    if _cache is not None and (now - _cache_at) < CACHE_TTL_SECONDS:
+        return _cache
 
     async with _lock:
+        # Double-check after acquiring lock
+        now = time.monotonic()
         if _cache is not None and (now - _cache_at) < CACHE_TTL_SECONDS:
             return _cache
 
         result = await _probe()
+
+        # Store in Redis
+        if r:
+            try:
+                await r.set(HEALTH_CACHE_KEY, json.dumps(result), ex=int(CACHE_TTL_SECONDS))
+            except Exception:
+                pass
+
+        # Store in-memory fallback
         _cache = result
-        _cache_at = now
+        _cache_at = time.monotonic()
         return result
