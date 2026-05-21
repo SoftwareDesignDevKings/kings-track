@@ -1,12 +1,12 @@
-from fastapi import APIRouter, BackgroundTasks, Depends
+import hmac
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from sqlalchemy import text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
 from app.sync.engine import sync_engine
-from app.api.deps import require_auth
-
-router = APIRouter(prefix="/sync", tags=["sync"], dependencies=[Depends(require_auth)])
+from app.api.deps import require_admin
 
 
 def _to_iso(value):
@@ -19,25 +19,22 @@ async def _run_sync():
     await sync_engine.full_sync()
 
 
+# ---------------------------------------------------------------------------
+# Admin-only routes (manual sync control)
+# ---------------------------------------------------------------------------
+
+router = APIRouter(prefix="/sync", tags=["sync"], dependencies=[Depends(require_admin)])
+
+
 @router.post("/trigger")
 async def trigger_sync(background_tasks: BackgroundTasks):
-    """Manually trigger a full Canvas data sync."""
+    """Manually trigger a full Canvas data sync (admin only)."""
     if sync_engine.is_running:
         return {"status": "already_running", "message": "A sync is already in progress"}
 
     background_tasks.add_task(_run_sync)
 
     return {"status": "started", "message": "Sync triggered"}
-
-
-@router.get("/trigger")
-async def sync_trigger(type: str = "incremental"):
-    """Cron-safe sync trigger. On Vercel, called by Vercel Cron Jobs.
-    On Azure/Docker, the background scheduler handles this automatically.
-    """
-    if type == "full":
-        return await sync_engine.full_sync()
-    return await sync_engine.incremental_sync()
 
 
 @router.get("/status")
@@ -73,3 +70,30 @@ async def sync_status():
         "progress": sync_engine.progress,
         "logs": logs,
     }
+
+
+# ---------------------------------------------------------------------------
+# Cron-safe trigger (no user JWT required, uses CRON_SECRET)
+# ---------------------------------------------------------------------------
+
+cron_router = APIRouter(prefix="/sync", tags=["sync"])
+
+
+@cron_router.get("/trigger")
+async def sync_trigger(
+    type: str = "incremental",
+    x_cron_secret: str | None = Header(None),
+):
+    """Cron-safe sync trigger. Authenticates via CRON_SECRET header.
+
+    On Vercel, called by Vercel Cron Jobs with the x-cron-secret header.
+    On Azure/Docker, the background scheduler handles this automatically.
+    In local dev (no CRON_SECRET set), the endpoint is open.
+    """
+    if settings.cron_secret:
+        if not x_cron_secret or not hmac.compare_digest(x_cron_secret, settings.cron_secret):
+            raise HTTPException(status_code=401, detail="Invalid or missing x-cron-secret header")
+
+    if type == "full":
+        return await sync_engine.full_sync()
+    return await sync_engine.incremental_sync()

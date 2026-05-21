@@ -136,7 +136,7 @@ async def add_to_whitelist(
                         text("""
                             INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id, edstem_course_name)
                             VALUES (:canvas_course_id, :edstem_course_id, :edstem_course_name)
-                            ON CONFLICT (canvas_course_id) DO NOTHING
+                            ON CONFLICT ON CONSTRAINT uq_edstem_mapping_canvas_edstem DO NOTHING
                         """),
                         {
                             "canvas_course_id": body.course_id,
@@ -247,7 +247,7 @@ async def auto_match_edstem_mappings(db: AsyncSession = Depends(get_db)):
                 text("""
                     INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id, edstem_course_name)
                     VALUES (:canvas_course_id, :edstem_course_id, :edstem_course_name)
-                    ON CONFLICT (canvas_course_id) DO NOTHING
+                    ON CONFLICT ON CONSTRAINT uq_edstem_mapping_canvas_edstem DO NOTHING
                 """),
                 {
                     "canvas_course_id": canvas_course_id,
@@ -269,8 +269,7 @@ async def create_edstem_mapping(body: EdStemMappingIn, db: AsyncSession = Depend
         text("""
             INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id, edstem_course_name)
             VALUES (:canvas_course_id, :edstem_course_id, :edstem_course_name)
-            ON CONFLICT (canvas_course_id) DO UPDATE SET
-                edstem_course_id = EXCLUDED.edstem_course_id,
+            ON CONFLICT ON CONSTRAINT uq_edstem_mapping_canvas_edstem DO UPDATE SET
                 edstem_course_name = EXCLUDED.edstem_course_name
         """),
         {
@@ -288,9 +287,19 @@ async def create_edstem_mapping(body: EdStemMappingIn, db: AsyncSession = Depend
 
 
 @router.delete("/edstem-mappings/{canvas_course_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_edstem_mapping(canvas_course_id: int, db: AsyncSession = Depends(get_db)):
-    await db.execute(
-        text("DELETE FROM edstem_course_mappings WHERE canvas_course_id = :cid"),
-        {"cid": canvas_course_id},
-    )
+async def delete_edstem_mapping(
+    canvas_course_id: int,
+    edstem_course_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    if edstem_course_id is not None:
+        await db.execute(
+            text("DELETE FROM edstem_course_mappings WHERE canvas_course_id = :cid AND edstem_course_id = :eid"),
+            {"cid": canvas_course_id, "eid": edstem_course_id},
+        )
+    else:
+        await db.execute(
+            text("DELETE FROM edstem_course_mappings WHERE canvas_course_id = :cid"),
+            {"cid": canvas_course_id},
+        )
     await db.commit()
