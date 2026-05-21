@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     reminder_test_mode_enabled: bool = True
     reminder_test_recipient_email: str = "liam22840@gmail.com"
 
+    # Attendance watcher
+    watch_folder: str = ""
+    processed_folder: str = "./processed"
+    watch_enabled: bool = False
+    attendance_late_threshold_minutes: int = 10
+    attendance_partial_threshold_minutes: int = 30
+
     # Environment & deployment
     environment: str = "development"
     deployment_target: str = "vercel"
