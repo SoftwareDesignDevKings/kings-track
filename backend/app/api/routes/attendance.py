@@ -89,11 +89,12 @@ async def watcher_history(limit: int = Query(50, ge=1, le=200)):
 
 @router.post("/watcher/start")
 async def watcher_start():
-    result = attendance_watcher.start(
+    if not settings.watch_folder:
+        raise HTTPException(status_code=400, detail="WATCH_FOLDER not configured")
+    return attendance_watcher.start(
         watch_folder=settings.watch_folder,
         processed_folder=settings.processed_folder,
     )
-    return result
 
 
 @router.post("/watcher/stop")
@@ -103,10 +104,9 @@ async def watcher_stop():
 
 @router.post("/watcher/scan")
 async def watcher_scan():
-    if not attendance_watcher.running and not settings.watch_folder:
-        raise HTTPException(status_code=400, detail="Watcher not configured")
-    # Ensure watcher has folder set even if not running
-    if not attendance_watcher._watch_folder:
-        attendance_watcher._watch_folder = attendance_watcher._resolve_folder(settings.watch_folder)
-        attendance_watcher._processed_folder = attendance_watcher._resolve_folder(settings.processed_folder)
+    if not settings.watch_folder and not attendance_watcher.watch_folder:
+        raise HTTPException(status_code=400, detail="Watcher not configured — set WATCH_FOLDER or start the watcher first")
+    # Configure folders if the watcher hasn't been started yet
+    if not attendance_watcher.watch_folder:
+        attendance_watcher.configure(settings.watch_folder, settings.processed_folder)
     return await attendance_watcher.scan()

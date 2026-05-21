@@ -3,14 +3,12 @@ Folder watcher — monitors a directory for new Teams attendance CSVs
 and auto-imports them. Uses watchdog (Python equivalent of chokidar).
 """
 import os
-import re
 import shutil
 import logging
 import asyncio
 from pathlib import Path
-from datetime import datetime
-from dataclasses import dataclass, field
-from typing import Callable
+from datetime import datetime, timezone
+from dataclasses import dataclass
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileCreatedEvent
@@ -54,6 +52,7 @@ class AttendanceWatcher:
         self._watch_folder = ""
         self._processed_folder = ""
         self._processed_files: set[str] = set()
+        self._skipped_files: set[str] = set()
         self._history: list[WatcherHistoryEntry] = []
         self._last_import_time: datetime | None = None
         self._last_import_file: str | None = None
@@ -63,10 +62,24 @@ class AttendanceWatcher:
     def running(self) -> bool:
         return self._running
 
+    @property
+    def watch_folder(self) -> str:
+        return self._watch_folder
+
+    def configure(self, watch_folder: str, processed_folder: str) -> None:
+        """Set watch/processed folders without starting the observer."""
+        if not watch_folder or not watch_folder.strip():
+            raise ValueError("watch_folder must be a non-empty path")
+        self._watch_folder = self._resolve_folder(watch_folder)
+        self._processed_folder = self._resolve_folder(processed_folder)
+
     def start(self, watch_folder: str, processed_folder: str) -> dict:
         """Start watching a folder for new CSVs."""
         if self._running:
             return {"status": "already_running", "folder": self._watch_folder}
+
+        if not watch_folder or not watch_folder.strip():
+            raise ValueError("watch_folder must be a non-empty path")
 
         self._watch_folder = self._resolve_folder(watch_folder)
         self._processed_folder = self._resolve_folder(processed_folder)
@@ -109,9 +122,10 @@ class AttendanceWatcher:
         for csv_file in sorted(folder.glob("*.csv")):
             if csv_file.name.startswith("."):
                 continue
-            if str(csv_file) in self._processed_files:
+            path_str = str(csv_file)
+            if path_str in self._processed_files or path_str in self._skipped_files:
                 continue
-            result = await self._process_file(str(csv_file))
+            result = await self._process_file(path_str)
             results.append(result)
 
         return results
@@ -123,8 +137,6 @@ class AttendanceWatcher:
         if file_path in self._processed_files:
             return {"file": file_name, "status": "skipped", "reason": "already_processed"}
 
-        self._processed_files.add(file_path)
-
         try:
             # Read and decode file
             with open(file_path, "rb") as f:
@@ -133,6 +145,7 @@ class AttendanceWatcher:
 
             # Validate it looks like a Teams attendance report
             if not self._is_attendance_report(file_name, content):
+                self._skipped_files.add(file_path)
                 return {"file": file_name, "status": "skipped", "reason": "not_attendance_report"}
 
             # Parse and import
@@ -141,7 +154,7 @@ class AttendanceWatcher:
 
             entry = WatcherHistoryEntry(
                 file_name=file_name,
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 success=result.success,
                 meeting_title=result.meeting_title,
                 records_imported=result.attendance_records_created,
@@ -152,7 +165,8 @@ class AttendanceWatcher:
                 self._history = self._history[:100]
 
             if result.success:
-                self._last_import_time = datetime.utcnow()
+                self._processed_files.add(file_path)
+                self._last_import_time = datetime.now(timezone.utc)
                 self._last_import_file = file_name
                 self._move_to_processed(file_path)
 
@@ -168,7 +182,7 @@ class AttendanceWatcher:
             logger.error("Error processing file %s: %s", file_name, e)
             entry = WatcherHistoryEntry(
                 file_name=file_name,
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 success=False,
                 error=str(e),
             )
@@ -189,7 +203,7 @@ class AttendanceWatcher:
     def _move_to_processed(self, file_path: str) -> None:
         """Move a processed file to the processed folder with timestamp prefix."""
         file_name = os.path.basename(file_path)
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         dest = os.path.join(self._processed_folder, f"{timestamp}_{file_name}")
 
         try:
@@ -204,7 +218,7 @@ class AttendanceWatcher:
 
     def get_status(self) -> dict:
         """Get current watcher status."""
-        today = datetime.utcnow().date().isoformat()
+        today = datetime.now(timezone.utc).date().isoformat()
         files_today = sum(
             1 for h in self._history if h.success and h.timestamp.startswith(today)
         )
