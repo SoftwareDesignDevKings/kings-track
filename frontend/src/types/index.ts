@@ -331,3 +331,165 @@ export interface GradeoTopicBands {
   topics?: GradeoTopicSummary[]
   students?: GradeoTopicBandStudent[]
 }
+
+// ─── Student listing ──────────────────────────────────────────────────────────
+
+export interface StudentConcern {
+  is_concern: boolean
+  level: 'none' | 'moderate' | 'high'
+  reasons: string[]
+}
+
+export interface StudentListItem {
+  id: number
+  name: string
+  email: string
+  sis_id: string | null
+  course_count: number
+  courses: Array<{ id: number; name: string }>
+  avg_completion_rate: number | null
+  avg_on_time_rate: number | null
+  avg_score: number | null
+  attendance_rate: number | null
+  concern: StudentConcern
+}
+
+// ─── Student profile ──────────────────────────────────────────────────────────
+
+export interface StudentInfo {
+  id: number
+  name: string
+  email: string
+  sis_id: string | null
+  sortable_name: string | null
+}
+
+export interface StudentOverview {
+  avg_completion_rate: number | null
+  avg_on_time_rate: number | null
+  avg_score: number | null
+  attendance_rate: number | null
+  total_courses: number
+}
+
+export interface StudentCourseMetrics {
+  course_id: number
+  course_name: string
+  course_code: string | null
+  completion_rate: number | null
+  on_time_rate: number | null
+  current_score: number | null
+  last_activity_at: string | null
+}
+
+export interface StudentSubmissionStats {
+  total: number
+  submitted: number
+  graded: number
+  late: number
+  missing: number
+}
+
+export interface AttendanceSummary {
+  total_meetings: number
+  present: number
+  late: number
+  partial: number
+  absent: number
+  attendance_rate: number | null
+}
+
+export interface AttendanceByClass {
+  class_code: string
+  total: number
+  present: number
+  late: number
+  partial: number
+  rate: number | null
+}
+
+export interface RecentAttendanceRecord {
+  meeting_id: number
+  meeting_title: string
+  date: string | null
+  class_code: string | null
+  join_time: string | null
+  leave_time: string | null
+  duration_minutes: number | null
+  status: string
+}
+
+export interface StudentProfileData {
+  student: StudentInfo
+  overview: StudentOverview
+  concern: StudentConcern
+  courses: StudentCourseMetrics[]
+  submission_stats: Record<string, StudentSubmissionStats>
+  attendance_summary: AttendanceSummary
+  attendance_by_class: AttendanceByClass[]
+  recent_attendance: RecentAttendanceRecord[]
+}
+
+// ─── Student learning overview ────────────────────────────────────────────────
+
+export interface CanvasGroupBreakdown {
+  group_name: string
+  total: number
+  submitted: number
+  graded: number
+  late: number
+  missing: number
+  avg_score: number | null
+  avg_points_possible: number | null
+}
+
+export interface CanvasCourseBreakdown {
+  course_name: string
+  course_code: string | null
+  groups: CanvasGroupBreakdown[]
+}
+
+export interface EdStemModuleBreakdown {
+  module_name: string
+  total_lessons: number
+  completed: number
+  viewed: number
+  not_started: number
+}
+
+export interface EdStemCourseBreakdown {
+  course_name: string
+  course_code: string | null
+  modules: EdStemModuleBreakdown[]
+}
+
+export interface GradeoExamBreakdown {
+  exam_name: string
+  syllabus_title: string | null
+  topics: string[]
+  status: string
+  exam_mark: number | null
+  marks_available: number | null
+  class_average: number | null
+}
+
+export interface GradeoCourseBreakdown {
+  course_name: string
+  course_code: string | null
+  exams: GradeoExamBreakdown[]
+}
+
+export interface StrugglingArea {
+  area: string
+  source: 'canvas' | 'edstem' | 'gradeo'
+  course_name: string
+  detail: string
+  score_pct: number
+}
+
+export interface StudentLearningOverview {
+  canvas: Record<string, CanvasCourseBreakdown>
+  edstem: Record<string, EdStemCourseBreakdown>
+  gradeo: Record<string, GradeoCourseBreakdown>
+  struggling_areas: StrugglingArea[]
+}
