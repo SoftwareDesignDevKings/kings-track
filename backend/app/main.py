@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.config import settings
-from app.api.routes import auth, courses, sync, admin, gradeo_admin, reminders_admin, canvas_health
+from app.api.routes import auth, courses, sync, admin, gradeo_admin, reminders_admin, canvas_health, students, attendance
 from app.cache import get_redis, close_redis
 from app.db import get_db
 from app.sync.engine import sync_engine
@@ -59,6 +59,8 @@ app.include_router(gradeo_admin.router, prefix="/api")
 app.include_router(reminders_admin.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(canvas_health.router, prefix="/api")
+app.include_router(students.router, prefix="/api")
+app.include_router(attendance.router, prefix="/api")
 
 
 @app.get("/api/health")

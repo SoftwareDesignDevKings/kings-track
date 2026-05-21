@@ -30,6 +30,8 @@ from app.models.guardian_contact import GuardianContact
 from app.models.school_contact import SchoolContact
 from app.models.reminder_run import ReminderRun
 from app.models.reminder_delivery import ReminderDelivery
+from app.models.meeting import Meeting
+from app.models.attendance_record import AttendanceRecord
 
 __all__ = [
     "Base",
@@ -64,4 +66,6 @@ __all__ = [
     "SchoolContact",
     "ReminderRun",
     "ReminderDelivery",
+    "Meeting",
+    "AttendanceRecord",
 ]

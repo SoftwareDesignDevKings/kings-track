@@ -5,6 +5,7 @@ import type {
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
   GradeoImportRun, GradeoCourseReport, GradeoTopicBands,
+  StudentListItem, StudentProfileData, StudentLearningOverview,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -433,5 +434,33 @@ export function useAutoMatchGradeo() {
       queryClient.invalidateQueries({ queryKey: ['gradeo-mappings'] })
       queryClient.invalidateQueries({ queryKey: ['gradeo-classes'] })
     },
+  })
+}
+
+// ─── Students ────────────────────────────────────────────────────────────────
+
+export function useStudents() {
+  return useQuery<StudentListItem[]>({
+    queryKey: ['students'],
+    queryFn: () => fetchJSON<StudentListItem[]>('/students'),
+    staleTime: 60_000,
+  })
+}
+
+export function useStudentProfile(userId: number) {
+  return useQuery<StudentProfileData>({
+    queryKey: ['student-profile', userId],
+    queryFn: () => fetchJSON<StudentProfileData>(`/students/${userId}/profile`),
+    staleTime: 60_000,
+    enabled: !isNaN(userId) && userId > 0,
+  })
+}
+
+export function useStudentLearningOverview(userId: number) {
+  return useQuery<StudentLearningOverview>({
+    queryKey: ['student-learning-overview', userId],
+    queryFn: () => fetchJSON<StudentLearningOverview>(`/students/${userId}/learning-overview`),
+    staleTime: 60_000,
+    enabled: !isNaN(userId) && userId > 0,
   })
 }
