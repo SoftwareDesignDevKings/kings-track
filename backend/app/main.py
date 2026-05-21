@@ -53,6 +53,7 @@ app.add_middleware(
 # Routes
 app.include_router(courses.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
+app.include_router(sync.cron_router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(gradeo_admin.router, prefix="/api")
 app.include_router(reminders_admin.router, prefix="/api")

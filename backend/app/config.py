@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     reminder_test_mode_enabled: bool = True
     reminder_test_recipient_email: str = "liam22840@gmail.com"
 
+    # Cron / sync security
+    cron_secret: str = ""
+
     # Environment & deployment
     environment: str = "development"
     deployment_target: str = "vercel"
