@@ -1,14 +1,16 @@
 """
 Sync engine — orchestrates full and incremental Canvas data sync into local database.
-Processes one course at a time to keep memory usage within 256MB Fly.io limit.
+Processes one course at a time to keep memory usage low.
 """
 import asyncio
 import inspect
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import text
 
+from app.cache import get_redis
 from app.canvas.client import CanvasClient, CanvasAPIError
 from app.config import settings
 from app.db import AsyncSessionLocal
@@ -24,6 +26,15 @@ from app.sync.edstem_tasks import sync_edstem_lessons
 from app.whitelist import get_effective_whitelist
 
 logger = logging.getLogger(__name__)
+
+# Lua script for atomic compare-and-delete: only removes the lock if
+# the stored value matches our owner token.
+_RELEASE_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+end
+return 0
+"""
 
 
 async def _log_sync(db, entity_type: str, course_id: int | None, status: str, records: int = 0, error: str | None = None) -> int:
@@ -52,15 +63,54 @@ async def _log_sync(db, entity_type: str, course_id: int | None, status: str, re
 
 
 class SyncEngine:
+    LOCK_KEY = "kings:sync:running"
+    PROGRESS_KEY = "kings:sync:progress"
+
     def __init__(self):
         self._running = False
         self._task: asyncio.Task | None = None
-        self._last_full_sync_at: datetime | None = None
+        self._lock_owner: str | None = None
         self._progress: dict | None = None
 
     @property
     def is_running(self) -> bool:
         return self._running
+
+    async def _acquire_lock(self) -> bool:
+        owner = uuid.uuid4().hex
+        r = await get_redis()
+        if r:
+            ttl = (settings.vercel_function_timeout * 2) if settings.is_serverless else 1800
+            acquired = await r.set(self.LOCK_KEY, owner, nx=True, ex=ttl)
+            if acquired:
+                self._running = True
+                self._lock_owner = owner
+            return bool(acquired)
+        if self._running:
+            return False
+        self._running = True
+        self._lock_owner = owner
+        return True
+
+    async def _release_lock(self) -> None:
+        r = await get_redis()
+        if r and self._lock_owner:
+            await r.eval(_RELEASE_LOCK_SCRIPT, 1, self.LOCK_KEY, self._lock_owner)
+        self._running = False
+        self._lock_owner = None
+
+    async def _get_last_full_sync_at(self) -> datetime | None:
+        """Read the last successful full sync timestamp from the database."""
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                text("""
+                    SELECT completed_at FROM sync_log
+                    WHERE entity_type = 'full_sync' AND status = 'completed'
+                    ORDER BY id DESC LIMIT 1
+                """)
+            )
+            row = result.fetchone()
+            return row[0] if row else None
 
     @property
     def progress(self) -> dict | None:
@@ -159,6 +209,7 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d enrollments failed: %s", course_id, exc)
                 course_results["enrollments_error"] = str(exc)
+                await db.rollback()
                 self._mark_step_completed()
 
             # Assignments (no incremental support in Canvas API)
@@ -171,6 +222,7 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d assignments failed: %s", course_id, exc)
                 course_results["assignments_error"] = str(exc)
+                await db.rollback()
                 self._mark_step_completed()
 
             # Submissions
@@ -183,6 +235,7 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d submissions failed: %s", course_id, exc)
                 course_results["submissions_error"] = str(exc)
+                await db.rollback()
                 self._mark_step_completed()
 
             # Compute metrics (DB-only, no API calls)
@@ -195,8 +248,8 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d metrics failed: %s", course_id, exc)
                 course_results["metrics_error"] = str(exc)
+                await db.rollback()
                 self._mark_step_completed()
-
 
             # EdStem lesson progress (optional — only runs if token is configured)
             if settings.edstem_configured:
@@ -211,6 +264,7 @@ class SyncEngine:
                 except Exception as exc:
                     logger.error("  Course %d edstem failed: %s", course_id, exc)
                     course_results["edstem_error"] = str(exc)
+                    await db.rollback()
                     self._mark_step_completed()
 
 
@@ -231,15 +285,15 @@ class SyncEngine:
 
         Processes one course at a time to minimise memory usage.
         """
-        if self._running:
+        if not await self._acquire_lock():
             logger.info("Sync already in progress — skipping")
             return {"status": "already_running"}
 
         if not settings.canvas_configured:
+            await self._release_lock()
             logger.warning("Canvas API not configured — skipping sync")
             return {"status": "not_configured", "message": "Set CANVAS_API_URL and CANVAS_API_TOKEN"}
 
-        self._running = True
         started_at = datetime.now(timezone.utc)
         results: dict = {"sync_type": "full"}
         self._begin_progress("full", started_at, total_courses=0, includes_edstem=settings.edstem_configured)
@@ -272,7 +326,7 @@ class SyncEngine:
             logger.exception("Unexpected error during sync: %s", exc)
             results["error"] = str(exc)
         finally:
-            self._running = False
+            await self._release_lock()
 
         elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
         results["elapsed_seconds"] = round(elapsed, 1)
@@ -289,9 +343,6 @@ class SyncEngine:
         async with AsyncSessionLocal() as db:
             await _log_sync(db, "full_sync", None, status, error=error_msg)
 
-        if status == "completed":
-            self._last_full_sync_at = datetime.now(timezone.utc)
-
         self._reset_progress()
 
         return results
@@ -302,21 +353,21 @@ class SyncEngine:
         Skips course sync (rarely changes) and enrollment deletion (can't safely delete
         without seeing the full list).
         """
-        if self._running:
-            logger.info("Sync already in progress — skipping")
-            return {"status": "already_running"}
-
         if not settings.canvas_configured:
             logger.warning("Canvas API not configured — skipping sync")
             return {"status": "not_configured"}
 
-        if not self._last_full_sync_at:
+        last_full_sync_at = await self._get_last_full_sync_at()
+        if not last_full_sync_at:
             logger.info("No previous full sync — running full sync instead")
             return await self.full_sync()
 
-        self._running = True
+        if not await self._acquire_lock():
+            logger.info("Sync already in progress — skipping")
+            return {"status": "already_running"}
+
         started_at = datetime.now(timezone.utc)
-        since = self._last_full_sync_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+        since = last_full_sync_at.strftime("%Y-%m-%dT%H:%M:%SZ")
         results: dict = {"sync_type": "incremental", "since": since}
         self._begin_progress("incremental", started_at, total_courses=0, includes_edstem=settings.edstem_configured)
 
@@ -350,7 +401,7 @@ class SyncEngine:
             logger.exception("Unexpected error during incremental sync: %s", exc)
             results["error"] = str(exc)
         finally:
-            self._running = False
+            await self._release_lock()
 
         elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
         results["elapsed_seconds"] = round(elapsed, 1)
@@ -365,7 +416,7 @@ class SyncEngine:
         status = "error" if ("error" in results or has_course_errors) else "completed"
         error_msg = results.get("error") or ("one or more courses failed to sync" if has_course_errors else None)
         async with AsyncSessionLocal() as db:
-            await _log_sync(db, "full_sync", None, status, error=error_msg)
+            await _log_sync(db, "incremental_sync", None, status, error=error_msg)
 
         self._reset_progress()
 

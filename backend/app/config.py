@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     reminder_test_mode_enabled: bool = True
     reminder_test_recipient_email: str = "liam22840@gmail.com"
 
+    # Cron / sync security
+    cron_secret: str = ""
+
+    # Environment & deployment
+    environment: str = "development"
+    deployment_target: str = "vercel"
+    redis_url: str = ""
+    db_pool_size: int = 5
+    db_max_overflow: int = 2
+    vercel_function_timeout: int = 300
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
@@ -55,6 +66,17 @@ class Settings(BaseSettings):
             and self.reminder_smtp_host
         )
 
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+    @property
+    def is_serverless(self) -> bool:
+        return self.deployment_target == "vercel"
+
+    @property
+    def redis_configured(self) -> bool:
+        return bool(self.redis_url)
 
 
 settings = Settings()
