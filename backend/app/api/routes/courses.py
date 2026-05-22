@@ -485,7 +485,21 @@ async def get_gradeo_topic_bands(course_id: int, db: AsyncSession = Depends(get_
     )
     mapping_row = mapping_result.fetchone()
     if not mapping_row:
-        return {"mapped": False}
+        # Fallback: discover Gradeo classes via student enrollment links
+        fallback_result = await db.execute(
+            text(
+                """
+                SELECT DISTINCT gcea.gradeo_class_id, gcea.class_name
+                FROM gradeo_assignment_results gar
+                JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
+                WHERE gar.canvas_course_id = :course_id
+                """
+            ),
+            {"course_id": course_id},
+        )
+        mapping_row = fallback_result.fetchone()
+        if not mapping_row:
+            return {"mapped": False}
 
     gradeo_class_id, gradeo_class_name = mapping_row
 
@@ -519,7 +533,7 @@ async def get_gradeo_topic_bands(course_id: int, db: AsyncSession = Depends(get_
              AND gar.gradeo_student_id = gaqr.gradeo_student_id
             JOIN gradeo_class_exam_assignments gcea
               ON gcea.id = gaqr.gradeo_class_exam_assignment_id
-            WHERE gar.canvas_course_id = :course_id
+            WHERE (gar.canvas_course_id = :course_id OR gar.canvas_course_id IS NULL)
               AND gcea.gradeo_class_id = :gradeo_class_id
               AND gaqr.mark IS NOT NULL
               AND gaqr.marks_available IS NOT NULL
@@ -629,7 +643,21 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
     )
     mapping_rows = mapping_result.fetchall()
     if not mapping_rows:
-        return {"mapped": False}
+        # Fallback: discover Gradeo classes via student enrollment links
+        fallback_result = await db.execute(
+            text(
+                """
+                SELECT DISTINCT gcea.gradeo_class_id, gcea.class_name
+                FROM gradeo_assignment_results gar
+                JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
+                WHERE gar.canvas_course_id = :course_id
+                """
+            ),
+            {"course_id": course_id},
+        )
+        mapping_rows = fallback_result.fetchall()
+        if not mapping_rows:
+            return {"mapped": False}
 
     gradeo_classes = [
         {
@@ -757,7 +785,7 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
                 gar.last_imported_at
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
-            WHERE gar.canvas_course_id = :course_id
+            WHERE (gar.canvas_course_id = :course_id OR gar.canvas_course_id IS NULL)
               AND gcea.gradeo_class_id IN :gradeo_class_ids
             """
         ).bindparams(bindparam("gradeo_class_ids", expanding=True)),

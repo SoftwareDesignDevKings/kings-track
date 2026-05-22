@@ -80,3 +80,27 @@ async def get_course_student_ids(db: AsyncSession, course_id: int) -> set[int]:
         {"course_id": course_id},
     )
     return {row[0] for row in result.fetchall()}
+
+
+async def get_whitelisted_enrollments_for_users(
+    db: AsyncSession, user_ids: list[int]
+) -> dict[int, set[int]]:
+    """Return {user_id: {course_id, ...}} for all whitelisted student enrollments."""
+    if not user_ids:
+        return {}
+
+    result = await db.execute(
+        text(
+            """
+            SELECT e.user_id, e.course_id
+            FROM enrollments e
+            JOIN course_whitelist cw ON cw.course_id = e.course_id
+            WHERE e.user_id IN :user_ids AND e.role = 'StudentEnrollment'
+            """
+        ).bindparams(bindparam("user_ids", expanding=True)),
+        {"user_ids": user_ids},
+    )
+    enrollments: dict[int, set[int]] = {}
+    for row in result.fetchall():
+        enrollments.setdefault(row[0], set()).add(row[1])
+    return enrollments
