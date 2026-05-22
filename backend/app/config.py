@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     attendance_late_threshold_minutes: int = 10
     attendance_partial_threshold_minutes: int = 30
 
+    # Microsoft Entra ID (Azure AD)
+    entra_tenant_id: str = ""
+    entra_client_id: str = ""
+    entra_admin_group_id: str = ""
+    entra_teacher_group_id: str = ""
+
     # Cron / sync security
     cron_secret: str = ""
 
@@ -64,6 +70,14 @@ class Settings(BaseSettings):
     @property
     def local_auth_enabled(self) -> bool:
         return self.auth_mode.lower() == "local"
+
+    @property
+    def entra_auth_enabled(self) -> bool:
+        return self.auth_mode.lower() == "entra"
+
+    @property
+    def entra_configured(self) -> bool:
+        return bool(self.entra_tenant_id and self.entra_client_id)
 
     @property
     def reminder_email_configured(self) -> bool:
