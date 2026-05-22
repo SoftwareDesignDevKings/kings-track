@@ -352,26 +352,28 @@ async def get_edstem_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
     if not course_result.fetchone():
         raise HTTPException(status_code=404, detail="Course not found")
 
-    # Check for EdStem mapping
+    # Check for EdStem mappings (may be multiple per canvas course)
     mapping_result = await db.execute(
         text("SELECT edstem_course_id, edstem_course_name FROM edstem_course_mappings WHERE canvas_course_id = :cid"),
         {"cid": course_id},
     )
-    mapping_row = mapping_result.fetchone()
-    if not mapping_row:
+    mapping_rows = mapping_result.fetchall()
+    if not mapping_rows:
         return {"mapped": False}
 
-    edstem_course_id, edstem_course_name = mapping_row
+    edstem_course_ids = [row[0] for row in mapping_rows]
+    edstem_course_id = mapping_rows[0][0]
+    edstem_course_name = mapping_rows[0][1]
 
-    # Fetch lessons ordered by module_name, position
+    # Fetch lessons from all mapped EdStem courses
     lessons_result = await db.execute(
         text("""
             SELECT id, title, module_id, module_name, is_interactive, position
             FROM edstem_lessons
-            WHERE edstem_course_id = :edstem_course_id
+            WHERE edstem_course_id = ANY(:edstem_course_ids)
             ORDER BY module_name IS NULL, module_name, position IS NULL, position, id
         """),
-        {"edstem_course_id": edstem_course_id},
+        {"edstem_course_ids": edstem_course_ids},
     )
     lessons_raw = lessons_result.fetchall()
 
@@ -410,15 +412,15 @@ async def get_edstem_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
     )
     students_raw = students_result.fetchall()
 
-    # Fetch all progress records for this EdStem course in one query
+    # Fetch all progress records for mapped EdStem courses in one query
     if all_lesson_ids:
         progress_result = await db.execute(
             text("""
                 SELECT user_id, edstem_lesson_id, status, completed_at
                 FROM edstem_lesson_progress
-                WHERE edstem_course_id = :edstem_course_id
+                WHERE edstem_course_id = ANY(:edstem_course_ids)
             """),
-            {"edstem_course_id": edstem_course_id},
+            {"edstem_course_ids": edstem_course_ids},
         )
         progress_raw = progress_result.fetchall()
     else:
