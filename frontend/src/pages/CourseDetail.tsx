@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
@@ -12,6 +12,7 @@ import {
   prepareCanvasActivityView,
 } from '../components/activityTableModel'
 import { useCourseMatrix, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
+import { downloadCsv } from '../lib/downloadCsv'
 
 type TabId = 'activities' | 'edstem' | 'gradeo'
 type GradeoSubview = 'exam_results' | 'topic_bands'
@@ -87,6 +88,30 @@ export default function CourseDetail() {
     return true
   }), [edStemMatrix?.mapped, gradeoMapped])
   const tabAvailabilityLoaded = !edStemLoading && !gradeoLoading && !gradeoTopicBandsLoading
+  const [downloadingClass, setDownloadingClass] = useState(false)
+  const [downloadingGradeo, setDownloadingGradeo] = useState(false)
+
+  async function handleExportClassReport() {
+    setDownloadingClass(true)
+    try {
+      await downloadCsv(`/reports/courses/${id}/class-report`, 'class-report.csv')
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingClass(false)
+    }
+  }
+
+  async function handleExportGradeoReport() {
+    setDownloadingGradeo(true)
+    try {
+      await downloadCsv(`/reports/courses/${id}/gradeo-report`, 'gradeo-report.csv')
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingGradeo(false)
+    }
+  }
 
   function setCourseView(tab: TabId, gradeoSubview: GradeoSubview = activeGradeoSubview) {
     setSearchParams(prev => {
@@ -211,7 +236,24 @@ export default function CourseDetail() {
                   Failed to load activity data. Make sure the course has been synced.
                 </div>
               )}
-              {matrix && <ActivityTable matrix={matrix} />}
+              {matrix && (
+                <>
+                  <div className="mb-3 flex shrink-0 justify-end">
+                    <button
+                      type="button"
+                      onClick={handleExportClassReport}
+                      disabled={downloadingClass}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                      </svg>
+                      {downloadingClass ? 'Downloading\u2026' : 'Export CSV'}
+                    </button>
+                  </div>
+                  <ActivityTable matrix={matrix} />
+                </>
+              )}
             </div>
           )}
 
@@ -290,7 +332,22 @@ export default function CourseDetail() {
                     </div>
                   )}
                   {activeGradeoSubview === 'topic_bands' && gradeoTopicBands?.mapped && (
-                    <GradeoTopicBandsTable topicBands={gradeoTopicBands} />
+                    <>
+                      <div className="mb-3 flex shrink-0 justify-end">
+                        <button
+                          type="button"
+                          onClick={handleExportGradeoReport}
+                          disabled={downloadingGradeo}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                          </svg>
+                          {downloadingGradeo ? 'Downloading\u2026' : 'Export CSV'}
+                        </button>
+                      </div>
+                      <GradeoTopicBandsTable topicBands={gradeoTopicBands} />
+                    </>
                   )}
                 </>
               )}
