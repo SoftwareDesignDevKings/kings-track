@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 
 import ActivityTable from '../components/ActivityTable'
 import type { CourseMatrix } from '../types'
@@ -32,6 +32,45 @@ function makeMatrix(overrides: Partial<CourseMatrix> = {}): CourseMatrix {
     ],
     ...overrides,
   }
+}
+
+function setScrollGeometry(
+  element: HTMLDivElement,
+  geometry: {
+    clientWidth: number
+    scrollWidth: number
+    clientHeight: number
+    scrollHeight: number
+    scrollLeft?: number
+    scrollTop?: number
+  },
+) {
+  Object.defineProperty(element, 'clientWidth', {
+    configurable: true,
+    value: geometry.clientWidth,
+  })
+  Object.defineProperty(element, 'scrollWidth', {
+    configurable: true,
+    value: geometry.scrollWidth,
+  })
+  Object.defineProperty(element, 'clientHeight', {
+    configurable: true,
+    value: geometry.clientHeight,
+  })
+  Object.defineProperty(element, 'scrollHeight', {
+    configurable: true,
+    value: geometry.scrollHeight,
+  })
+  Object.defineProperty(element, 'scrollLeft', {
+    configurable: true,
+    writable: true,
+    value: geometry.scrollLeft ?? 0,
+  })
+  Object.defineProperty(element, 'scrollTop', {
+    configurable: true,
+    writable: true,
+    value: geometry.scrollTop ?? 0,
+  })
 }
 
 describe('ActivityTable', () => {
@@ -145,6 +184,141 @@ describe('ActivityTable', () => {
     expect(completionCell).toHaveTextContent('—')
   })
 
+  it('renders custom matrix scrollbars only when table content overflows', () => {
+    const { container } = render(<ActivityTable matrix={makeMatrix()} />)
+    const scrollEl = container.querySelector('.activity-table-scroll') as HTMLDivElement | null
+
+    expect(scrollEl).not.toBeNull()
+    setScrollGeometry(scrollEl!, {
+      clientWidth: 320,
+      scrollWidth: 320,
+      clientHeight: 180,
+      scrollHeight: 180,
+    })
+
+    fireEvent(window, new Event('resize'))
+
+    expect(container.querySelector('[data-testid="matrix-scrollbar-horizontal"]')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-testid="matrix-scrollbar-vertical"]')).not.toBeInTheDocument()
+  })
+
+  it('syncs custom matrix scrollbar thumbs with native scroll position', () => {
+    const { container } = render(<ActivityTable matrix={makeMatrix()} />)
+    const scrollEl = container.querySelector('.activity-table-scroll') as HTMLDivElement | null
+
+    expect(scrollEl).not.toBeNull()
+    setScrollGeometry(scrollEl!, {
+      clientWidth: 200,
+      scrollWidth: 1000,
+      clientHeight: 100,
+      scrollHeight: 400,
+    })
+
+    fireEvent(window, new Event('resize'))
+
+    const horizontalThumb = container.querySelector('[data-testid="matrix-scrollbar-horizontal-thumb"]') as HTMLDivElement | null
+    const verticalThumb = container.querySelector('[data-testid="matrix-scrollbar-vertical-thumb"]') as HTMLDivElement | null
+    const horizontalTrack = container.querySelector('[data-testid="matrix-scrollbar-horizontal"]') as HTMLDivElement | null
+    const verticalTrack = container.querySelector('[data-testid="matrix-scrollbar-vertical"]') as HTMLDivElement | null
+
+    expect(horizontalThumb).not.toBeNull()
+    expect(verticalThumb).not.toBeNull()
+    expect(Number.parseFloat(horizontalThumb!.style.width)).toBeGreaterThanOrEqual(32)
+    expect(Number.parseFloat(verticalThumb!.style.height)).toBeGreaterThanOrEqual(32)
+
+    scrollEl!.scrollLeft = 400
+    fireEvent.scroll(scrollEl!)
+
+    expect(horizontalTrack).toHaveClass('activity-table-scrollbar-visible')
+    expect(verticalTrack).not.toHaveClass('activity-table-scrollbar-visible')
+    expect(horizontalThumb!.style.transform).toBe('translate3d(78px, 0, 0)')
+
+    act(() => {
+      vi.advanceTimersByTime(800)
+    })
+
+    expect(horizontalTrack).not.toHaveClass('activity-table-scrollbar-visible')
+
+    scrollEl!.scrollTop = 150
+    fireEvent.scroll(scrollEl!)
+
+    expect(horizontalTrack).not.toHaveClass('activity-table-scrollbar-visible')
+    expect(verticalTrack).toHaveClass('activity-table-scrollbar-visible')
+    expect(verticalThumb!.style.transform).toBe('translate3d(0, 32px, 0)')
+
+    act(() => {
+      vi.advanceTimersByTime(800)
+    })
+
+    expect(verticalTrack).not.toHaveClass('activity-table-scrollbar-visible')
+  })
+
+  it('reveals the respective custom matrix scrollbar when the pointer is near its edge', () => {
+    const { container } = render(<ActivityTable matrix={makeMatrix()} />)
+    const scrollEl = container.querySelector('.activity-table-scroll') as HTMLDivElement | null
+    const scrollFrame = container.querySelector('.activity-table-scroll-frame') as HTMLDivElement | null
+
+    expect(scrollEl).not.toBeNull()
+    expect(scrollFrame).not.toBeNull()
+    setScrollGeometry(scrollEl!, {
+      clientWidth: 200,
+      scrollWidth: 1000,
+      clientHeight: 100,
+      scrollHeight: 400,
+    })
+
+    fireEvent(window, new Event('resize'))
+
+    const horizontalTrack = container.querySelector('[data-testid="matrix-scrollbar-horizontal"]') as HTMLDivElement | null
+    const verticalTrack = container.querySelector('[data-testid="matrix-scrollbar-vertical"]') as HTMLDivElement | null
+
+    expect(horizontalTrack).not.toBeNull()
+    expect(verticalTrack).not.toBeNull()
+
+    scrollFrame!.getBoundingClientRect = vi.fn(() => new DOMRect(0, 0, 200, 100))
+
+    fireEvent.mouseMove(scrollFrame!, { clientX: 100, clientY: 94 })
+    expect(horizontalTrack).toHaveClass('activity-table-scrollbar-visible')
+    expect(verticalTrack).not.toHaveClass('activity-table-scrollbar-visible')
+
+    act(() => {
+      vi.advanceTimersByTime(800)
+    })
+
+    fireEvent.mouseMove(scrollFrame!, { clientX: 194, clientY: 50 })
+    expect(horizontalTrack).not.toHaveClass('activity-table-scrollbar-visible')
+    expect(verticalTrack).toHaveClass('activity-table-scrollbar-visible')
+  })
+
+  it('updates native matrix scroll position when dragging a custom thumb', () => {
+    const { container } = render(<ActivityTable matrix={makeMatrix()} />)
+    const scrollEl = container.querySelector('.activity-table-scroll') as HTMLDivElement | null
+
+    expect(scrollEl).not.toBeNull()
+    setScrollGeometry(scrollEl!, {
+      clientWidth: 200,
+      scrollWidth: 1000,
+      clientHeight: 100,
+      scrollHeight: 100,
+    })
+
+    fireEvent(window, new Event('resize'))
+
+    const horizontalTrack = container.querySelector('[data-testid="matrix-scrollbar-horizontal"]') as HTMLDivElement | null
+    const horizontalThumb = container.querySelector('[data-testid="matrix-scrollbar-horizontal-thumb"]') as HTMLDivElement | null
+
+    expect(horizontalTrack).not.toBeNull()
+    expect(horizontalThumb).not.toBeNull()
+
+    horizontalTrack!.getBoundingClientRect = vi.fn(() => new DOMRect(0, 0, 200, 6))
+
+    fireEvent.mouseDown(horizontalThumb!, { clientX: 10 })
+    fireEvent.mouseMove(document, { clientX: 60 })
+    fireEvent.mouseUp(document)
+
+    expect(scrollEl!.scrollLeft).toBeGreaterThan(0)
+  })
+
   it('sorts activities globally by due date across source groups', () => {
     const matrix = makeMatrix({
       assignment_groups: [
@@ -190,12 +364,39 @@ describe('ActivityTable', () => {
     })
 
     const { container } = render(<ActivityTable matrix={matrix} />)
+    const groupHeaders = Array.from(container.querySelectorAll('thead tr:first-child th')).slice(2)
     const activityHeaders = Array.from(container.querySelectorAll('thead tr:nth-child(2) th'))
 
     expect(screen.getAllByText('No due date').length).toBeGreaterThan(0)
+    expect(groupHeaders[0].className).toContain('timeline-divider-primary-end')
+    expect(groupHeaders[1].className).toContain('timeline-divider-primary-start')
     expect(activityHeaders[1].className).toContain('timeline-divider-primary-end')
     expect(activityHeaders[2].className).toContain('timeline-divider-primary-start')
     expect(activityHeaders[3].className).not.toContain('timeline-divider')
+  })
+
+  it('does not draw the future boundary when due-now activities are followed only by no-due-date activities', () => {
+    const matrix = makeMatrix({
+      assignment_groups: [
+        {
+          name: 'Unit 1',
+          assignments: [
+            { id: 34, name: 'Today Task', points_possible: 10, due_at: new Date(2026, 3, 28, 18).toISOString() },
+            { id: 35, name: 'Optional Task', points_possible: 10, due_at: null },
+          ],
+        },
+      ],
+    })
+
+    const { container } = render(<ActivityTable matrix={matrix} />)
+    const groupHeaders = Array.from(container.querySelectorAll('thead tr:first-child th')).slice(2)
+    const activityHeaders = Array.from(container.querySelectorAll('thead tr:nth-child(2) th'))
+
+    expect(screen.getAllByText('Due now').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('No due date').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Future')).not.toBeInTheDocument()
+    expect(groupHeaders.every(header => !header.className.includes('timeline-divider'))).toBe(true)
+    expect(activityHeaders.every(header => !header.className.includes('timeline-divider'))).toBe(true)
   })
 
   it('preserves source group metadata in the activity tooltip', () => {
@@ -221,6 +422,75 @@ describe('ActivityTable', () => {
   it('renders StatusBadge for completed submission', () => {
     const { container } = render(<ActivityTable matrix={makeMatrix()} />)
     expect(container.querySelector('.bg-emerald-400')).toBeInTheDocument()
+  })
+
+  it('renders the shared dashboard toolbar and due-date groups', () => {
+    const matrix = makeMatrix({
+      assignment_groups: [
+        {
+          name: 'Unit 1',
+          assignments: [
+            { id: 50, name: 'Today Task', points_possible: 10, due_at: new Date(2026, 3, 28, 18).toISOString() },
+            { id: 51, name: 'Future Task', points_possible: 10, due_at: new Date(2026, 3, 29, 9).toISOString() },
+            { id: 52, name: 'Optional Task', points_possible: 10, due_at: null },
+          ],
+        },
+      ],
+    })
+
+    render(<ActivityTable matrix={matrix} />)
+
+    expect(screen.queryByText('Canvas Tasks')).not.toBeInTheDocument()
+    expect(screen.queryByText('1/1 students')).not.toBeInTheDocument()
+    const searchButton = screen.getByRole('button', { name: /^Search students$/i })
+    const sortButton = screen.getByRole('button', { name: /^Sort students$/i })
+    const searchInput = screen.getByPlaceholderText('Search students')
+
+    expect(searchButton).toHaveAttribute('aria-expanded', 'false')
+    expect(sortButton).toHaveAttribute('aria-expanded', 'false')
+    expect(searchInput).toBeDisabled()
+    expect(screen.queryByRole('dialog', { name: /^Sort options$/i })).not.toBeInTheDocument()
+
+    fireEvent.click(searchButton)
+
+    expect(searchButton).toHaveAttribute('aria-expanded', 'true')
+    expect(searchInput).toBeEnabled()
+    fireEvent.blur(searchInput)
+    expect(searchButton).toHaveAttribute('aria-expanded', 'false')
+    expect(searchInput).toBeDisabled()
+
+    fireEvent.click(searchButton)
+    fireEvent.change(searchInput, { target: { value: 'Alice' } })
+    fireEvent.blur(searchInput)
+    expect(searchButton).toHaveAttribute('aria-expanded', 'true')
+    expect(searchInput).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Clear search$/i }))
+    expect(searchButton).toHaveAttribute('aria-expanded', 'false')
+    expect(searchInput).toBeDisabled()
+    expect(searchInput).toHaveValue('')
+
+    fireEvent.click(searchButton)
+    fireEvent.change(searchInput, { target: { value: 'Nobody' } })
+    expect(screen.getByRole('status')).toHaveTextContent('No students found.')
+    fireEvent.click(screen.getByRole('button', { name: /^Clear search$/i }))
+
+    fireEvent.click(sortButton)
+
+    expect(sortButton).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('dialog', { name: /^Sort options$/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitemradio', { name: /^Student A-Z$/i })).toHaveAttribute('aria-checked', 'true')
+    const completionSortOption = screen.getByRole('menuitemradio', { name: /^Completion high-low$/i })
+    expect(completionSortOption).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(completionSortOption)
+    expect(sortButton).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: /^Marks$/i })).toBeInTheDocument()
+    expect(screen.queryByText('Filters')).not.toBeInTheDocument()
+    expect(screen.queryByText('Legend:')).not.toBeInTheDocument()
+    expect(screen.queryByText(/grouped by due date/i)).not.toBeInTheDocument()
+    expect(screen.getAllByText('Due now').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Future').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('No due date').length).toBeGreaterThan(0)
   })
 
   it('keeps due zone labels aligned to their visible sections while horizontally scrolling', () => {
@@ -287,5 +557,58 @@ describe('ActivityTable', () => {
     expect(dueNowWindow?.style.width).toBe('90px')
     expect(futureWindow?.style.width).toBe('110px')
     expect(undatedWindow?.style.width).toBe('120px')
+  })
+
+  it('shows late as the core status circle in status mode and a clear tint in marks mode', () => {
+    const matrix = makeMatrix({
+      assignment_groups: [
+        {
+          name: 'Unit 1',
+          assignments: [
+            { id: 60, name: 'Late Task', points_possible: 10, due_at: new Date(2026, 3, 28, 9).toISOString() },
+            { id: 61, name: 'On Time Task', points_possible: 10, due_at: new Date(2026, 3, 28, 10).toISOString() },
+          ],
+        },
+      ],
+      students: [
+        {
+          id: 1,
+          name: 'Alice',
+          sortable_name: 'Alice',
+          submissions: {
+            '60': { status: 'completed', score: 8, late: true, missing: false },
+            '61': { status: 'completed', score: 10, late: false, missing: true },
+          },
+          metrics: { completion_rate: 0.5, on_time_rate: 0.5, current_score: 80 },
+        },
+      ],
+    })
+
+    const { container } = render(<ActivityTable matrix={matrix} />)
+    let activityCells = Array.from(container.querySelectorAll('tbody tr td')).slice(2)
+
+    expect(screen.queryByRole('dialog', { name: /legend/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /show legend/i }))
+    expect(screen.getByRole('dialog', { name: /legend/i })).toHaveTextContent('Late')
+    expect(screen.queryByText('Missing')).not.toBeInTheDocument()
+    expect(activityCells[0].className).not.toContain('bg-emerald-50/90')
+    expect(activityCells[0].querySelector('.bg-emerald-50')).toBeInTheDocument()
+    expect(activityCells[0].querySelector('.border-emerald-500')).toBeInTheDocument()
+    expect(activityCells[0].querySelector('.bg-emerald-400')).not.toBeInTheDocument()
+    expect(activityCells[1].className).not.toContain('bg-amber-50/80')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Marks$/i }))
+    activityCells = Array.from(container.querySelectorAll('tbody tr td')).slice(2)
+
+    expect(activityCells[0].className).not.toContain('bg-emerald-50/90')
+    expect(activityCells[0].textContent).toBe('8')
+    expect(activityCells[0].textContent).not.toContain('/10')
+    expect(activityCells[0].querySelector('.bg-emerald-50')).toBeInTheDocument()
+    expect(activityCells[0].querySelector('.border-emerald-500')).toBeInTheDocument()
+    expect(activityCells[0].querySelector('.ring-emerald-100')).toBeInTheDocument()
+    expect(activityCells[1].querySelector('.bg-emerald-400')).toBeInTheDocument()
+    expect(activityCells[1].querySelector('.ring-emerald-200')).toBeInTheDocument()
+    expect(activityCells[1].querySelector('.text-white')).toBeInTheDocument()
+    expect(activityCells[1].textContent).toBe('10')
   })
 })

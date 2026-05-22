@@ -70,7 +70,7 @@ describe('GradeoTopicBandsTable', () => {
   it('renders band, score percent, and confidence for populated cells', () => {
     render(<GradeoTopicBandsTable topicBands={makeTopicBands()} />)
     expect(screen.getByText('B5')).toBeInTheDocument()
-    expect(screen.getByText('82%')).toBeInTheDocument()
+    expect(screen.getAllByText('82%').length).toBeGreaterThan(0)
     expect(screen.getAllByText('medium').length).toBeGreaterThan(0)
   })
 
