@@ -5,15 +5,15 @@ which prevented mapping one Canvas course to multiple EdStem courses.
 This migration replaces it with a composite unique constraint on
 (canvas_course_id, edstem_course_id).
 
-Revision ID: 0014
-Revises: 0013
+Revision ID: 0015
+Revises: 0014
 Create Date: 2026-05-21
 """
 from alembic import op
 
 
-revision = "0014"
-down_revision = "0013"
+revision = "0015"
+down_revision = "0014"
 branch_labels = None
 depends_on = None
 
