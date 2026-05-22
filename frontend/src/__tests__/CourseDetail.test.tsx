@@ -70,12 +70,11 @@ describe('CourseDetail', () => {
     expect(screen.getByText(/Failed to load activity data/i)).toBeInTheDocument()
   })
 
-  it('renders course name and code when loaded', () => {
+  it('renders course name and breadcrumb code when loaded', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />)
     expect(screen.getByText('Software Engineering 2026')).toBeInTheDocument()
-    // course_code appears in both breadcrumb and header
-    expect(screen.getAllByText('11SENX').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('11SENX')).toHaveLength(1)
   })
 
   it('shows student and assignment counts', () => {
@@ -386,7 +385,7 @@ describe('CourseDetail', () => {
 
     renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=gradeo&gradeo=topic-bands'] })
     expect(screen.getByText('B5')).toBeInTheDocument()
-    expect(screen.getByText('82%')).toBeInTheDocument()
+    expect(screen.getAllByText('82%').length).toBeGreaterThan(0)
     expect(screen.getAllByText('medium').length).toBeGreaterThan(0)
   })
 

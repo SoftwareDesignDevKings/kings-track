@@ -151,9 +151,6 @@ export default function CourseDetail() {
                 <h2 className="text-2xl font-bold text-slate-900 leading-tight">
                   {matrix?.course_name ?? 'Course'}
                 </h2>
-                {matrix?.course_code && (
-                  <p className="text-sm text-slate-500 mt-0.5">{matrix.course_code}</p>
-                )}
               </>
             )}
           </div>
