@@ -89,7 +89,7 @@ async def test_no_mapping_returns_zero(db):
 async def test_sync_marks_completed(db):
     """Lesson in 'completed' dict → status='completed' with completed_at stored."""
     seed(
-        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id) DO NOTHING",
+        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id, edstem_course_id) DO NOTHING",
         {"cid": COURSE_ID, "eid": EDSTEM_COURSE_ID},
     )
     client = _make_client(
@@ -114,7 +114,7 @@ async def test_sync_marks_completed(db):
 async def test_sync_marks_interactive_completed(db):
     """Lesson in 'interactive_completed' dict → status='completed'."""
     seed(
-        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id) DO NOTHING",
+        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id, edstem_course_id) DO NOTHING",
         {"cid": COURSE_ID, "eid": EDSTEM_COURSE_ID},
     )
     client = _make_client(
@@ -139,7 +139,7 @@ async def test_sync_marks_interactive_completed(db):
 async def test_sync_marks_viewed(db):
     """Lesson in 'viewed' list but not completed → status='viewed'."""
     seed(
-        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id) DO NOTHING",
+        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id, edstem_course_id) DO NOTHING",
         {"cid": COURSE_ID, "eid": EDSTEM_COURSE_ID},
     )
     client = _make_client(
@@ -164,7 +164,7 @@ async def test_sync_marks_viewed(db):
 async def test_sync_marks_not_started(db):
     """Lesson absent from all fields → status='not_started'."""
     seed(
-        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id) DO NOTHING",
+        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id, edstem_course_id) DO NOTHING",
         {"cid": COURSE_ID, "eid": EDSTEM_COURSE_ID},
     )
     client = _make_client(
@@ -188,7 +188,7 @@ async def test_sync_marks_not_started(db):
 async def test_email_match_case_insensitive(db):
     """EdStem email matched to Canvas user case-insensitively."""
     seed(
-        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id) DO NOTHING",
+        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id, edstem_course_id) DO NOTHING",
         {"cid": COURSE_ID, "eid": EDSTEM_COURSE_ID},
     )
     # Use uppercase in EdStem user
@@ -207,7 +207,7 @@ async def test_email_match_case_insensitive(db):
 async def test_unmatched_student_skipped(db):
     """EdStem user with no Canvas email match produces no progress records."""
     seed(
-        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id) DO NOTHING",
+        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id, edstem_course_id) DO NOTHING",
         {"cid": COURSE_ID, "eid": EDSTEM_COURSE_ID},
     )
     user = _make_user(completed={str(LESSON_ID_1): COMPLETED_AT})
@@ -225,7 +225,7 @@ async def test_unmatched_student_skipped(db):
 async def test_upsert_idempotent(db):
     """Running sync twice produces same result — no duplicate rows."""
     seed(
-        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id) DO NOTHING",
+        "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id) VALUES (:cid, :eid) ON CONFLICT (canvas_course_id, edstem_course_id) DO NOTHING",
         {"cid": COURSE_ID, "eid": EDSTEM_COURSE_ID},
     )
     client = _make_client(

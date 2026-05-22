@@ -55,7 +55,7 @@ def edstem_matrix_data():
 def _seed_mapping():
     seed(
         "INSERT INTO edstem_course_mappings (canvas_course_id, edstem_course_id, edstem_course_name) "
-        "VALUES (:cid, :eid, 'SE2026 EdStem') ON CONFLICT (canvas_course_id) DO NOTHING",
+        "VALUES (:cid, :eid, 'SE2026 EdStem') ON CONFLICT (canvas_course_id, edstem_course_id) DO NOTHING",
         {"cid": COURSE_ID, "eid": EDSTEM_COURSE_ID},
     )
 
