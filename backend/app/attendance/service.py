@@ -799,15 +799,17 @@ async def get_student_learning_overview(db: AsyncSession, user_id: int) -> dict:
 
     # ── Gradeo: exam results with topics ──
     gradeo_sql = text("""
-        SELECT gar.canvas_course_id AS course_id, c.name AS course_name, c.course_code,
+        SELECT COALESCE(gar.canvas_course_id, 0) AS course_id,
+               COALESCE(c.name, gcea.class_name, 'Gradeo') AS course_name,
+               COALESCE(c.course_code, '') AS course_code,
                gcea.exam_name, gcea.syllabus_title, gcea.topics,
                gar.status, gar.exam_mark, gar.marks_available, gar.class_average
         FROM gradeo_assignment_results gar
         JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
-        JOIN courses c ON c.id = gar.canvas_course_id
+        LEFT JOIN courses c ON c.id = gar.canvas_course_id
         WHERE gar.user_id = :user_id
-          AND gar.canvas_course_id = ANY(:enrolled)
-        ORDER BY gar.canvas_course_id, gcea.exam_name
+          AND (gar.canvas_course_id = ANY(:enrolled) OR gar.canvas_course_id IS NULL)
+        ORDER BY COALESCE(gar.canvas_course_id, 0), gcea.exam_name
     """)
     gradeo_rows = await db.execute(gradeo_sql, {"user_id": user_id, "enrolled": enrolled_ids})
     gradeo = {}
@@ -1048,15 +1050,15 @@ async def get_student_academic_breakdown(db: AsyncSession, user_id: int) -> dict
 
     # ── Gradeo: exam results (same enrolled filter) ──
     gradeo_sql = text("""
-        SELECT gar.canvas_course_id AS course_id,
+        SELECT COALESCE(gar.canvas_course_id, 0) AS course_id,
                gcea.exam_name, gcea.syllabus_title, gcea.topics,
                gar.status, gar.exam_mark, gar.marks_available, gar.class_average
         FROM gradeo_assignment_results gar
         JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
-        JOIN courses c ON c.id = gar.canvas_course_id
+        LEFT JOIN courses c ON c.id = gar.canvas_course_id
         WHERE gar.user_id = :user_id
-          AND gar.canvas_course_id = ANY(:enrolled)
-        ORDER BY gar.canvas_course_id, gcea.exam_name
+          AND (gar.canvas_course_id = ANY(:enrolled) OR gar.canvas_course_id IS NULL)
+        ORDER BY COALESCE(gar.canvas_course_id, 0), gcea.exam_name
     """)
     gradeo_rows = await db.execute(gradeo_sql, {"user_id": user_id, "enrolled": enrolled_ids})
     gradeo_by_course: dict = {}

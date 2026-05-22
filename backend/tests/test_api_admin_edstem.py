@@ -48,21 +48,21 @@ def test_create_mapping(app_client):
 
 
 def test_create_mapping_upserts(app_client):
-    """Second POST for same canvas_course_id updates, no duplicate."""
+    """Second POST for same (canvas_course_id, edstem_course_id) updates name, no duplicate."""
     app_client.post(
         "/api/admin/edstem-mappings",
         json={"canvas_course_id": COURSE_ID, "edstem_course_id": EDSTEM_COURSE_ID, "edstem_course_name": "SE 2026"},
     )
     resp = app_client.post(
         "/api/admin/edstem-mappings",
-        json={"canvas_course_id": COURSE_ID, "edstem_course_id": 99999, "edstem_course_name": "SE Updated"},
+        json={"canvas_course_id": COURSE_ID, "edstem_course_id": EDSTEM_COURSE_ID, "edstem_course_name": "SE Updated"},
     )
     assert resp.status_code == 201
 
     list_resp = app_client.get("/api/admin/edstem-mappings")
     mappings = list_resp.json()
     assert len(mappings) == 1  # no duplicate
-    assert mappings[0]["edstem_course_id"] == 99999
+    assert mappings[0]["edstem_course_name"] == "SE Updated"
 
 
 def test_delete_mapping(app_client):

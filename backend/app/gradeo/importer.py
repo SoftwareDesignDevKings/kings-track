@@ -8,7 +8,7 @@ from time import perf_counter
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.gradeo.matcher import get_course_student_ids, get_whitelisted_courses, get_whitelisted_users_by_email, unique_course_candidate
+from app.gradeo.matcher import get_course_student_ids, get_whitelisted_courses, get_whitelisted_enrollments_for_users, get_whitelisted_users_by_email, unique_course_candidate
 from app.gradeo.normalizer import aggregate_exam_rows, aggregate_exam_summaries, gradeo_assignment_key, normalize_match_key
 from app.gradeo.types import GradeoExamAggregate, GradeoImportBatch
 
@@ -765,20 +765,37 @@ async def preflight_class_import(
     if mapping_row:
         reason = None if not status["stale"] else "student_directory_stale"
         ready = not status["stale"]
+        match_mode = "class_mapping"
         mapping = {
             "canvas_course_id": mapping_row[0],
             "gradeo_class_name": mapping_row[1],
             "canvas_course_name": mapping_row[2],
             "canvas_course_code": mapping_row[3],
+            "source": "explicit",
+        }
+    elif unique_candidate:
+        # Auto-match: single whitelisted course matches class name
+        reason = None if not status["stale"] else "student_directory_stale"
+        ready = not status["stale"]
+        match_mode = "class_mapping"
+        mapping = {
+            "canvas_course_id": unique_candidate["course_id"],
+            "gradeo_class_name": gradeo_class_name,
+            "canvas_course_name": unique_candidate["name"],
+            "canvas_course_code": unique_candidate["course_code"],
+            "source": "auto_name_match",
         }
     else:
-        ready = False
-        reason = "mapping_required"
+        # No class-level mapping — will derive course per-student via email matching
+        reason = None if not status["stale"] else "student_directory_stale"
+        ready = not status["stale"]
+        match_mode = "student_email"
         mapping = None
 
     result = {
         "ready": ready,
         "reason": reason,
+        "match_mode": match_mode,
         "student_directory_last_synced_at": status["last_synced_at"],
         "student_directory_stale": status["stale"],
         "mapping": mapping,
@@ -831,12 +848,11 @@ async def import_class_batch(
         gradeo_class_id=batch.gradeo_class_id,
         gradeo_class_name=batch.gradeo_class_name,
     )
-    if not preflight["mapping"]:
-        raise ValueError("Gradeo class is not mapped to a whitelisted course")
     if preflight["student_directory_stale"]:
         raise ValueError("Gradeo student directory is stale. Refresh it from the extension first.")
 
-    canvas_course_id = preflight["mapping"]["canvas_course_id"]
+    match_mode = preflight.get("match_mode", "class_mapping")
+    canvas_course_id: int | None = preflight["mapping"]["canvas_course_id"] if preflight["mapping"] else None
     run_id = await start_import_run(
         db,
         run_type="class_import",
@@ -861,12 +877,7 @@ async def import_class_batch(
     class_syllabus_ids = await get_gradeo_class_syllabus_ids(db, batch.gradeo_class_id)
 
     try:
-        enrolled_student_ids = await get_course_student_ids(db, canvas_course_id)
-        logger.info(
-            "gradeo_import_step class_id=%s step=get_course_student_ids enrolled_count=%s",
-            batch.gradeo_class_id,
-            len(enrolled_student_ids),
-        )
+        # Load matched students from gradeo_students directory
         student_ids = [student.gradeo_student_id for student in batch.students]
         statement = text(
             """
@@ -878,11 +889,33 @@ async def import_class_batch(
         result = await db.execute(statement, {"student_ids": student_ids or ["__none__"]})
         matched_students = {row[0]: row[1] for row in result.fetchall()}
         logger.info(
-            "gradeo_import_step class_id=%s step=load_gradeo_student_matches requested_students=%s matched_directory_students=%s",
+            "gradeo_import_step class_id=%s step=load_gradeo_student_matches requested_students=%s matched_directory_students=%s match_mode=%s",
             batch.gradeo_class_id,
             len(student_ids),
             len(matched_students),
+            match_mode,
         )
+
+        # Resolve enrollment context based on match mode
+        enrolled_student_ids: set[int] | None = None
+        per_student_courses: dict[int, set[int]] | None = None
+        if match_mode == "class_mapping" and canvas_course_id is not None:
+            enrolled_student_ids = await get_course_student_ids(db, canvas_course_id)
+            logger.info(
+                "gradeo_import_step class_id=%s step=get_course_student_ids enrolled_count=%s",
+                batch.gradeo_class_id,
+                len(enrolled_student_ids),
+            )
+        else:
+            # Email mode: bulk-load whitelisted enrollments for matched users
+            matched_user_ids = [uid for uid in matched_students.values() if uid]
+            per_student_courses = await get_whitelisted_enrollments_for_users(db, matched_user_ids)
+            logger.info(
+                "gradeo_import_step class_id=%s step=get_whitelisted_enrollments matched_users=%s users_with_enrollments=%s",
+                batch.gradeo_class_id,
+                len(matched_user_ids),
+                len(per_student_courses),
+            )
 
         matched_student_updates: list[dict] = []
         assignment_templates: dict[str, GradeoExamAggregate] = {}
@@ -890,9 +923,24 @@ async def import_class_batch(
 
         for student in batch.students:
             matched_user_id = matched_students.get(student.gradeo_student_id)
-            if not matched_user_id or matched_user_id not in enrolled_student_ids:
+            if not matched_user_id:
                 unmatched_count += 1
                 continue
+
+            if match_mode == "class_mapping" and enrolled_student_ids is not None:
+                # Traditional: student must be enrolled in the mapped course
+                if matched_user_id not in enrolled_student_ids:
+                    unmatched_count += 1
+                    continue
+                student_canvas_course_id = canvas_course_id
+            else:
+                # Email mode: accept if student has any whitelisted enrollment
+                student_enrollments = per_student_courses.get(matched_user_id, set()) if per_student_courses else set()
+                if not student_enrollments:
+                    unmatched_count += 1
+                    continue
+                # Single enrollment → use it; multiple → NULL (can't disambiguate)
+                student_canvas_course_id = next(iter(student_enrollments)) if len(student_enrollments) == 1 else None
 
             matched_count += 1
             matched_student_updates.append(
@@ -942,6 +990,7 @@ async def import_class_batch(
                         "student": student,
                         "matched_user_id": matched_user_id,
                         "aggregate": aggregate,
+                        "canvas_course_id": student_canvas_course_id,
                     }
                 )
 
@@ -990,7 +1039,7 @@ async def import_class_batch(
                 {
                     "gradeo_class_exam_assignment_id": assignment_id,
                     "gradeo_student_id": student.gradeo_student_id,
-                    "canvas_course_id": canvas_course_id,
+                    "canvas_course_id": item["canvas_course_id"],
                     "user_id": matched_user_id,
                     "student_name": student.student_name,
                     "status": aggregate.status,
@@ -1166,6 +1215,7 @@ async def import_class_batch(
 
     return {
         "run_id": run_id,
+        "match_mode": match_mode,
         "canvas_course_id": canvas_course_id,
         "processed_students": processed_students,
         "matched_students": matched_count,
