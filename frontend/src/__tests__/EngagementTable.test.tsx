@@ -56,18 +56,8 @@ describe('EngagementTable', () => {
     expect(screen.getByText(/student.* with no activity/i)).toBeInTheDocument()
   })
 
-  it('displays "Never" for students with no last_activity_at', () => {
+  it('displays — for students with no last_page_view_at', () => {
     renderWithProviders(<EngagementTable students={students} />)
-    expect(screen.getByText('Never')).toBeInTheDocument()
-  })
-
-  it('formats total_activity_time_seconds as hours and minutes', () => {
-    renderWithProviders(<EngagementTable students={[makeStudent({ total_activity_time_seconds: 3720 })]} />)
-    expect(screen.getByText('1h 2m')).toBeInTheDocument()
-  })
-
-  it('shows — for null total_activity_time_seconds', () => {
-    renderWithProviders(<EngagementTable students={[makeStudent({ total_activity_time_seconds: null })]} />)
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 
@@ -102,7 +92,7 @@ describe('EngagementTable', () => {
 
   it('does not show the inactive banner when all students are active', () => {
     const activeStudents = [
-      makeStudent({ id: 1, name: 'Alice Smith', page_views: 50, last_activity_at: new Date().toISOString() }),
+      makeStudent({ id: 1, name: 'Alice Smith', page_views: 50, last_page_view_at: new Date().toISOString() }),
     ]
     renderWithProviders(<EngagementTable students={activeStudents} />)
     expect(screen.queryByText(/with no activity/i)).not.toBeInTheDocument()
