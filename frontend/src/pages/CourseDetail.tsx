@@ -331,65 +331,28 @@ export default function CourseDetail() {
                   Failed to load Gradeo topic bands. Make sure the class has been imported from the extension.
                 </div>
               )}
-              {!gradeoLoading && !gradeoTopicBandsLoading && gradeoMapped && (
+              {!gradeoTopicBandsLoading && gradeoTopicBands?.mapped && (
                 <>
-                  <div className="mb-4 inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                  <div className="mb-3 flex shrink-0 justify-end">
                     <button
                       type="button"
-                      onClick={() => setCourseView('gradeo', 'exam_results')}
-                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                        activeGradeoSubview === 'exam_results'
-                          ? 'bg-brand-50 text-brand-700 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-700'
-                      }`}
+                      onClick={handleExportGradeoReport}
+                      disabled={downloadingGradeo}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Results
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCourseView('gradeo', 'topic_bands')}
-                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                        activeGradeoSubview === 'topic_bands'
-                          ? 'bg-brand-50 text-brand-700 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-700'
-                      }`}
-                    >
-                      Topic Bands
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                      </svg>
+                      {downloadingGradeo ? 'Downloading\u2026' : 'Export CSV'}
                     </button>
                   </div>
-
-                  {activeGradeoSubview === 'exam_results' && gradeoReport?.mapped && (
-                    <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
-                  )}
-                  {activeGradeoSubview === 'exam_results' && !gradeoReport?.mapped && (
-                    <div className="text-center py-16 text-slate-400 text-sm">
-                      No Gradeo exams have been imported for this course yet.
-                    </div>
-                  )}
-                  {activeGradeoSubview === 'topic_bands' && gradeoTopicBands?.mapped && (
-                    <>
-                      <div className="mb-3 flex shrink-0 justify-end">
-                        <button
-                          type="button"
-                          onClick={handleExportGradeoReport}
-                          disabled={downloadingGradeo}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
-                          </svg>
-                          {downloadingGradeo ? 'Downloading\u2026' : 'Export CSV'}
-                        </button>
-                      </div>
-                      <GradeoTopicBandsTable topicBands={gradeoTopicBands} />
-                    </>
-                  )}
-                  {activeGradeoSubview === 'topic_bands' && !gradeoTopicBands?.mapped && (
-                    <div className="text-center py-16 text-slate-400 text-sm">
-                      No Gradeo topic bands have been imported for this course yet.
-                    </div>
-                  )}
+                  <GradeoTopicBandsTable topicBands={gradeoTopicBands} />
                 </>
+              )}
+              {!gradeoTopicBandsLoading && !gradeoTopicBandsError && !gradeoTopicBands?.mapped && (
+                <div className="text-center py-16 text-slate-400 text-sm">
+                  No Gradeo topic bands have been imported for this course yet.
+                </div>
               )}
             </div>
           )}
