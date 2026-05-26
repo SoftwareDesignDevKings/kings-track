@@ -174,17 +174,6 @@ export default function Students() {
                 Concerns
               </button>
             </div>
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              disabled={downloading}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
-              </svg>
-              {downloading ? 'Downloading\u2026' : 'Export CSV'}
-            </button>
           </div>
         )}
 
@@ -236,6 +225,24 @@ export default function Students() {
                     <SortHeader label="Avg Score" sortKey="avg_score" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
                     <SortHeader label="Attendance" sortKey="attendance_rate" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
                     <th className="py-2.5 px-3 text-left text-xs font-medium uppercase tracking-wide text-slate-400">Status</th>
+                    <th className="py-2.5 px-3 w-10">
+                      <button
+                        type="button"
+                        onClick={handleExportCsv}
+                        disabled={downloading}
+                        className={`inline-flex h-8 w-8 items-center justify-center transition-colors ${
+                          downloading
+                            ? 'text-blue-600 animate-pulse'
+                            : 'text-slate-400 hover:text-slate-700'
+                        }`}
+                        aria-label="Export CSV"
+                        title="Export CSV"
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5m0 0 5-5m-5 5V3" />
+                        </svg>
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -298,6 +305,7 @@ function StudentRowComponent({ student }: { student: StudentListItem }) {
           <span className="text-xs text-slate-300">-</span>
         )}
       </td>
+      <td />
     </tr>
   )
 }
