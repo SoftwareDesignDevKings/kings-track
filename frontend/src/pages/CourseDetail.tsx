@@ -82,10 +82,12 @@ export default function CourseDetail() {
   const [downloadingGradeo, setDownloadingGradeo] = useState(false)
   const [downloadingClassList, setDownloadingClassList] = useState(false)
 
+  const courseCode = (matrix?.course_code ?? '').replace(/\s+/g, '-') || String(id)
+
   async function handleExportClassList() {
     setDownloadingClassList(true)
     try {
-      await downloadCsv(`/reports/courses/${id}/class-list`, 'class-list.csv')
+      await downloadCsv(`/reports/courses/${id}/class-list`, `${courseCode}-class-list.csv`)
     } catch {
       // silent fail
     } finally {
@@ -96,7 +98,7 @@ export default function CourseDetail() {
   async function handleExportClassReport() {
     setDownloadingClass(true)
     try {
-      await downloadCsv(`/reports/courses/${id}/class-report`, 'class-report.csv')
+      await downloadCsv(`/reports/courses/${id}/class-report`, `${courseCode}-class-report.csv`)
     } catch {
       // silent fail
     } finally {
@@ -107,7 +109,7 @@ export default function CourseDetail() {
   async function handleExportGradeoReport() {
     setDownloadingGradeo(true)
     try {
-      await downloadCsv(`/reports/courses/${id}/gradeo-report`, 'gradeo-report.csv')
+      await downloadCsv(`/reports/courses/${id}/gradeo-report`, `${courseCode}-gradeo-report.csv`)
     } catch {
       // silent fail
     } finally {
