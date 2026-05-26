@@ -3,7 +3,7 @@ Per-entity sync tasks. Each function fetches data from Canvas and upserts
 it into the local database page-by-page to keep memory usage low.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as date_type
 from typing import Any
 
 from sqlalchemy import text
@@ -104,13 +104,14 @@ async def sync_enrollments(canvas: CanvasClient, db: AsyncSession, course_id: in
         await db.execute(
             text("""
                 INSERT INTO enrollments (id, course_id, user_id, role, enrollment_state, last_activity_at,
-                    current_score, current_grade, final_score, final_grade)
+                    total_activity_time, current_score, current_grade, final_score, final_grade)
                 VALUES (:id, :course_id, :user_id, :role, :enrollment_state, :last_activity_at,
-                    :current_score, :current_grade, :final_score, :final_grade)
+                    :total_activity_time, :current_score, :current_grade, :final_score, :final_grade)
                 ON CONFLICT (course_id, user_id, role) DO UPDATE SET
                     id = EXCLUDED.id,
                     enrollment_state = EXCLUDED.enrollment_state,
                     last_activity_at = EXCLUDED.last_activity_at,
+                    total_activity_time = EXCLUDED.total_activity_time,
                     current_score = EXCLUDED.current_score,
                     current_grade = EXCLUDED.current_grade,
                     final_score = EXCLUDED.final_score,
@@ -123,6 +124,7 @@ async def sync_enrollments(canvas: CanvasClient, db: AsyncSession, course_id: in
                 "role": enrollment.get("type"),
                 "enrollment_state": enrollment.get("enrollment_state"),
                 "last_activity_at": _parse_dt(enrollment.get("last_activity_at")),
+                "total_activity_time": enrollment.get("total_activity_time"),
                 "current_score": grades.get("current_score"),
                 "current_grade": grades.get("current_grade"),
                 "final_score": grades.get("final_score"),
@@ -350,3 +352,161 @@ async def compute_metrics(db: AsyncSession, course_id: int) -> int:
 
     await db.commit()
     return count
+
+
+async def sync_canvas_engagement(
+    canvas: CanvasClient,
+    db: AsyncSession,
+    course_id: int,
+) -> int:
+    """
+    Fetch and upsert per-student engagement summaries and course-wide daily activity.
+    Overwrites the previous snapshot — no historical retention.
+    """
+    now = _now()
+    count = 0
+
+    # Only insert for users we already have in both the users and enrollments tables.
+    # student_summaries can include concluded/inactive students not in our users table.
+    result = await db.execute(
+        text("""
+            SELECT e.user_id FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
+        """),
+        {"course_id": course_id},
+    )
+    enrolled_user_ids = {row[0] for row in result}
+
+    # --- Per-student summaries ---
+    async for summary in canvas.list_student_summaries(course_id):
+        user_id = summary.get("id")
+        if not user_id or user_id not in enrolled_user_ids:
+            continue
+
+        tardiness = summary.get("tardiness_breakdown", {}) or {}
+
+        await db.execute(
+            text("""
+                INSERT INTO canvas_engagement (
+                    course_id, user_id,
+                    page_views, page_views_level, max_page_views,
+                    participations, participations_level, max_participations,
+                    tardiness_on_time, tardiness_late, tardiness_missing,
+                    synced_at
+                )
+                VALUES (
+                    :course_id, :user_id,
+                    :page_views, :page_views_level, :max_page_views,
+                    :participations, :participations_level, :max_participations,
+                    :tardiness_on_time, :tardiness_late, :tardiness_missing,
+                    :synced_at
+                )
+                ON CONFLICT (course_id, user_id) DO UPDATE SET
+                    page_views = EXCLUDED.page_views,
+                    page_views_level = EXCLUDED.page_views_level,
+                    max_page_views = EXCLUDED.max_page_views,
+                    participations = EXCLUDED.participations,
+                    participations_level = EXCLUDED.participations_level,
+                    max_participations = EXCLUDED.max_participations,
+                    tardiness_on_time = EXCLUDED.tardiness_on_time,
+                    tardiness_late = EXCLUDED.tardiness_late,
+                    tardiness_missing = EXCLUDED.tardiness_missing,
+                    synced_at = EXCLUDED.synced_at
+            """),
+            {
+                "course_id": course_id,
+                "user_id": user_id,
+                "page_views": summary.get("page_views"),
+                "page_views_level": _to_int(summary.get("page_views_level")),
+                "max_page_views": summary.get("max_page_views"),
+                "participations": summary.get("participations"),
+                "participations_level": _to_int(summary.get("participations_level")),
+                "max_participations": summary.get("max_participations"),
+                "tardiness_on_time": _to_int(tardiness.get("on_time")),
+                "tardiness_late": _to_int(tardiness.get("late")),
+                "tardiness_missing": _to_int(tardiness.get("missing")),
+                "synced_at": now,
+            },
+        )
+        count += 1
+        if count % 50 == 0:
+            await db.commit()
+
+    await db.commit()
+
+    # --- Per-student activity timestamps (last page view, last participation) ---
+    for user_id in enrolled_user_ids:
+        try:
+            activity = await canvas.get_student_activity(course_id, user_id)
+        except Exception:
+            continue
+
+        last_page_view_at = None
+        last_participation_at = None
+
+        page_views = activity.get("page_views") if isinstance(activity, dict) else None
+        if isinstance(page_views, dict) and page_views:
+            last_page_view_at = _parse_dt(max(page_views.keys()))
+
+        participations_list = activity.get("participations") if isinstance(activity, dict) else None
+        if isinstance(participations_list, list) and participations_list:
+            last_ts = max(p.get("created_at", "") for p in participations_list if p.get("created_at"))
+            if last_ts:
+                last_participation_at = _parse_dt(last_ts)
+
+        await db.execute(
+            text("""
+                UPDATE canvas_engagement
+                SET last_page_view_at = :last_page_view_at,
+                    last_participation_at = :last_participation_at
+                WHERE course_id = :course_id AND user_id = :user_id
+            """),
+            {
+                "course_id": course_id,
+                "user_id": user_id,
+                "last_page_view_at": last_page_view_at,
+                "last_participation_at": last_participation_at,
+            },
+        )
+
+    await db.commit()
+
+    # --- Course-wide daily activity timeseries ---
+    daily_rows = await canvas.get_course_activity(course_id)
+    for row in daily_rows:
+        raw_date = row.get("date")
+        if not raw_date:
+            continue
+        try:
+            parsed_date = date_type.fromisoformat(str(raw_date))
+        except (ValueError, TypeError):
+            continue
+        await db.execute(
+            text("""
+                INSERT INTO canvas_course_activity (course_id, date, views, participations)
+                VALUES (:course_id, :date, :views, :participations)
+                ON CONFLICT (course_id, date) DO UPDATE SET
+                    views = EXCLUDED.views,
+                    participations = EXCLUDED.participations
+            """),
+            {
+                "course_id": course_id,
+                "date": parsed_date,
+                "views": row.get("views"),
+                "participations": row.get("participations"),
+            },
+        )
+
+    await db.commit()
+    return count
+
+
+def _to_int(value: Any) -> int | None:
+    """Coerce Canvas page_views_level / participations_level (may be str or int) to int."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None

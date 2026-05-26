@@ -201,6 +201,103 @@ async def get_course(course_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/{course_id}/engagement")
+async def get_course_engagement(course_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Return per-student Canvas engagement data (page views, participations, total activity time,
+    last seen) and a course-wide daily activity timeseries for the Engagement tab.
+    """
+    course_result = await db.execute(
+        text("SELECT id, name FROM courses WHERE id = :id"),
+        {"id": course_id},
+    )
+    course_row = course_result.fetchone()
+    if not course_row:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Per-student rows: join engagement snapshot with enrollment (for last_activity_at,
+    # total_activity_time) and users (for display name, sorted name).
+    student_result = await db.execute(
+        text("""
+            SELECT
+                u.id,
+                u.name,
+                u.sortable_name,
+                ce.page_views,
+                ce.page_views_level,
+                ce.max_page_views,
+                ce.participations,
+                ce.participations_level,
+                ce.max_participations,
+                ce.tardiness_on_time,
+                ce.tardiness_late,
+                ce.tardiness_missing,
+                ce.synced_at,
+                e.total_activity_time,
+                e.last_activity_at,
+                ce.last_page_view_at,
+                ce.last_participation_at
+            FROM canvas_engagement ce
+            JOIN users u ON u.id = ce.user_id
+            JOIN enrollments e ON e.course_id = ce.course_id AND e.user_id = ce.user_id
+                AND e.role = 'StudentEnrollment'
+            WHERE ce.course_id = :course_id
+            ORDER BY u.sortable_name
+        """),
+        {"course_id": course_id},
+    )
+    student_rows = student_result.fetchall()
+
+    # Course-wide daily activity timeseries
+    activity_result = await db.execute(
+        text("""
+            SELECT date, views, participations
+            FROM canvas_course_activity
+            WHERE course_id = :course_id
+            ORDER BY date
+        """),
+        {"course_id": course_id},
+    )
+    activity_rows = activity_result.fetchall()
+
+    synced_at = student_rows[0][12] if student_rows else None
+
+    return {
+        "course_id": course_row[0],
+        "course_name": course_row[1],
+        "synced_at": _to_iso(synced_at),
+        "students": [
+            {
+                "id": row[0],
+                "name": row[1],
+                "sortable_name": row[2],
+                "page_views": row[3],
+                "page_views_level": row[4],
+                "max_page_views": row[5],
+                "participations": row[6],
+                "participations_level": row[7],
+                "max_participations": row[8],
+                "tardiness_on_time": row[9],
+                "tardiness_late": row[10],
+                "tardiness_missing": row[11],
+                "total_activity_time_seconds": row[13],
+                "last_activity_at": _to_iso(row[14]),
+                "last_page_view_at": _to_iso(row[15]),
+                "last_participation_at": _to_iso(row[16]),
+            }
+            for row in student_rows
+        ],
+        "course_activity": [
+            {
+                "date": str(row[0]),
+                "views": row[1],
+                "participations": row[2],
+            }
+            for row in activity_rows
+        ],
+    }
+
+
 @router.get("/{course_id}/matrix")
 async def get_course_matrix(course_id: int, db: AsyncSession = Depends(get_db)):
     """

@@ -20,6 +20,7 @@ from app.sync.tasks import (
     sync_enrollments,
     sync_assignments,
     sync_submissions,
+    sync_canvas_engagement,
     compute_metrics,
 )
 from app.sync.edstem_tasks import sync_edstem_lessons
@@ -140,7 +141,7 @@ class SyncEngine:
     def _set_course_plan(self, course_ids: list[int]):
         if self._progress is None:
             return
-        per_course_steps = 5 if self._progress["includes_edstem"] else 4
+        per_course_steps = 6 if self._progress["includes_edstem"] else 5
         self._progress["pending_course_ids"] = list(course_ids)
         self._progress["completed_course_ids"] = []
         self._progress["total_courses"] = len(course_ids)
@@ -235,6 +236,19 @@ class SyncEngine:
             except Exception as exc:
                 logger.error("  Course %d submissions failed: %s", course_id, exc)
                 course_results["submissions_error"] = str(exc)
+                await db.rollback()
+                self._mark_step_completed()
+
+            # Canvas engagement (page views, participations, course activity)
+            try:
+                self._mark_step_started("canvas_engagement", course_id)
+                count = await sync_canvas_engagement(canvas, db, course_id)
+                course_results["canvas_engagement"] = count
+                self._mark_step_completed()
+                logger.info("  Course %d: %d engagement records", course_id, count)
+            except Exception as exc:
+                logger.error("  Course %d canvas_engagement failed: %s", course_id, exc)
+                course_results["canvas_engagement_error"] = str(exc)
                 await db.rollback()
                 self._mark_step_completed()
 

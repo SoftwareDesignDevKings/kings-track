@@ -81,6 +81,7 @@ async def test_full_sync_writes_sync_log_on_completion():
          patch("app.sync.engine.sync_enrollments", new_callable=AsyncMock, return_value=0), \
          patch("app.sync.engine.sync_assignments", new_callable=AsyncMock, return_value=0), \
          patch("app.sync.engine.sync_submissions", new_callable=AsyncMock, return_value=0), \
+         patch("app.sync.engine.sync_canvas_engagement", new_callable=AsyncMock, return_value=0), \
          patch("app.sync.engine.compute_metrics", new_callable=AsyncMock, return_value=0), \
          patch("app.sync.engine.AsyncSessionLocal") as mock_session_factory:
 

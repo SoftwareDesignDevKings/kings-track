@@ -11,10 +11,12 @@ import {
   getCanvasDueNowCount,
   prepareCanvasActivityView,
 } from '../components/activityTableModel'
-import { useCourseMatrix, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
+import { useCourseMatrix, useCourseEngagement, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
+import EngagementTable from '../components/EngagementTable'
+import EngagementTimelineChart from '../components/charts/EngagementTimelineChart'
 import { downloadCsv } from '../lib/downloadCsv'
 
-type TabId = 'activities' | 'gradeo' | 'topic_bands' | 'edstem'
+type TabId = 'activities' | 'engagement' | 'gradeo' | 'topic_bands' | 'edstem'
 
 interface Tab {
   id: TabId
@@ -23,13 +25,14 @@ interface Tab {
 
 const TABS: Tab[] = [
   { id: 'activities', label: 'Canvas' },
+  { id: 'edstem', label: 'EdStem' },
   { id: 'gradeo', label: 'Gradeo' },
   { id: 'topic_bands', label: 'Topic Bands' },
-  { id: 'edstem', label: 'EdStem' },
+  { id: 'engagement', label: 'Engagement' },
 ]
 
 function getTabFromSearch(value: string | null): TabId {
-  if (value === 'gradeo' || value === 'edstem') return value
+  if (value === 'gradeo' || value === 'edstem' || value === 'engagement') return value
   if (value === 'topic-bands' || value === 'topic_bands') return 'topic_bands'
   return 'activities'
 }
@@ -47,6 +50,7 @@ export default function CourseDetail() {
   const activeTab = getTabFromSearch(searchParams.get('tab'))
 
   const { data: matrix, isLoading, error } = useCourseMatrix(id)
+  const { data: engagement, isLoading: engagementLoading, error: engagementError } = useCourseEngagement(id)
   const { data: edStemMatrix, isLoading: edStemLoading, error: edStemError } = useEdStemMatrix(id)
   const { data: gradeoReport, isLoading: gradeoLoading, error: gradeoError } = useGradeoReport(id)
   const {
@@ -77,7 +81,7 @@ export default function CourseDetail() {
     if (tab.id === 'edstem') return edStemMatrix?.mapped
     return true
   }), [edStemMatrix?.mapped, gradeoMapped])
-  const tabAvailabilityLoaded = !edStemLoading && !gradeoLoading && !gradeoTopicBandsLoading
+  const tabAvailabilityLoaded = !edStemLoading && !engagementLoading && !gradeoLoading && !gradeoTopicBandsLoading
   const [downloadingClass, setDownloadingClass] = useState(false)
   const [downloadingGradeo, setDownloadingGradeo] = useState(false)
   const [downloadingClassList, setDownloadingClassList] = useState(false)
@@ -254,6 +258,42 @@ export default function CourseDetail() {
               )}
               {matrix && (
                 <ActivityTable matrix={matrix} onExport={handleExportClassReport} exportLoading={downloadingClass} />
+              )}
+            </div>
+          )}
+
+          {activeTab === 'engagement' && (
+            <div className="flex h-full min-h-0 min-w-0 flex-col gap-6 overflow-y-auto">
+              {engagementLoading && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
+                  <div className="h-10 bg-slate-100 border-b border-slate-200" />
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <div key={i} className="h-10 border-b border-slate-100 bg-white" />
+                  ))}
+                </div>
+              )}
+              {engagementError && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
+                  Failed to load engagement data. Make sure the course has been synced.
+                </div>
+              )}
+              {!engagementLoading && !engagementError && (!engagement || engagement.students.length === 0) && (
+                <div className="text-center py-16 text-slate-400 text-sm">
+                  {engagement?.synced_at
+                    ? 'No students with engagement data found for this course.'
+                    : 'No engagement data yet — trigger a sync to pull Canvas analytics.'}
+                </div>
+              )}
+              {engagement && engagement.students.length > 0 && (
+                <>
+                  {engagement.course_activity.length > 0 && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-5">
+                      <h3 className="mb-3 text-sm font-semibold text-slate-700">Course activity over time</h3>
+                      <EngagementTimelineChart data={engagement.course_activity} />
+                    </div>
+                  )}
+                  <EngagementTable students={engagement.students} />
+                </>
               )}
             </div>
           )}

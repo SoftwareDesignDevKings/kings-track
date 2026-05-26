@@ -7,6 +7,7 @@ import type { CourseMatrix } from '../types'
 
 vi.mock('../services/api', () => ({
   useCourseMatrix: vi.fn(),
+  useCourseEngagement: vi.fn(),
   useEdStemMatrix: vi.fn(),
   useGradeoReport: vi.fn(),
   useGradeoTopicBands: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useParams: () => ({ courseId: '9001' }) }
 })
 
-import { useCourseMatrix, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
+import { useCourseMatrix, useCourseEngagement, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
 
 const mockMatrix: CourseMatrix = {
   course_id: 9001,
@@ -53,6 +54,7 @@ const defaultEdStemMatrix = { mapped: false }
 
 describe('CourseDetail', () => {
   beforeEach(() => {
+    vi.mocked(useCourseEngagement).mockReturnValue({ isLoading: false, error: null, data: undefined } as any)
     vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: false, error: null, data: defaultEdStemMatrix } as any)
     vi.mocked(useGradeoReport).mockReturnValue({ isLoading: false, error: null, data: { mapped: false } } as any)
     vi.mocked(useGradeoTopicBands).mockReturnValue({ isLoading: false, error: null, data: { mapped: false } } as any)
@@ -148,11 +150,79 @@ describe('CourseDetail', () => {
     ).toEqual(['Canvas', 'Gradeo', 'EdStem'])
   })
 
-  it('does not render unfinished tabs', () => {
+  it('does not render placeholder tabs that have not been built', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />)
-    expect(screen.queryByRole('button', { name: /Engagement/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /At-Risk/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the Engagement tab when loaded', () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    renderWithProviders(<CourseDetail />)
+    expect(screen.getByRole('button', { name: /^Engagement$/i })).toBeInTheDocument()
+  })
+
+  it('renders EngagementTable when Engagement tab is active and data is loaded', async () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useCourseEngagement).mockReturnValue({
+      isLoading: false,
+      error: null,
+      data: {
+        course_id: 9001,
+        course_name: 'Software Engineering 2026',
+        synced_at: '2026-05-26T10:00:00Z',
+        students: [
+          {
+            id: 1,
+            name: 'Alice Smith',
+            sortable_name: 'Smith, Alice',
+            page_views: 120,
+            page_views_level: 2,
+            max_page_views: 200,
+            participations: 3,
+            participations_level: 1,
+            max_participations: 10,
+            tardiness_on_time: 4,
+            tardiness_late: 1,
+            tardiness_missing: 0,
+            total_activity_time_seconds: 3720,
+            last_activity_at: '2026-05-24T08:00:00Z',
+            last_page_view_at: '2026-05-25T10:00:00Z',
+            last_participation_at: '2026-05-24T08:00:00Z',
+          },
+        ],
+        course_activity: [],
+      },
+    } as any)
+
+    const user = userEvent.setup()
+    renderWithProviders(<CourseDetail />)
+    await user.click(screen.getByRole('button', { name: /^Engagement$/i }))
+    expect(screen.getAllByText('Alice Smith').length).toBeGreaterThan(0)
+  })
+
+  it('shows empty state on Engagement tab when no data has been synced', async () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useCourseEngagement).mockReturnValue({ isLoading: false, error: null, data: undefined } as any)
+
+    const user = userEvent.setup()
+    renderWithProviders(<CourseDetail />)
+    await user.click(screen.getByRole('button', { name: /^Engagement$/i }))
+    expect(screen.getByText(/trigger a sync/i)).toBeInTheDocument()
+  })
+
+  it('shows empty state when API returns students: [] and synced_at: null', async () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useCourseEngagement).mockReturnValue({
+      isLoading: false,
+      error: null,
+      data: { course_id: 9001, course_name: 'Test', synced_at: null, students: [], course_activity: [] },
+    } as any)
+
+    const user = userEvent.setup()
+    renderWithProviders(<CourseDetail />)
+    await user.click(screen.getByRole('button', { name: /^Engagement$/i }))
+    expect(screen.getByText(/trigger a sync/i)).toBeInTheDocument()
   })
 
   it('does not render the EdStem tab when the course is not linked', () => {

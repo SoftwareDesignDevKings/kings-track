@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, String, Float, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import BigInteger, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 
@@ -15,6 +15,7 @@ class Enrollment(Base):
     role: Mapped[str | None] = mapped_column(String)  # StudentEnrollment, TeacherEnrollment
     enrollment_state: Mapped[str | None] = mapped_column(String)  # active, invited, completed
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    total_activity_time: Mapped[int | None] = mapped_column(Integer)  # seconds, from Canvas
     current_score: Mapped[float | None] = mapped_column(Float)
     current_grade: Mapped[str | None] = mapped_column(String)
     final_score: Mapped[float | None] = mapped_column(Float)
