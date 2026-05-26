@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import Header from '../components/Header'
 import { useStudents } from '../services/api'
+import { downloadCsv } from '../lib/downloadCsv'
 import type { StudentListItem } from '../types'
 
 type SortKey = 'name' | 'course_count' | 'avg_completion_rate' | 'avg_on_time_rate' | 'avg_score' | 'attendance_rate'
@@ -63,6 +64,7 @@ export default function Students() {
   const [concernFilter, setConcernFilter] = useState<'all' | 'concern'>('all')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [downloading, setDownloading] = useState(false)
 
   const courseOptions = useMemo(() => {
     if (!students) return []
@@ -95,6 +97,17 @@ export default function Students() {
         return (av < bv ? -1 : av > bv ? 1 : 0) * dir
       })
   }, [students, search, courseFilter, concernFilter, sortKey, sortDir])
+
+  async function handleExportCsv() {
+    setDownloading(true)
+    try {
+      await downloadCsv('/reports/student-progress', 'student-progress-report.csv')
+    } catch {
+      // silent fail — user sees the button reset
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -161,6 +174,17 @@ export default function Students() {
                 Concerns
               </button>
             </div>
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={downloading}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+              </svg>
+              {downloading ? 'Downloading\u2026' : 'Export CSV'}
+            </button>
           </div>
         )}
 
