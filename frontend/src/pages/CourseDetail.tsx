@@ -90,6 +90,18 @@ export default function CourseDetail() {
   const tabAvailabilityLoaded = !edStemLoading && !gradeoLoading && !gradeoTopicBandsLoading
   const [downloadingClass, setDownloadingClass] = useState(false)
   const [downloadingGradeo, setDownloadingGradeo] = useState(false)
+  const [downloadingClassList, setDownloadingClassList] = useState(false)
+
+  async function handleExportClassList() {
+    setDownloadingClassList(true)
+    try {
+      await downloadCsv(`/reports/courses/${id}/class-list`, 'class-list.csv')
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingClassList(false)
+    }
+  }
 
   async function handleExportClassReport() {
     setDownloadingClass(true)
@@ -181,21 +193,34 @@ export default function CourseDetail() {
           </div>
 
           {matrix && (
-            <div className="grid grid-cols-3 gap-3 text-sm shrink-0 sm:flex sm:items-center sm:gap-5">
-              <div className="text-center">
-                <p className="text-lg font-bold text-slate-900">{totalStudents}</p>
-                <p className="text-xs text-slate-400">Students</p>
+            <div className="flex shrink-0 items-center gap-5">
+              <div className="grid grid-cols-3 gap-3 text-sm sm:flex sm:items-center sm:gap-5">
+                <div className="text-center">
+                  <p className="text-lg font-bold text-slate-900">{totalStudents}</p>
+                  <p className="text-xs text-slate-400">Students</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-slate-900">{totalAssignments}</p>
+                  <p className="text-xs text-slate-400">Activities</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-slate-900">
+                    {avgCompletion !== null ? `${Math.round(avgCompletion * 100)}%` : '-'}
+                  </p>
+                  <p className="text-xs text-slate-400">Avg completion</p>
+                </div>
               </div>
-              <div className="text-center">
-                <p className="text-lg font-bold text-slate-900">{totalAssignments}</p>
-                <p className="text-xs text-slate-400">Activities</p>
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold text-slate-900">
-                  {avgCompletion !== null ? `${Math.round(avgCompletion * 100)}%` : '-'}
-                </p>
-                <p className="text-xs text-slate-400">Avg completion</p>
-              </div>
+              <button
+                type="button"
+                onClick={handleExportClassList}
+                disabled={downloadingClassList}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                </svg>
+                {downloadingClassList ? 'Downloading\u2026' : 'Class List'}
+              </button>
             </div>
           )}
         </div>

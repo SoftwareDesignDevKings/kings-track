@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import text
+
 from app.api.deps import require_auth
 from app.db import get_db
 
@@ -169,7 +171,6 @@ async def export_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db
         rows.append(row)
 
     code = str(course_id)
-    from sqlalchemy import text
     result = await db.execute(
         text("SELECT course_code FROM courses WHERE id = :id"),
         {"id": course_id},
@@ -179,4 +180,46 @@ async def export_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db
         code = course_row[0].replace(" ", "-")
 
     filename = f"course-{code}-gradeo-report-{date.today().isoformat()}.csv"
+    return _csv_response(rows, headers, filename)
+
+
+# ---------------------------------------------------------------------------
+# 4. Class List
+# ---------------------------------------------------------------------------
+
+@router.get("/courses/{course_id}/class-list")
+async def export_class_list(course_id: int, db: AsyncSession = Depends(get_db)):
+    """Export the enrolled student roster for a course as CSV."""
+    course_result = await db.execute(
+        text("SELECT id, name, course_code FROM courses WHERE id = :id"),
+        {"id": course_id},
+    )
+    course_row = course_result.fetchone()
+    if not course_row:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    students_result = await db.execute(
+        text("""
+            SELECT u.name, u.sortable_name, u.email
+            FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
+            ORDER BY u.sortable_name IS NULL, u.sortable_name
+        """),
+        {"course_id": course_id},
+    )
+
+    headers = ["First Name", "Last Name", "Email"]
+    rows = []
+    for name, sortable_name, email in students_result.fetchall():
+        if sortable_name and ", " in sortable_name:
+            last, first = sortable_name.split(", ", 1)
+        else:
+            parts = (name or "").split(" ", 1)
+            first = parts[0]
+            last = parts[1] if len(parts) > 1 else ""
+        rows.append([first, last, email or ""])
+
+    code = (course_row[2] or str(course_id)).replace(" ", "-")
+    filename = f"course-{code}-class-list-{date.today().isoformat()}.csv"
     return _csv_response(rows, headers, filename)
