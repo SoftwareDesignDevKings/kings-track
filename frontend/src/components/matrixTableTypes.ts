@@ -93,4 +93,6 @@ export interface MatrixTableModel {
   legends: MatrixLegendItem[]
   hiddenFooter?: ReactNode
   className?: string
+  onExport?: () => void
+  exportLoading?: boolean
 }

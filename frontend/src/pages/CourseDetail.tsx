@@ -251,22 +251,7 @@ export default function CourseDetail() {
                 </div>
               )}
               {matrix && (
-                <>
-                  <div className="mb-3 flex shrink-0 justify-end">
-                    <button
-                      type="button"
-                      onClick={handleExportClassReport}
-                      disabled={downloadingClass}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
-                      </svg>
-                      {downloadingClass ? 'Downloading\u2026' : 'Export CSV'}
-                    </button>
-                  </div>
-                  <ActivityTable matrix={matrix} />
-                </>
+                <ActivityTable matrix={matrix} onExport={handleExportClassReport} exportLoading={downloadingClass} />
               )}
             </div>
           )}
@@ -332,22 +317,7 @@ export default function CourseDetail() {
                 </div>
               )}
               {!gradeoTopicBandsLoading && gradeoTopicBands?.mapped && (
-                <>
-                  <div className="mb-3 flex shrink-0 justify-end">
-                    <button
-                      type="button"
-                      onClick={handleExportGradeoReport}
-                      disabled={downloadingGradeo}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
-                      </svg>
-                      {downloadingGradeo ? 'Downloading\u2026' : 'Export CSV'}
-                    </button>
-                  </div>
-                  <GradeoTopicBandsTable topicBands={gradeoTopicBands} />
-                </>
+                <GradeoTopicBandsTable topicBands={gradeoTopicBands} onExport={handleExportGradeoReport} exportLoading={downloadingGradeo} />
               )}
               {!gradeoTopicBandsLoading && !gradeoTopicBandsError && !gradeoTopicBands?.mapped && (
                 <div className="text-center py-16 text-slate-400 text-sm">
