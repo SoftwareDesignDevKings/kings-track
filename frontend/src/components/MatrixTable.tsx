@@ -190,6 +190,14 @@ function SortIcon() {
   )
 }
 
+function DownloadIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5m0 0 5-5m-5 5V3" />
+    </svg>
+  )
+}
+
 function ClearIcon() {
   return (
     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -1026,6 +1034,22 @@ export default function MatrixTable({ model }: Props) {
                   </div>
                 </div>
               </div>
+              {model.onExport && (
+                <button
+                  type="button"
+                  onClick={model.onExport}
+                  disabled={model.exportLoading}
+                  className={`inline-flex h-8 w-8 items-center justify-center text-sm font-medium transition-colors ${
+                    model.exportLoading
+                      ? 'text-blue-600 animate-pulse'
+                      : 'text-slate-400 hover:text-slate-700'
+                  }`}
+                  aria-label="Export CSV"
+                  title="Export CSV"
+                >
+                  <DownloadIcon />
+                </button>
+              )}
               {!swapCompactLegendWithModeToggle && displayModeToggle}
               {swapCompactLegendWithModeToggle && (
                 <LegendPopover items={model.legends} subtitle={model.subtitle} />

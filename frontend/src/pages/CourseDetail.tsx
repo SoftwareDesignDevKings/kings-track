@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
@@ -14,6 +14,7 @@ import {
 import { useCourseMatrix, useCourseEngagement, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
 import EngagementTable from '../components/EngagementTable'
 import EngagementTimelineChart from '../components/charts/EngagementTimelineChart'
+import { downloadCsv } from '../lib/downloadCsv'
 
 type TabId = 'activities' | 'engagement' | 'gradeo' | 'topic_bands' | 'edstem'
 
@@ -81,6 +82,44 @@ export default function CourseDetail() {
     return true
   }), [edStemMatrix?.mapped, gradeoMapped])
   const tabAvailabilityLoaded = !edStemLoading && !engagementLoading && !gradeoLoading && !gradeoTopicBandsLoading
+  const [downloadingClass, setDownloadingClass] = useState(false)
+  const [downloadingGradeo, setDownloadingGradeo] = useState(false)
+  const [downloadingClassList, setDownloadingClassList] = useState(false)
+
+  const courseCode = (matrix?.course_code ?? '').replace(/\s+/g, '-') || String(id)
+
+  async function handleExportClassList() {
+    setDownloadingClassList(true)
+    try {
+      await downloadCsv(`/reports/courses/${id}/class-list`, `${courseCode}-class-list.csv`)
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingClassList(false)
+    }
+  }
+
+  async function handleExportClassReport() {
+    setDownloadingClass(true)
+    try {
+      await downloadCsv(`/reports/courses/${id}/class-report`, `${courseCode}-class-report.csv`)
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingClass(false)
+    }
+  }
+
+  async function handleExportGradeoReport() {
+    setDownloadingGradeo(true)
+    try {
+      await downloadCsv(`/reports/courses/${id}/gradeo-report`, `${courseCode}-gradeo-report.csv`)
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingGradeo(false)
+    }
+  }
 
   function setCourseView(tab: TabId) {
     setSearchParams(prev => {
@@ -149,21 +188,34 @@ export default function CourseDetail() {
           </div>
 
           {matrix && (
-            <div className="grid grid-cols-3 gap-3 text-sm shrink-0 sm:flex sm:items-center sm:gap-5">
-              <div className="text-center">
-                <p className="text-lg font-bold text-slate-900">{totalStudents}</p>
-                <p className="text-xs text-slate-400">Students</p>
+            <div className="flex shrink-0 items-center gap-5">
+              <div className="grid grid-cols-3 gap-3 text-sm sm:flex sm:items-center sm:gap-5">
+                <div className="text-center">
+                  <p className="text-lg font-bold text-slate-900">{totalStudents}</p>
+                  <p className="text-xs text-slate-400">Students</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-slate-900">{totalAssignments}</p>
+                  <p className="text-xs text-slate-400">Activities</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-slate-900">
+                    {avgCompletion !== null ? `${Math.round(avgCompletion * 100)}%` : '-'}
+                  </p>
+                  <p className="text-xs text-slate-400">Avg completion</p>
+                </div>
               </div>
-              <div className="text-center">
-                <p className="text-lg font-bold text-slate-900">{totalAssignments}</p>
-                <p className="text-xs text-slate-400">Activities</p>
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold text-slate-900">
-                  {avgCompletion !== null ? `${Math.round(avgCompletion * 100)}%` : '-'}
-                </p>
-                <p className="text-xs text-slate-400">Avg completion</p>
-              </div>
+              <button
+                type="button"
+                onClick={handleExportClassList}
+                disabled={downloadingClassList}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                </svg>
+                {downloadingClassList ? 'Downloading\u2026' : 'Class List'}
+              </button>
             </div>
           )}
         </div>
@@ -204,7 +256,9 @@ export default function CourseDetail() {
                   Failed to load activity data. Make sure the course has been synced.
                 </div>
               )}
-              {matrix && <ActivityTable matrix={matrix} />}
+              {matrix && (
+                <ActivityTable matrix={matrix} onExport={handleExportClassReport} exportLoading={downloadingClass} />
+              )}
             </div>
           )}
 
@@ -305,7 +359,7 @@ export default function CourseDetail() {
                 </div>
               )}
               {!gradeoTopicBandsLoading && gradeoTopicBands?.mapped && (
-                <GradeoTopicBandsTable topicBands={gradeoTopicBands} />
+                <GradeoTopicBandsTable topicBands={gradeoTopicBands} onExport={handleExportGradeoReport} exportLoading={downloadingGradeo} />
               )}
               {!gradeoTopicBandsLoading && !gradeoTopicBandsError && !gradeoTopicBands?.mapped && (
                 <div className="text-center py-16 text-slate-400 text-sm">

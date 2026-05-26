@@ -6,8 +6,10 @@ import type { CanvasActivityViewMode } from './activityTableModel'
 interface Props {
   matrix: CourseMatrix
   viewMode?: CanvasActivityViewMode
+  onExport?: () => void
+  exportLoading?: boolean
 }
 
-export default function ActivityTable({ matrix }: Props) {
-  return <MatrixTable model={buildCanvasMatrixTableModel(matrix)} />
+export default function ActivityTable({ matrix, onExport, exportLoading }: Props) {
+  return <MatrixTable model={{ ...buildCanvasMatrixTableModel(matrix), onExport, exportLoading }} />
 }

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import Header from '../components/Header'
 import { useStudents } from '../services/api'
+import { downloadCsv } from '../lib/downloadCsv'
 import type { StudentListItem } from '../types'
 
 type SortKey = 'name' | 'course_count' | 'avg_completion_rate' | 'avg_on_time_rate' | 'avg_score' | 'attendance_rate'
@@ -63,6 +64,7 @@ export default function Students() {
   const [concernFilter, setConcernFilter] = useState<'all' | 'concern'>('all')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [downloading, setDownloading] = useState(false)
 
   const courseOptions = useMemo(() => {
     if (!students) return []
@@ -95,6 +97,17 @@ export default function Students() {
         return (av < bv ? -1 : av > bv ? 1 : 0) * dir
       })
   }, [students, search, courseFilter, concernFilter, sortKey, sortDir])
+
+  async function handleExportCsv() {
+    setDownloading(true)
+    try {
+      await downloadCsv('/reports/student-progress', 'student-progress-report.csv')
+    } catch {
+      // silent fail — user sees the button reset
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -212,6 +225,24 @@ export default function Students() {
                     <SortHeader label="Avg Score" sortKey="avg_score" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
                     <SortHeader label="Attendance" sortKey="attendance_rate" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
                     <th className="py-2.5 px-3 text-left text-xs font-medium uppercase tracking-wide text-slate-400">Status</th>
+                    <th className="py-2.5 px-3 w-10">
+                      <button
+                        type="button"
+                        onClick={handleExportCsv}
+                        disabled={downloading}
+                        className={`inline-flex h-8 w-8 items-center justify-center transition-colors ${
+                          downloading
+                            ? 'text-blue-600 animate-pulse'
+                            : 'text-slate-400 hover:text-slate-700'
+                        }`}
+                        aria-label="Export CSV"
+                        title="Export CSV"
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5m0 0 5-5m-5 5V3" />
+                        </svg>
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -274,6 +305,7 @@ function StudentRowComponent({ student }: { student: StudentListItem }) {
           <span className="text-xs text-slate-300">-</span>
         )}
       </td>
+      <td />
     </tr>
   )
 }
