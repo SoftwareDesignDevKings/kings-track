@@ -82,6 +82,37 @@ function formatNumber(value: number | null | undefined) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1)))
 }
 
+function mean(values: number[]): number | null {
+  if (values.length === 0) return null
+  let sum = 0
+  for (const v of values) sum += v
+  return sum / values.length
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+}
+
+function stdev(values: number[]): number | null {
+  if (values.length < 2) return null
+  const m = mean(values) as number
+  let sq = 0
+  for (const v of values) sq += (v - m) ** 2
+  return Math.sqrt(sq / values.length)
+}
+
+function cellMarkValue(cell: MatrixCell | undefined): number | null {
+  const marks = cell?.marks
+  if (!marks) return null
+  const { earned, available } = marks
+  if (typeof earned !== 'number' || !Number.isFinite(earned)) return null
+  if (typeof available !== 'number' || !Number.isFinite(available) || available <= 0) return null
+  return earned
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
 }
@@ -694,6 +725,52 @@ export default function MatrixTable({ model }: Props) {
   const selectedSortValue = `${selectedSort.id}:${selectedSort.desc ? 'desc' : 'asc'}`
   const hasActiveSort = selectedSortValue !== 'student:asc'
   const visibleRows = table.getRowModel().rows
+
+  const columnSummaries = useMemo(() => {
+    const perColumn: Record<string, { mean: number | null; median: number | null; stdev: number | null }> = {}
+    let anyValue = false
+    for (const column of flattenedColumns) {
+      const values: number[] = []
+      for (const row of visibleRows) {
+        const v = cellMarkValue(row.original.cells[column.id])
+        if (v != null) values.push(v)
+      }
+      if (values.length > 0) anyValue = true
+      perColumn[column.id] = { mean: mean(values), median: median(values), stdev: stdev(values) }
+    }
+    const summaryValues: number[] = []
+    for (const row of visibleRows) {
+      const v = row.original.summaryValue
+      if (typeof v === 'number' && Number.isFinite(v)) summaryValues.push(v)
+    }
+    const completion = {
+      mean: mean(summaryValues),
+      median: median(summaryValues),
+      stdev: stdev(summaryValues),
+    }
+    return { perColumn, completion, hasValues: anyValue }
+  }, [visibleRows, flattenedColumns])
+
+  const showColumnSummaries = displayMode === 'marks' && visibleRows.length > 0 && columnSummaries.hasValues
+
+  const columnDenominators = useMemo(() => {
+    const out: Record<string, number | null> = {}
+    for (const column of flattenedColumns) {
+      let denom: number | null = null
+      for (const row of model.rows) {
+        const available = row.cells[column.id]?.marks?.available
+        if (typeof available === 'number' && Number.isFinite(available) && available > 0) {
+          denom = available
+          break
+        }
+      }
+      out[column.id] = denom
+    }
+    return out
+  }, [model.rows, flattenedColumns])
+
+  const showColumnDenominators = displayMode === 'marks'
+
   const showToolbarSummary = model.showToolbarSummary === true
   const showFloatingGroupLabels = model.floatingColumnGroupLabels === true
   const swapCompactLegendWithModeToggle = !showToolbarSummary && model.supportsMarks === true
@@ -823,7 +900,7 @@ export default function MatrixTable({ model }: Props) {
     <>
       <div className={`activity-table-wrapper overflow-hidden rounded-xl border border-slate-200 bg-white ${model.className ?? ''}`}>
         <div className="shrink-0 border-b border-slate-200 bg-slate-50/90 px-2 py-2">
-          <div className={`flex flex-col gap-2 xl:flex-row xl:items-center ${showToolbarSummary ? 'xl:justify-between' : 'xl:justify-end'}`}>
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 ${showToolbarSummary ? 'justify-between' : 'justify-end'}`}>
             {showToolbarSummary && (
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -987,6 +1064,7 @@ export default function MatrixTable({ model }: Props) {
           <div ref={scrollRef} className="activity-table-scroll">
             <table className={`activity-table w-full text-sm ${model.tableClassName ?? ''}`}>
             <thead>
+              {model.columnGroups.length >= 1 && (
               <tr className="bg-slate-50 border-b border-slate-200">
                 {table.getHeaderGroups()[0].headers.slice(0, 2).map(header => (
                   <th
@@ -997,7 +1075,7 @@ export default function MatrixTable({ model }: Props) {
                       }
                     }}
                     className={`${header.column.id === 'student' ? 'sticky-col-header-1' : 'sticky-col-header-2'} border-r border-slate-200 px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500`}
-                    rowSpan={model.columnGroups.length ? 2 : 1}
+                    rowSpan={2}
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
@@ -1021,8 +1099,13 @@ export default function MatrixTable({ model }: Props) {
                   </th>
                 ))}
               </tr>
+              )}
               <tr className="bg-slate-50 border-b border-slate-200">
-                {flattenedColumns.map(column => (
+                {flattenedColumns.map(column => {
+                  const denom = columnDenominators[column.id]
+                  const showDenom = showColumnDenominators && denom != null
+                  const reserveDenomSlot = showColumnDenominators && denom == null
+                  return (
                   <th
                     key={column.id}
                     className={`${column.widthClass ?? 'h-[130px] w-11 min-w-11 max-w-11'} border-r border-slate-100 px-0 py-0 align-bottom text-center last:border-r-slate-200 ${column.dividerClassName ?? ''}`}
@@ -1030,23 +1113,30 @@ export default function MatrixTable({ model }: Props) {
                     data-group-name={column.dataGroupName}
                   >
                     {column.headerVariant === 'wide' ? (
-                      <div className="flex min-h-16 flex-col justify-end gap-1 px-3 py-2 text-left">
-                        <span className="line-clamp-3 text-xs font-semibold leading-snug text-slate-600">{column.label}</span>
-                        {column.shortLabel && <span className="text-[11px] font-medium leading-none text-slate-400">{column.shortLabel}</span>}
+                      <div className="mx-auto flex w-full flex-col items-center gap-0.5 px-1 py-2 text-center">
+                        <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium leading-tight text-slate-500" title={column.label}>{column.label}</span>
+                        {column.shortLabel && <span className="text-[10px] font-medium leading-none text-slate-400">{column.shortLabel}</span>}
+                        {showDenom && <span className="text-[10px] font-normal leading-none text-slate-400 tabular-nums">/{denom}</span>}
+                        {reserveDenomSlot && <span aria-hidden="true" className="text-[10px] font-normal leading-none tabular-nums opacity-0">/0</span>}
                       </div>
                     ) : column.headerVariant === 'short' ? (
-                      <span className="mx-auto block w-10 overflow-hidden text-ellipsis px-1 py-2 text-center text-xs font-medium leading-tight text-slate-500">
-                        {column.shortLabel ?? column.label}
+                      <span className="mx-auto flex w-10 flex-col items-center gap-0.5 overflow-hidden px-1 py-2 text-center text-xs font-medium leading-tight text-slate-500">
+                        <span className="block w-full overflow-hidden text-ellipsis">{column.shortLabel ?? column.label}</span>
+                        {showDenom && <span className="text-[10px] font-normal text-slate-400 tabular-nums">/{denom}</span>}
+                        {reserveDenomSlot && <span aria-hidden="true" className="text-[10px] font-normal tabular-nums opacity-0">/0</span>}
                       </span>
                     ) : (
-                      <div className="flex h-full w-full items-end justify-center px-1 pb-2">
-                        <span className="block max-h-[112px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-xs font-medium leading-tight text-slate-500 [transform:rotate(180deg)] [writing-mode:vertical-rl]">
+                      <div className="flex h-full w-full flex-col items-center justify-end gap-0.5 px-1 pb-1">
+                        <span className="block max-h-[104px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-xs font-medium leading-tight text-slate-500 [transform:rotate(180deg)] [writing-mode:vertical-rl]">
                           {column.label}
                         </span>
+                        {showDenom && <span className="text-[10px] font-normal text-slate-400 tabular-nums">/{denom}</span>}
+                        {reserveDenomSlot && <span aria-hidden="true" className="text-[10px] font-normal tabular-nums opacity-0">/0</span>}
                       </div>
                     )}
                   </th>
-                ))}
+                  )
+                })}
               </tr>
             </thead>
 
@@ -1088,6 +1178,29 @@ export default function MatrixTable({ model }: Props) {
                         </td>
                       )
                     })}
+                  </tr>
+                )
+              })}
+              {showColumnSummaries && (['mean', 'median', 'stdev'] as const).map((stat, statIndex) => {
+                const label = stat === 'mean' ? 'Average' : stat === 'median' ? 'Median' : 'Std Dev'
+                const rowBg = 'bg-slate-50'
+                const topBorder = statIndex === 0 ? 'border-t-2 border-slate-300' : ''
+                return (
+                  <tr key={`summary-${stat}`} className={`${rowBg} ${topBorder} font-medium text-slate-700`}>
+                    <td className={`sticky-col-1 border-r border-slate-200 px-4 py-2 ${rowBg} ${topBorder}`}>
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+                    </td>
+                    <td className={`sticky-col-2 border-r border-slate-200 px-3 py-2 text-sm ${rowBg} ${topBorder}`}>
+                      {formatPercent(columnSummaries.completion[stat])}
+                    </td>
+                    {flattenedColumns.map(column => (
+                      <td
+                        key={column.id}
+                        className={`border-r border-slate-100 px-2 py-2 text-center text-sm last:border-r-0 ${column.dividerClassName ?? ''}`}
+                      >
+                        {formatNumber(columnSummaries.perColumn[column.id]?.[stat] ?? null)}
+                      </td>
+                    ))}
                   </tr>
                 )
               })}

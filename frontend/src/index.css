@@ -153,7 +153,7 @@
 
 .activity-table-edstem,
 .activity-table-matrix-rotated {
-  --activity-table-edstem-lesson-row-height: 130px;
+  --activity-table-edstem-lesson-row-height: 40px;
 }
 
 .activity-table-edstem .sticky-col-header-1,
@@ -173,7 +173,7 @@
 }
 
 .activity-table-matrix-wide {
-  --activity-table-wide-header-row-height: 76px;
+  --activity-table-wide-header-row-height: 56px;
 }
 
 .activity-table-matrix-wide .sticky-col-header-1,

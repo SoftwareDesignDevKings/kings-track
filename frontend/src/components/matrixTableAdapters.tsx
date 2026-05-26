@@ -96,6 +96,31 @@ function average(values: number[]) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
 }
 
+function shortenLabels(labels: string[]): string[] {
+  if (labels.length < 2) return labels
+  const counts = new Map<string, number>()
+  for (const label of labels) {
+    const match = label.match(/^([^\s_\-]+[\s_\-])/)
+    if (match) counts.set(match[1], (counts.get(match[1]) ?? 0) + 1)
+  }
+  let bestPrefix: string | null = null
+  let bestCount = 0
+  for (const [prefix, count] of counts) {
+    if (count > bestCount) {
+      bestPrefix = prefix
+      bestCount = count
+    }
+  }
+  const threshold = Math.max(2, Math.ceil(labels.length * 0.5))
+  if (!bestPrefix || bestCount < threshold) return labels
+  const prefix = bestPrefix
+  return labels.map(label => {
+    if (!label.startsWith(prefix)) return label
+    const stripped = label.slice(prefix.length).trim()
+    return stripped.length > 0 ? stripped : label
+  })
+}
+
 export function buildCanvasMatrixTableModel(matrix: CourseMatrix): MatrixTableModel {
   const activityColumns = buildCanvasActivityColumns(matrix.assignment_groups)
   const activityView = prepareCanvasActivityView(activityColumns)
@@ -205,20 +230,25 @@ export function buildEdStemMatrixTableModel(matrix: EdStemMatrix): MatrixTableMo
     title: 'EdStem Lessons',
     showToolbarSummary: false,
     tableClassName: 'activity-table-matrix-rotated',
+    floatingColumnGroupLabels: true,
     summaryHeader: 'Completion',
     supportsMarks: false,
     emptyRowsMessage: 'No students found. Trigger a sync to load data.',
     emptyColumnsMessage: 'No lessons found for this EdStem course.',
-    columnGroups: modules.map(module => ({
-      id: module.name,
-      label: module.name,
-      columns: module.lessons.map(lesson => ({
-        id: String(lesson.id),
-        label: lesson.title,
-        tooltip: lesson.title + (lesson.is_interactive ? ' (interactive)' : ''),
-        headerVariant: 'rotated',
-      })),
-    })),
+    columnGroups: modules.map(module => {
+      const shortTitles = shortenLabels(module.lessons.map(lesson => lesson.title))
+      return {
+        id: module.name,
+        label: module.name,
+        columns: module.lessons.map((lesson, index) => ({
+          id: String(lesson.id),
+          label: shortTitles[index],
+          tooltip: lesson.title + (lesson.is_interactive ? ' (interactive)' : ''),
+          headerVariant: 'wide',
+          widthClass: 'w-28 min-w-28 max-w-28',
+        })),
+      }
+    }),
     rows: (matrix.students ?? []).map(student => ({
       id: student.id,
       name: student.name,
@@ -330,26 +360,31 @@ export function buildGradeoReportMatrixTableModel(
     title: 'Gradeo Results',
     showToolbarSummary: false,
     tableClassName: 'activity-table-matrix-rotated',
+    floatingColumnGroupLabels: true,
     summaryHeader: 'Completion',
     supportsMarks: true,
     emptyRowsMessage: 'No students found. Refresh the Gradeo directory and import a class from the extension first.',
     emptyColumnsMessage: 'No Gradeo exams have been imported for this course yet.',
     rows,
-    columnGroups: [{
-      id: 'gradeo-results',
-      label: 'Exam Results',
-      columns: exams.map(exam => ({
-        id: exam.id,
-        label: exam.name,
-        tooltip: [
-          exam.name,
-          exam.class_average != null ? `Class avg: ${exam.class_average}` : null,
-          exam.topics.length ? `Topics: ${exam.topics.join(', ')}` : null,
-          exam.outcomes.length ? `Outcomes: ${exam.outcomes.join(', ')}` : null,
-        ].filter(Boolean).join('\n'),
-        headerVariant: 'rotated',
-      })),
-    }],
+    columnGroups: (() => {
+      const shortNames = shortenLabels(exams.map(exam => exam.name))
+      return [{
+        id: 'gradeo-results',
+        label: 'Results',
+        columns: exams.map((exam, index) => ({
+          id: exam.id,
+          label: shortNames[index],
+          tooltip: [
+            exam.name,
+            exam.class_average != null ? `Class avg: ${exam.class_average}` : null,
+            exam.topics.length ? `Topics: ${exam.topics.join(', ')}` : null,
+            exam.outcomes.length ? `Outcomes: ${exam.outcomes.join(', ')}` : null,
+          ].filter(Boolean).join('\n'),
+          headerVariant: 'wide',
+          widthClass: 'w-28 min-w-28 max-w-28',
+        })),
+      }]
+    })(),
     legends: [
       { id: 'scored', label: 'Scored', status: 'scored' },
       { id: 'awaiting_marking', label: 'Awaiting marking', status: 'awaiting_marking' },
@@ -451,6 +486,7 @@ export function buildGradeoTopicBandsMatrixTableModel(topicBands: GradeoTopicBan
     title: 'Gradeo Topic Bands',
     showToolbarSummary: false,
     tableClassName: 'activity-table-matrix-wide',
+    floatingColumnGroupLabels: true,
     summaryHeader: 'Avg topic',
     supportsMarks: false,
     emptyRowsMessage: 'No students found. Refresh the Gradeo directory and import a class from the extension first.',
