@@ -55,8 +55,13 @@ describe('EdStemLessonTable', () => {
   })
 
   it('renders module name as group header', () => {
-    render(<EdStemLessonTable matrix={makeMatrix()} />)
-    expect(screen.getByText('Intro Module')).toBeInTheDocument()
+    render(<EdStemLessonTable matrix={makeMatrix({
+      modules: [
+        { name: 'Intro Module', lessons: [{ id: 101, title: 'SQL Basics', is_interactive: false }] },
+        { name: 'Advanced Module', lessons: [{ id: 201, title: 'Indexing', is_interactive: false }] },
+      ],
+    })} />)
+    expect(screen.getAllByText('Intro Module').length).toBeGreaterThan(0)
   })
 
   it('renders lesson titles in header row', () => {

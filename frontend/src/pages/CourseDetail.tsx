@@ -14,8 +14,7 @@ import {
 import { useCourseMatrix, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
 import { downloadCsv } from '../lib/downloadCsv'
 
-type TabId = 'activities' | 'edstem' | 'gradeo'
-type GradeoSubview = 'exam_results' | 'topic_bands'
+type TabId = 'activities' | 'gradeo' | 'topic_bands' | 'edstem'
 
 interface Tab {
   id: TabId
@@ -25,26 +24,20 @@ interface Tab {
 const TABS: Tab[] = [
   { id: 'activities', label: 'Canvas' },
   { id: 'gradeo', label: 'Gradeo' },
+  { id: 'topic_bands', label: 'Topic Bands' },
   { id: 'edstem', label: 'EdStem' },
 ]
 
 function getTabFromSearch(value: string | null): TabId {
   if (value === 'gradeo' || value === 'edstem') return value
+  if (value === 'topic-bands' || value === 'topic_bands') return 'topic_bands'
   return 'activities'
 }
 
 function getTabSearchValue(tab: TabId) {
-  return tab === 'activities' ? 'canvas' : tab
-}
-
-function getGradeoSubviewFromSearch(value: string | null): GradeoSubview | null {
-  if (value === 'topic-bands' || value === 'topic_bands') return 'topic_bands'
-  if (value === 'results' || value === 'exam-results' || value === 'exam_results') return 'exam_results'
-  return null
-}
-
-function getGradeoSubviewSearchValue(subview: GradeoSubview) {
-  return subview === 'topic_bands' ? 'topic-bands' : 'results'
+  if (tab === 'activities') return 'canvas'
+  if (tab === 'topic_bands') return 'topic-bands'
+  return tab
 }
 
 export default function CourseDetail() {
@@ -52,7 +45,6 @@ export default function CourseDetail() {
   const [searchParams, setSearchParams] = useSearchParams()
   const id = Number(courseId)
   const activeTab = getTabFromSearch(searchParams.get('tab'))
-  const selectedGradeoSubview = getGradeoSubviewFromSearch(searchParams.get('gradeo'))
 
   const { data: matrix, isLoading, error } = useCourseMatrix(id)
   const { data: edStemMatrix, isLoading: edStemLoading, error: edStemError } = useEdStemMatrix(id)
@@ -78,12 +70,10 @@ export default function CourseDetail() {
       0,
     ) / totalStudents
     : null
-  const activeGradeoSubview = activeTab === 'gradeo'
-    ? selectedGradeoSubview ?? 'exam_results'
-    : 'exam_results'
   const gradeoMapped = Boolean(gradeoReport?.mapped || gradeoTopicBands?.mapped)
   const tabs = useMemo(() => TABS.filter(tab => {
     if (tab.id === 'gradeo') return gradeoMapped
+    if (tab.id === 'topic_bands') return gradeoMapped
     if (tab.id === 'edstem') return edStemMatrix?.mapped
     return true
   }), [edStemMatrix?.mapped, gradeoMapped])
@@ -125,24 +115,17 @@ export default function CourseDetail() {
     }
   }
 
-  function setCourseView(tab: TabId, gradeoSubview: GradeoSubview = activeGradeoSubview) {
+  function setCourseView(tab: TabId) {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
+      next.delete('gradeo')
 
       if (tab === 'activities') {
         next.delete('tab')
-        next.delete('gradeo')
         return next
       }
 
       next.set('tab', getTabSearchValue(tab))
-
-      if (tab === 'gradeo') {
-        next.set('gradeo', getGradeoSubviewSearchValue(gradeoSubview))
-      } else {
-        next.delete('gradeo')
-      }
-
       return next
     }, { replace: true })
   }
@@ -154,6 +137,12 @@ export default function CourseDetail() {
       setSearchParams(prev => {
         const next = new URLSearchParams(prev)
         next.delete('tab')
+        next.delete('gradeo')
+        return next
+      }, { replace: true })
+    } else if (searchParams.get('gradeo')) {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev)
         next.delete('gradeo')
         return next
       }, { replace: true })
@@ -303,7 +292,7 @@ export default function CourseDetail() {
 
           {activeTab === 'gradeo' && (
             <div className="flex h-full min-h-0 min-w-0 flex-col">
-              {(gradeoLoading || gradeoTopicBandsLoading) && (
+              {gradeoLoading && (
                 <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
                   <div className="h-10 bg-slate-100 border-b border-slate-200" />
                   {[1, 2, 3, 4, 5].map(i => (
@@ -316,7 +305,28 @@ export default function CourseDetail() {
                   Failed to load Gradeo data. Make sure the class has been imported from the extension.
                 </div>
               )}
-              {gradeoTopicBandsError && activeGradeoSubview === 'topic_bands' && (
+              {!gradeoLoading && gradeoReport?.mapped && (
+                <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
+              )}
+              {!gradeoLoading && !gradeoError && !gradeoReport?.mapped && (
+                <div className="text-center py-16 text-slate-400 text-sm">
+                  No Gradeo exams have been imported for this course yet.
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'topic_bands' && (
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              {gradeoTopicBandsLoading && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden animate-pulse">
+                  <div className="h-10 bg-slate-100 border-b border-slate-200" />
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <div key={i} className="h-10 border-b border-slate-100 bg-white" />
+                  ))}
+                </div>
+              )}
+              {gradeoTopicBandsError && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
                   Failed to load Gradeo topic bands. Make sure the class has been imported from the extension.
                 </div>
@@ -373,6 +383,11 @@ export default function CourseDetail() {
                       </div>
                       <GradeoTopicBandsTable topicBands={gradeoTopicBands} />
                     </>
+                  )}
+                  {activeGradeoSubview === 'topic_bands' && !gradeoTopicBands?.mapped && (
+                    <div className="text-center py-16 text-slate-400 text-sm">
+                      No Gradeo topic bands have been imported for this course yet.
+                    </div>
                   )}
                 </>
               )}

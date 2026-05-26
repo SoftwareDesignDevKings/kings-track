@@ -412,7 +412,7 @@ describe('ActivityTable', () => {
     })
 
     const { container } = render(<ActivityTable matrix={matrix} />)
-    const activityHeader = container.querySelector('thead tr:nth-child(2) th')
+    const activityHeader = container.querySelector('thead th[data-group-name]')
 
     expect(activityHeader).toHaveAttribute('data-group-name', 'Quizzes')
     expect(activityHeader).toHaveAttribute('title', expect.stringContaining('Group: Quizzes'))

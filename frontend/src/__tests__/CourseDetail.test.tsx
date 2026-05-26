@@ -188,14 +188,17 @@ describe('CourseDetail', () => {
         mapped: true,
         edstem_course_id: 28555,
         edstem_course_name: 'SE 2026',
-        modules: [{ name: 'Module 1', lessons: [{ id: 1, title: 'SQL Basics', is_interactive: false }] }],
-        students: [{ id: 1, name: 'Alice Smith', sortable_name: 'Smith, Alice', completion_rate: 0.5, progress: { '1': { status: 'completed', completed_at: null } } }],
+        modules: [
+          { name: 'Module 1', lessons: [{ id: 1, title: 'SQL Basics', is_interactive: false }] },
+          { name: 'Module 2', lessons: [{ id: 2, title: 'Indexing', is_interactive: false }] },
+        ],
+        students: [{ id: 1, name: 'Alice Smith', sortable_name: 'Smith, Alice', completion_rate: 0.5, progress: { '1': { status: 'completed', completed_at: null }, '2': { status: 'not_started', completed_at: null } } }],
       },
     } as any)
     const user = userEvent.setup()
     renderWithProviders(<CourseDetail />)
     await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
-    expect(screen.getByText('Module 1')).toBeInTheDocument()
+    expect(screen.getAllByText('Module 1').length).toBeGreaterThan(0)
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
   })
 
@@ -253,8 +256,6 @@ describe('CourseDetail', () => {
     const user = userEvent.setup()
     renderWithProviders(<CourseDetail />)
     await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
-    expect(screen.getByRole('button', { name: /^Results$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Topic Bands$/i })).toBeInTheDocument()
     expect(screen.getByText('12ENC_Cycle6')).toBeInTheDocument()
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
     expect(screen.getByText('Noah Ould')).toBeInTheDocument()
@@ -339,7 +340,7 @@ describe('CourseDetail', () => {
     expect(screen.queryByText('B5')).not.toBeInTheDocument()
   })
 
-  it('restores the Gradeo topic-bands subview from the course URL', () => {
+  it('restores the Topic Bands tab from the course URL', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useGradeoReport).mockReturnValue({
       isLoading: false,
@@ -383,13 +384,13 @@ describe('CourseDetail', () => {
       },
     } as any)
 
-    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=gradeo&gradeo=topic-bands'] })
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=topic-bands'] })
     expect(screen.getByText('B5')).toBeInTheDocument()
     expect(screen.getAllByText('82%').length).toBeGreaterThan(0)
     expect(screen.getAllByText('medium').length).toBeGreaterThan(0)
   })
 
-  it('switches from Results to Topic Bands inside the Gradeo tab', async () => {
+  it('switches between Gradeo and Topic Bands top-level tabs', async () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useGradeoReport).mockReturnValue({
       isLoading: false,
