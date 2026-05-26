@@ -234,7 +234,9 @@ async def get_course_engagement(course_id: int, db: AsyncSession = Depends(get_d
                 ce.tardiness_missing,
                 ce.synced_at,
                 e.total_activity_time,
-                e.last_activity_at
+                e.last_activity_at,
+                ce.last_page_view_at,
+                ce.last_participation_at
             FROM canvas_engagement ce
             JOIN users u ON u.id = ce.user_id
             JOIN enrollments e ON e.course_id = ce.course_id AND e.user_id = ce.user_id
@@ -280,6 +282,8 @@ async def get_course_engagement(course_id: int, db: AsyncSession = Depends(get_d
                 "tardiness_missing": row[11],
                 "total_activity_time_seconds": row[13],
                 "last_activity_at": _to_iso(row[14]),
+                "last_page_view_at": _to_iso(row[15]),
+                "last_participation_at": _to_iso(row[16]),
             }
             for row in student_rows
         ],

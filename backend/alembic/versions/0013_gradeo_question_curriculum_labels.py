@@ -16,9 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("gradeo_assignment_question_results", sa.Column("bands", sa.String()))
-    op.add_column("gradeo_assignment_question_results", sa.Column("outcomes", sa.String()))
-    op.add_column("gradeo_assignment_question_results", sa.Column("topics", sa.String()))
+    # Use IF NOT EXISTS — these columns may already exist if migration was partially applied
+    op.execute("ALTER TABLE gradeo_assignment_question_results ADD COLUMN IF NOT EXISTS bands VARCHAR")
+    op.execute("ALTER TABLE gradeo_assignment_question_results ADD COLUMN IF NOT EXISTS outcomes VARCHAR")
+    op.execute("ALTER TABLE gradeo_assignment_question_results ADD COLUMN IF NOT EXISTS topics VARCHAR")
 
 
 def downgrade() -> None:

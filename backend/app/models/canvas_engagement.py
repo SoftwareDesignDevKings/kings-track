@@ -25,4 +25,8 @@ class CanvasEngagement(Base):
     tardiness_late: Mapped[int | None] = mapped_column(Integer)
     tardiness_missing: Mapped[int | None] = mapped_column(Integer)
 
+    # From per-student activity endpoint
+    last_page_view_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_participation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

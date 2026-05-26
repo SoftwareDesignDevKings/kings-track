@@ -187,6 +187,8 @@ describe('CourseDetail', () => {
             tardiness_missing: 0,
             total_activity_time_seconds: 3720,
             last_activity_at: '2026-05-24T08:00:00Z',
+            last_page_view_at: '2026-05-25T10:00:00Z',
+            last_participation_at: '2026-05-24T08:00:00Z',
           },
         ],
         course_activity: [],
@@ -202,6 +204,20 @@ describe('CourseDetail', () => {
   it('shows empty state on Engagement tab when no data has been synced', async () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useCourseEngagement).mockReturnValue({ isLoading: false, error: null, data: undefined } as any)
+
+    const user = userEvent.setup()
+    renderWithProviders(<CourseDetail />)
+    await user.click(screen.getByRole('button', { name: /^Engagement$/i }))
+    expect(screen.getByText(/trigger a sync/i)).toBeInTheDocument()
+  })
+
+  it('shows empty state when API returns students: [] and synced_at: null', async () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    vi.mocked(useCourseEngagement).mockReturnValue({
+      isLoading: false,
+      error: null,
+      data: { course_id: 9001, course_name: 'Test', synced_at: null, students: [], course_activity: [] },
+    } as any)
 
     const user = userEvent.setup()
     renderWithProviders(<CourseDetail />)

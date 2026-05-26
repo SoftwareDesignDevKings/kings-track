@@ -76,6 +76,8 @@ export interface CourseEngagementStudent {
   tardiness_missing: number | null
   total_activity_time_seconds: number | null
   last_activity_at: string | null
+  last_page_view_at: string | null
+  last_participation_at: string | null
 }
 
 export interface CourseActivityDay {

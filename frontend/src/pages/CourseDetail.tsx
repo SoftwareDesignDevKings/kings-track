@@ -24,10 +24,10 @@ interface Tab {
 
 const TABS: Tab[] = [
   { id: 'activities', label: 'Canvas' },
-  { id: 'engagement', label: 'Engagement' },
+  { id: 'edstem', label: 'EdStem' },
   { id: 'gradeo', label: 'Gradeo' },
   { id: 'topic_bands', label: 'Topic Bands' },
-  { id: 'edstem', label: 'EdStem' },
+  { id: 'engagement', label: 'Engagement' },
 ]
 
 function getTabFromSearch(value: string | null): TabId {
@@ -223,9 +223,11 @@ export default function CourseDetail() {
                   Failed to load engagement data. Make sure the course has been synced.
                 </div>
               )}
-              {!engagementLoading && !engagementError && !engagement && (
+              {!engagementLoading && !engagementError && (!engagement || engagement.students.length === 0) && (
                 <div className="text-center py-16 text-slate-400 text-sm">
-                  No engagement data yet — trigger a sync to pull Canvas analytics.
+                  {engagement?.synced_at
+                    ? 'No students with engagement data found for this course.'
+                    : 'No engagement data yet — trigger a sync to pull Canvas analytics.'}
                 </div>
               )}
               {engagement && engagement.students.length > 0 && (

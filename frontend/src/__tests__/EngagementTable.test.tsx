@@ -19,7 +19,9 @@ const makeStudent = (overrides: Partial<CourseEngagementStudent>): CourseEngagem
   tardiness_late: 1,
   tardiness_missing: 0,
   total_activity_time_seconds: 3720,
-  last_activity_at: new Date(Date.now() - 3 * 86_400_000).toISOString(), // 3 days ago
+  last_activity_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+  last_page_view_at: new Date(Date.now() - 1 * 86_400_000).toISOString(),
+  last_participation_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
   ...overrides,
 })
 
@@ -35,6 +37,8 @@ const students: CourseEngagementStudent[] = [
     participations: 0,
     total_activity_time_seconds: 0,
     last_activity_at: null,
+    last_page_view_at: null,
+    last_participation_at: null,
   }),
 ]
 

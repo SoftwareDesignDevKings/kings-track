@@ -3,7 +3,7 @@ Per-entity sync tasks. Each function fetches data from Canvas and upserts
 it into the local database page-by-page to keep memory usage low.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as date_type
 from typing import Any
 
 from sqlalchemy import text
@@ -366,10 +366,22 @@ async def sync_canvas_engagement(
     now = _now()
     count = 0
 
+    # Only insert for users we already have in both the users and enrollments tables.
+    # student_summaries can include concluded/inactive students not in our users table.
+    result = await db.execute(
+        text("""
+            SELECT e.user_id FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
+        """),
+        {"course_id": course_id},
+    )
+    enrolled_user_ids = {row[0] for row in result}
+
     # --- Per-student summaries ---
     async for summary in canvas.list_student_summaries(course_id):
         user_id = summary.get("id")
-        if not user_id:
+        if not user_id or user_id not in enrolled_user_ids:
             continue
 
         tardiness = summary.get("tardiness_breakdown", {}) or {}
@@ -407,13 +419,13 @@ async def sync_canvas_engagement(
                 "user_id": user_id,
                 "page_views": summary.get("page_views"),
                 "page_views_level": _to_int(summary.get("page_views_level")),
-                "max_page_views": summary.get("max_page_view"),
+                "max_page_views": summary.get("max_page_views"),
                 "participations": summary.get("participations"),
                 "participations_level": _to_int(summary.get("participations_level")),
                 "max_participations": summary.get("max_participations"),
-                "tardiness_on_time": tardiness.get("on_time"),
-                "tardiness_late": tardiness.get("late"),
-                "tardiness_missing": tardiness.get("missing"),
+                "tardiness_on_time": _to_int(tardiness.get("on_time")),
+                "tardiness_late": _to_int(tardiness.get("late")),
+                "tardiness_missing": _to_int(tardiness.get("missing")),
                 "synced_at": now,
             },
         )
@@ -423,11 +435,52 @@ async def sync_canvas_engagement(
 
     await db.commit()
 
+    # --- Per-student activity timestamps (last page view, last participation) ---
+    for user_id in enrolled_user_ids:
+        try:
+            activity = await canvas.get_student_activity(course_id, user_id)
+        except Exception:
+            continue
+
+        last_page_view_at = None
+        last_participation_at = None
+
+        page_views = activity.get("page_views") if isinstance(activity, dict) else None
+        if isinstance(page_views, dict) and page_views:
+            last_page_view_at = _parse_dt(max(page_views.keys()))
+
+        participations_list = activity.get("participations") if isinstance(activity, dict) else None
+        if isinstance(participations_list, list) and participations_list:
+            last_ts = max(p.get("created_at", "") for p in participations_list if p.get("created_at"))
+            if last_ts:
+                last_participation_at = _parse_dt(last_ts)
+
+        await db.execute(
+            text("""
+                UPDATE canvas_engagement
+                SET last_page_view_at = :last_page_view_at,
+                    last_participation_at = :last_participation_at
+                WHERE course_id = :course_id AND user_id = :user_id
+            """),
+            {
+                "course_id": course_id,
+                "user_id": user_id,
+                "last_page_view_at": last_page_view_at,
+                "last_participation_at": last_participation_at,
+            },
+        )
+
+    await db.commit()
+
     # --- Course-wide daily activity timeseries ---
     daily_rows = await canvas.get_course_activity(course_id)
     for row in daily_rows:
         raw_date = row.get("date")
         if not raw_date:
+            continue
+        try:
+            parsed_date = date_type.fromisoformat(str(raw_date))
+        except (ValueError, TypeError):
             continue
         await db.execute(
             text("""
@@ -439,7 +492,7 @@ async def sync_canvas_engagement(
             """),
             {
                 "course_id": course_id,
-                "date": raw_date,
+                "date": parsed_date,
                 "views": row.get("views"),
                 "participations": row.get("participations"),
             },

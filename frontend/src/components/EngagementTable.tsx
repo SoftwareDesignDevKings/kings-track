@@ -1,32 +1,23 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import type { CourseEngagementStudent } from '../types'
 
 interface Props {
   students: CourseEngagementStudent[]
 }
 
-type SortKey = 'name' | 'page_views' | 'participations' | 'total_activity_time_seconds' | 'last_activity_at'
+type SortKey =
+  | 'name'
+  | 'page_views'
+  | 'participations'
+  | 'tardiness_on_time'
+  | 'tardiness_late'
+  | 'tardiness_missing'
+  | 'last_page_view_at'
+  | 'last_participation_at'
 type SortDir = 'asc' | 'desc'
 
-// page_views_level 0–3 → Tailwind classes (matches Canvas's own RAG scale)
-const LEVEL_DOT: Record<number, string> = {
-  0: 'bg-red-400',
-  1: 'bg-amber-400',
-  2: 'bg-emerald-400',
-  3: 'bg-emerald-500',
-}
-
-function formatDuration(seconds: number | null): string {
-  if (seconds === null || seconds === undefined) return '—'
-  if (seconds === 0) return '0m'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (h > 0) return `${h}h ${m}m`
-  return `${m}m`
-}
-
-function formatLastSeen(iso: string | null): string {
-  if (!iso) return 'Never'
+function formatRelativeDate(iso: string | null): string {
+  if (!iso) return '—'
   const date = new Date(iso)
   const now = new Date()
   const diffDays = Math.floor((now.getTime() - date.getTime()) / 86_400_000)
@@ -39,8 +30,9 @@ function formatLastSeen(iso: string | null): string {
 
 function isInactive(student: CourseEngagementStudent): boolean {
   if ((student.page_views ?? 0) === 0) return true
-  if (!student.last_activity_at) return true
-  const diffDays = Math.floor((Date.now() - new Date(student.last_activity_at).getTime()) / 86_400_000)
+  const lastActive = student.last_page_view_at ?? student.last_participation_at
+  if (!lastActive) return true
+  const diffDays = Math.floor((Date.now() - new Date(lastActive).getTime()) / 86_400_000)
   return diffDays > 14
 }
 
@@ -50,9 +42,9 @@ function sortStudents(students: CourseEngagementStudent[], key: SortKey, dir: So
     if (key === 'name') {
       av = a.sortable_name ?? a.name
       bv = b.sortable_name ?? b.name
-    } else if (key === 'last_activity_at') {
-      av = a.last_activity_at ? new Date(a.last_activity_at).getTime() : -Infinity
-      bv = b.last_activity_at ? new Date(b.last_activity_at).getTime() : -Infinity
+    } else if (key === 'last_page_view_at' || key === 'last_participation_at') {
+      av = a[key] ? new Date(a[key]!).getTime() : -Infinity
+      bv = b[key] ? new Date(b[key]!).getTime() : -Infinity
     } else {
       av = a[key] ?? -Infinity
       bv = b[key] ?? -Infinity
@@ -68,9 +60,28 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   return <span className="ml-1">{dir === 'asc' ? '↑' : '↓'}</span>
 }
 
+function RelativeBar({ value, max }: { value: number; max: number }) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0
+  let color = 'bg-emerald-400'
+  if (pct < 25) color = 'bg-red-400'
+  else if (pct < 50) color = 'bg-amber-400'
+  return (
+    <div className="ml-2 inline-flex items-center w-16" title={`${Math.round(pct)}% of class max (${max})`}>
+      <div className="h-1.5 w-full rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
 export default function EngagementTable({ students }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('page_views')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+
+  const courseMaxPageViews = useMemo(
+    () => Math.max(...students.map(s => s.page_views ?? 0), 1),
+    [students],
+  )
 
   function handleSort(key: SortKey) {
     if (sortKey === key) {
@@ -113,20 +124,19 @@ export default function EngagementTable({ students }: Props) {
           <thead className="border-b border-slate-100 bg-slate-50">
             <tr>
               {th('name', 'Student', 'left')}
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 text-center whitespace-nowrap">
-                Engagement
-              </th>
               {th('page_views', 'Page views')}
               {th('participations', 'Participations')}
-              {th('total_activity_time_seconds', 'Time on Canvas')}
-              {th('last_activity_at', 'Last seen')}
+              {th('tardiness_on_time', 'On time')}
+              {th('tardiness_late', 'Late')}
+              {th('tardiness_missing', 'Missing')}
+              {th('last_page_view_at', 'Last page view')}
+              {th('last_participation_at', 'Last participation')}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {sorted.map(student => {
-              const level = student.page_views_level ?? 0
-              const dotClass = LEVEL_DOT[Math.min(level, 3)] ?? LEVEL_DOT[0]
               const inactive = isInactive(student)
+              const pageViews = student.page_views ?? 0
 
               return (
                 <tr
@@ -136,28 +146,27 @@ export default function EngagementTable({ students }: Props) {
                   <td className="px-4 py-2.5 font-medium text-slate-800 whitespace-nowrap">
                     {student.name}
                   </td>
-                  <td className="px-4 py-2.5 text-center">
-                    <span
-                      className={`inline-block h-2.5 w-2.5 rounded-full ${dotClass}`}
-                      title={`Level ${level} — ${['No activity', 'Low', 'Medium', 'High'][Math.min(level, 3)]}`}
-                    />
-                  </td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
-                    {student.page_views ?? '—'}
-                    {student.max_page_views != null && student.page_views != null && (
-                      <span className="ml-1 text-xs text-slate-400">
-                        / {student.max_page_views}
-                      </span>
-                    )}
+                    <span>{pageViews}</span>
+                    <RelativeBar value={pageViews} max={courseMaxPageViews} />
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
                     {student.participations ?? '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
-                    {formatDuration(student.total_activity_time_seconds)}
+                  <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600">
+                    {student.tardiness_on_time ?? '—'}
                   </td>
-                  <td className={`px-4 py-2.5 text-right whitespace-nowrap ${inactive ? 'text-red-500 font-medium' : 'text-slate-600'}`}>
-                    {formatLastSeen(student.last_activity_at)}
+                  <td className="px-4 py-2.5 text-right tabular-nums text-amber-600">
+                    {student.tardiness_late ?? '—'}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-red-500">
+                    {student.tardiness_missing ?? '—'}
+                  </td>
+                  <td className={`px-4 py-2.5 text-right whitespace-nowrap ${inactive && !student.last_page_view_at ? 'text-red-500 font-medium' : 'text-slate-600'}`}>
+                    {formatRelativeDate(student.last_page_view_at)}
+                  </td>
+                  <td className={`px-4 py-2.5 text-right whitespace-nowrap ${inactive && !student.last_participation_at ? 'text-red-500 font-medium' : 'text-slate-600'}`}>
+                    {formatRelativeDate(student.last_participation_at)}
                   </td>
                 </tr>
               )
