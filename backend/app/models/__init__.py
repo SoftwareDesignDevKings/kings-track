@@ -32,6 +32,8 @@ from app.models.reminder_run import ReminderRun
 from app.models.reminder_delivery import ReminderDelivery
 from app.models.meeting import Meeting
 from app.models.attendance_record import AttendanceRecord
+from app.models.canvas_engagement import CanvasEngagement
+from app.models.canvas_course_activity import CanvasCourseActivity
 
 __all__ = [
     "Base",
@@ -68,4 +70,6 @@ __all__ = [
     "ReminderDelivery",
     "Meeting",
     "AttendanceRecord",
+    "CanvasEngagement",
+    "CanvasCourseActivity",
 ]

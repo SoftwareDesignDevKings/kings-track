@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type {
-  Course, CourseMatrix, SyncStatus, HealthResponse, CanvasHealthResponse, AppUser,
+  Course, CourseMatrix, CourseEngagement, SyncStatus, HealthResponse, CanvasHealthResponse, AppUser,
   WhitelistedCourse, AvailableCourse,
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
@@ -77,6 +77,15 @@ export function useCourseMatrix(courseId: number) {
   return useQuery<CourseMatrix>({
     queryKey: ['matrix', courseId],
     queryFn: () => fetchJSON<CourseMatrix>(`/courses/${courseId}/matrix`),
+    staleTime: 60_000,
+    enabled: !isNaN(courseId),
+  })
+}
+
+export function useCourseEngagement(courseId: number) {
+  return useQuery<CourseEngagement>({
+    queryKey: ['engagement', courseId],
+    queryFn: () => fetchJSON<CourseEngagement>(`/courses/${courseId}/engagement`),
     staleTime: 60_000,
     enabled: !isNaN(courseId),
   })

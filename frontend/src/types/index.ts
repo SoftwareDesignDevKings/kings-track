@@ -59,6 +59,39 @@ export interface CourseMatrix {
   students: StudentRow[]
 }
 
+// ─── Engagement ──────────────────────────────────────────────────────────────
+
+export interface CourseEngagementStudent {
+  id: number
+  name: string
+  sortable_name: string | null
+  page_views: number | null
+  page_views_level: number | null   // 0–3 Canvas bucket
+  max_page_views: number | null
+  participations: number | null
+  participations_level: number | null
+  max_participations: number | null
+  tardiness_on_time: number | null
+  tardiness_late: number | null
+  tardiness_missing: number | null
+  total_activity_time_seconds: number | null
+  last_activity_at: string | null
+}
+
+export interface CourseActivityDay {
+  date: string
+  views: number | null
+  participations: number | null
+}
+
+export interface CourseEngagement {
+  course_id: number
+  course_name: string
+  synced_at: string | null
+  students: CourseEngagementStudent[]
+  course_activity: CourseActivityDay[]
+}
+
 // ─── Sync ────────────────────────────────────────────────────────────────────
 
 export interface SyncLogEntry {

@@ -204,7 +204,7 @@ class CanvasClient:
             "type[]": "StudentEnrollment",
             "state[]": "active",
             "per_page": 100,
-            "include[]": ["grades", "email"],
+            "include[]": ["grades", "email", "total_activity_time"],
         }
         if since:
             params["updated_after"] = since
@@ -249,3 +249,18 @@ class CanvasClient:
             f"/api/v1/courses/{course_id}/students/submissions",
             params=params,
         )
+
+    def list_student_summaries(self, course_id: int) -> AsyncIterator[dict]:
+        """Yield per-student engagement summaries (page views, participations, tardiness)."""
+        return self.get_paginated(
+            f"/api/v1/courses/{course_id}/analytics/student_summaries",
+            params={"per_page": 100},
+        )
+
+    async def get_course_activity(self, course_id: int) -> list[dict]:
+        """Return course-wide daily page view and participation counts."""
+        resp = await self._request(
+            "GET",
+            f"/api/v1/courses/{course_id}/analytics/activity",
+        )
+        return resp.json()
