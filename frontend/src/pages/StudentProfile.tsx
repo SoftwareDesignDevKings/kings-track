@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
 import {
@@ -11,6 +11,7 @@ import {
   AttendanceByClassChart,
 } from '../components/charts'
 import { useStudentProfile, useStudentLearningOverview } from '../services/api'
+import { downloadCsv } from '../lib/downloadCsv'
 
 type TabId = 'overview' | 'canvas' | 'edstem' | 'gradeo' | 'attendance'
 
@@ -69,6 +70,19 @@ export default function StudentProfile() {
 
   const { data: profile, isLoading: profileLoading, error: profileError } = useStudentProfile(id)
   const { data: learning, isLoading: learningLoading } = useStudentLearningOverview(id)
+  const [downloadingReport, setDownloadingReport] = useState(false)
+
+  async function handleExportReport() {
+    setDownloadingReport(true)
+    try {
+      const nameSlug = (profile?.student.name ?? 'student').toLowerCase().replace(/\s+/g, '-')
+      await downloadCsv(`/reports/students/${id}/report`, `student-${nameSlug}-report.csv`)
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingReport(false)
+    }
+  }
 
   const tabs = useMemo(() => {
     if (!learning) return ALL_TABS.filter(t => t.id === 'overview' || t.id === 'attendance')
@@ -159,6 +173,18 @@ export default function StudentProfile() {
                 <MetricCard label="Avg Score" value={profile.overview.avg_score !== null ? `${Math.round(profile.overview.avg_score)}%` : '-'} />
                 <MetricCard label="Attendance" value={profile.overview.attendance_rate !== null ? `${profile.overview.attendance_rate}%` : '-'} />
               </div>
+
+              <button
+                type="button"
+                onClick={handleExportReport}
+                disabled={downloadingReport}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                </svg>
+                {downloadingReport ? 'Downloading\u2026' : 'Export Report'}
+              </button>
             </div>
 
             {/* Tabs */}

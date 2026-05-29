@@ -4,8 +4,10 @@ import { buildEdStemMatrixTableModel } from './matrixTableAdapters'
 
 interface Props {
   matrix: EdStemMatrix
+  onExport?: () => void
+  exportLoading?: boolean
 }
 
-export default function EdStemLessonTable({ matrix }: Props) {
-  return <MatrixTable model={buildEdStemMatrixTableModel(matrix)} />
+export default function EdStemLessonTable({ matrix, onExport, exportLoading }: Props) {
+  return <MatrixTable model={{ ...buildEdStemMatrixTableModel(matrix), onExport, exportLoading }} />
 }

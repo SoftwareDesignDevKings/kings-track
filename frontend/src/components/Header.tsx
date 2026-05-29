@@ -40,6 +40,12 @@ export default function Header() {
               >
                 Students
               </Link>
+              <Link
+                to="/reports"
+                className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+              >
+                Reports
+              </Link>
               {currentUser?.role === 'admin' && (
                 <Link
                   to="/admin"
