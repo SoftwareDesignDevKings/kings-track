@@ -220,6 +220,34 @@ async def sync_assignments(
             },
         )
 
+        rubric = assignment.get("rubric", [])
+        if rubric and isinstance(rubric, list):
+            for idx, criterion in enumerate(rubric):
+                crit_id = criterion.get("id")
+                if not crit_id:
+                    continue
+                await db.execute(
+                    text("""
+                        INSERT INTO rubric_criteria (id, assignment_id, description, long_description, points, position, synced_at)
+                        VALUES (:id, :assignment_id, :description, :long_description, :points, :position, :synced_at)
+                        ON CONFLICT (id) DO UPDATE SET
+                            description = EXCLUDED.description,
+                            long_description = EXCLUDED.long_description,
+                            points = EXCLUDED.points,
+                            position = EXCLUDED.position,
+                            synced_at = EXCLUDED.synced_at
+                    """),
+                    {
+                        "id": str(crit_id),
+                        "assignment_id": assignment["id"],
+                        "description": criterion.get("description", ""),
+                        "long_description": criterion.get("long_description"),
+                        "points": criterion.get("points"),
+                        "position": idx,
+                        "synced_at": now,
+                    },
+                )
+
         count += 1
         if count % 50 == 0:
             await db.commit()
@@ -318,14 +346,14 @@ async def compute_metrics(db: AsyncSession, course_id: int) -> int:
                 e.user_id,
                 -- completion_rate: % of published assignments with any submission
                 COALESCE(
-                    1.0 * SUM(CASE WHEN s.workflow_state != 'unsubmitted' THEN 1 ELSE 0 END) /
+                    1.0 * SUM(CASE WHEN s.excused = true OR s.workflow_state IN ('submitted', 'pending_review') OR (s.workflow_state = 'graded' AND COALESCE(s.score, 0) > 0) THEN 1 ELSE 0 END) /
                     NULLIF(COUNT(a.id), 0),
                     0
                 ) AS completion_rate,
                 -- on_time_rate: % of submitted assignments that were not late
                 COALESCE(
-                    1.0 * SUM(CASE WHEN s.workflow_state != 'unsubmitted' AND s.late = false THEN 1 ELSE 0 END) /
-                    NULLIF(SUM(CASE WHEN s.workflow_state != 'unsubmitted' THEN 1 ELSE 0 END), 0),
+                    1.0 * SUM(CASE WHEN (s.excused = true OR s.workflow_state IN ('submitted', 'pending_review') OR (s.workflow_state = 'graded' AND COALESCE(s.score, 0) > 0)) AND s.late = false THEN 1 ELSE 0 END) /
+                    NULLIF(SUM(CASE WHEN s.excused = true OR s.workflow_state IN ('submitted', 'pending_review') OR (s.workflow_state = 'graded' AND COALESCE(s.score, 0) > 0) THEN 1 ELSE 0 END), 0),
                     0
                 ) AS on_time_rate,
                 e.current_score,

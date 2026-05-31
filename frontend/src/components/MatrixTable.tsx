@@ -692,10 +692,12 @@ export default function MatrixTable({ model }: Props) {
       cell: info => info.getValue(),
       sortingFn: 'alphanumeric',
     }),
-    columnHelper.accessor(row => row.summaryValue ?? -1, {
-      id: 'completion',
-      header: model.summaryHeader ?? 'Completion',
-    }),
+    ...(model.hideCompletionColumn ? [] : [
+      columnHelper.accessor(row => row.summaryValue ?? -1, {
+        id: 'completion',
+        header: model.summaryHeader ?? 'Completion',
+      })
+    ]),
     columnHelper.accessor(row => row.lateCount ?? 0, { id: 'lateCount', header: 'Late' }),
     columnHelper.accessor(row => row.missingCount ?? 0, { id: 'missingCount', header: 'Missing' }),
     columnHelper.accessor(row => row.averageMarkPct ?? -1, { id: 'averageMarkPct', header: 'Avg mark' }),
@@ -1090,7 +1092,7 @@ export default function MatrixTable({ model }: Props) {
             <thead>
               {model.columnGroups.length >= 1 && (
               <tr className="bg-slate-50 border-b border-slate-200">
-                {table.getHeaderGroups()[0].headers.slice(0, 2).map(header => (
+                {table.getHeaderGroups()[0].headers.slice(0, model.hideCompletionColumn ? 1 : 2).map(header => (
                   <th
                     key={header.id}
                     ref={element => {
@@ -1166,8 +1168,8 @@ export default function MatrixTable({ model }: Props) {
 
             <tbody className="divide-y divide-slate-100">
               {visibleRows.length === 0 ? (
-                <tr>
-                  <td colSpan={flattenedColumns.length + 2} className="bg-slate-100 p-0">
+                <tr className="bg-slate-100 hover:bg-slate-100">
+                  <td colSpan={flattenedColumns.length + (model.hideCompletionColumn ? 1 : 2)} className="bg-slate-100 p-0">
                     <div
                       role="status"
                       className="sticky left-0 flex min-h-48 items-center justify-center px-4 text-center text-sm font-medium text-slate-500"
@@ -1185,9 +1187,11 @@ export default function MatrixTable({ model }: Props) {
                     <td className={`sticky-col-1 border-r border-slate-200 px-4 py-2.5 ${rowBg}`}>
                       <span className="text-sm font-medium text-slate-800">{original.name}</span>
                     </td>
-                    <td className={`sticky-col-2 border-r border-slate-200 px-3 py-2.5 ${rowBg}`}>
-                      <CompletionBar value={original.summaryValue} />
-                    </td>
+                    {!model.hideCompletionColumn && (
+                      <td className={`sticky-col-2 border-r border-slate-200 px-3 py-2.5 ${rowBg}`}>
+                        <CompletionBar value={original.summaryValue} />
+                      </td>
+                    )}
                     {flattenedColumns.map(column => {
                       const cell = original.cells[column.id]
                       const lateCellClass = displayMode === 'marks' && cell?.flags?.late
@@ -1214,9 +1218,11 @@ export default function MatrixTable({ model }: Props) {
                     <td className={`sticky-col-1 border-r border-slate-200 px-4 py-2 ${rowBg} ${topBorder}`}>
                       <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
                     </td>
-                    <td className={`sticky-col-2 border-r border-slate-200 px-3 py-2 text-sm ${rowBg} ${topBorder}`}>
-                      {formatPercent(columnSummaries.completion[stat])}
-                    </td>
+                    {!model.hideCompletionColumn && (
+                      <td className={`sticky-col-2 border-r border-slate-200 px-3 py-2 text-sm ${rowBg} ${topBorder}`}>
+                        {formatPercent(columnSummaries.completion[stat])}
+                      </td>
+                    )}
                     {flattenedColumns.map(column => (
                       <td
                         key={column.id}

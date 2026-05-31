@@ -285,12 +285,20 @@ export default function Admin() {
         <div className="space-y-8">
           {/* ── Data Sync ──────────────────────────────────────────── */}
           <section className={`rounded-xl border border-slate-200 bg-white overflow-hidden ${activeTab === 'sync' ? '' : 'hidden'}`}>
-            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900">Data Sync</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Canvas data syncs automatically. Incremental updates run every 30 minutes, with a full sync every 6 hours.
-                </p>
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${isRunning ? 'bg-amber-400 animate-pulse' : health?.canvas_configured ? 'bg-emerald-400' : 'bg-slate-300'}`} />
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Data Sync</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {isRunning
+                      ? liveProgress?.phase ?? 'Syncing now…'
+                      : health?.canvas_configured
+                        ? `Last synced ${formatLastSync(lastSync)}`
+                        : 'Canvas not configured'}
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => triggerSync.mutate()}
@@ -301,126 +309,44 @@ export default function Admin() {
               </button>
             </div>
 
+            {/* Progress */}
             <div className="px-5 py-5 border-b border-slate-100 bg-slate-50/60 space-y-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-3 text-sm text-slate-700">
-                  <span className={`h-2.5 w-2.5 rounded-full ${isRunning ? 'bg-amber-400 animate-pulse' : health?.canvas_configured ? 'bg-emerald-400' : 'bg-slate-300'}`} />
-                  <span className="font-medium">
-                    {isRunning
-                      ? liveProgress?.phase ?? 'Syncing now'
-                      : health?.canvas_configured
-                        ? `Last sync ${formatLastSync(lastSync)}`
-                        : 'Canvas not configured'}
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap gap-2 text-xs">
-                  {hasLiveProgress ? (
-                    <>
-                      <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-600 ring-1 ring-slate-200">
-                        {liveCompletedSteps}/{liveTotalSteps || '?'} steps
-                      </span>
-                      <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-600 ring-1 ring-slate-200">
-                        {liveRemainingSteps} left
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-600 ring-1 ring-slate-200">
-                        {syncedWhitelistedCourses.length}/{whitelist.length} synced
-                      </span>
-                      <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-600 ring-1 ring-slate-200">
-                        {pendingWhitelistedCourses.length} waiting
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
               <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      {hasLiveProgress ? 'Current sync progress' : 'Sync coverage'}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {hasLiveProgress
-                        ? liveTotalSteps > 0
-                          ? `${liveCompletedSteps} of ${liveTotalSteps} sync steps have finished in this run.`
-                          : 'Preparing this sync run now.'
-                        : whitelist.length === 0
-                          ? 'No courses are whitelisted yet, so there is nothing queued for sync.'
-                          : `${syncedWhitelistedCourses.length} of ${whitelist.length} whitelisted courses have been synced into the dashboard.`}
-                    </p>
-                  </div>
-                  <p className="text-sm font-semibold text-slate-700">
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-sm font-medium text-slate-700">
                     {hasLiveProgress
-                      ? liveTotalSteps > 0 ? `${Math.round(liveProgressPercent)}%` : '…'
-                      : whitelist.length === 0 ? '0%' : `${Math.round(syncCoverage)}%`}
+                      ? liveTotalSteps > 0
+                        ? `${liveCompletedSteps} / ${liveTotalSteps} steps`
+                        : 'Preparing…'
+                      : whitelist.length === 0
+                        ? 'No courses whitelisted'
+                        : `${syncedWhitelistedCourses.length} / ${whitelist.length} courses synced`}
+                  </p>
+                  <p className="text-sm font-semibold text-slate-700 tabular-nums">
+                    {hasLiveProgress
+                      ? liveTotalSteps > 0 ? `${Math.round(liveProgressPercent)}%` : '—'
+                      : whitelist.length === 0 ? '—' : `${Math.round(syncCoverage)}%`}
                   </p>
                 </div>
                 <div className="mt-3">
                   <StatusBar value={hasLiveProgress ? liveProgressPercent : syncCoverage} />
                 </div>
-                <p className="mt-3 text-xs text-slate-500">
-                  {hasLiveProgress
-                    ? liveTotalSteps > 0
-                      ? `${liveRemainingSteps} sync step${liveRemainingSteps === 1 ? '' : 's'} left.${liveCurrentCourse ? ` Working on ${formatCourseLabel(liveCurrentCourse.name, liveCurrentCourse.course_code)} now.` : ''}`
-                      : 'Fetching the sync plan before the detailed progress starts.'
-                    : pendingWhitelistedCourses.length === 0
-                      ? 'Everything in the whitelist has been synced.'
-                      : `${pendingWhitelistedCourses.length} whitelisted course${pendingWhitelistedCourses.length === 1 ? '' : 's'} still need${pendingWhitelistedCourses.length === 1 ? 's' : ''} to be synced.`}
-                </p>
-                {hasLiveProgress ? (
+                {hasLiveProgress && liveCurrentCourse && (
                   <p className="mt-3 text-xs text-slate-500">
-                    Current step: {liveProgress?.current_step?.replace(/_/g, ' ') ?? 'preparing'}.
+                    Syncing {formatCourseLabel(liveCurrentCourse.name, liveCurrentCourse.course_code)}
                   </p>
-                ) : latestSyncLog && (
-                  <p className={`mt-3 text-xs ${
-                    latestSyncLog.status === 'error' ? 'text-red-600' : 'text-slate-500'
-                  }`}>
-                    {latestSyncLog.error_message
-                      ? latestSyncLog.error_message
-                      : `Latest run: ${latestSyncLog.entity_type.replace(/_/g, ' ')} ${latestSyncLog.status}.`}
-                  </p>
+                )}
+                {!hasLiveProgress && latestSyncLog?.error_message && (
+                  <p className="mt-3 text-xs text-red-600">{latestSyncLog.error_message}</p>
                 )}
               </div>
 
+              {/* Course lists */}
               <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70">
-                  <div className="flex items-center justify-between border-b border-emerald-100 px-4 py-3">
-                    <p className="text-sm font-semibold text-emerald-900">
-                      {hasLiveProgress ? 'Finished this run' : 'Already synced'}
-                    </p>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                      {hasLiveProgress ? liveCompletedCourses.length : syncedWhitelistedCourses.length}
-                    </span>
-                  </div>
-                  <div className="max-h-52 overflow-y-auto divide-y divide-emerald-100">
-                    {hasLiveProgress ? (
-                      liveCompletedCourses.length === 0 ? (
-                        <p className="px-4 py-5 text-sm text-emerald-700/80">No courses have finished in this run yet.</p>
-                      ) : liveCompletedCourses.map(course => (
-                        <div key={course.course_id} className="px-4 py-3 text-sm font-medium text-slate-800">
-                          {formatCourseLabel(course.name, course.course_code)}
-                        </div>
-                      ))
-                    ) : syncedCoursesLoading ? (
-                      <p className="px-4 py-5 text-sm text-emerald-700/80">Loading synced courses…</p>
-                    ) : syncedWhitelistedCourses.length === 0 ? (
-                      <p className="px-4 py-5 text-sm text-emerald-700/80">No whitelisted courses have been synced yet.</p>
-                    ) : syncedWhitelistedCourses.map(course => (
-                      <div key={course.course_id} className="px-4 py-3 text-sm font-medium text-slate-800">
-                        {formatCourseLabel(course.name, course.course_code)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
                 <div className="rounded-xl border border-amber-200 bg-amber-50/70">
                   <div className="flex items-center justify-between border-b border-amber-100 px-4 py-3">
                     <p className="text-sm font-semibold text-amber-900">
-                      {hasLiveProgress ? 'Still queued in this run' : 'Still waiting on sync'}
+                      {hasLiveProgress ? 'Queued' : 'Pending'}
                     </p>
                     <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-700">
                       {hasLiveProgress ? livePendingCourses.length : pendingWhitelistedCourses.length}
@@ -429,17 +355,47 @@ export default function Admin() {
                   <div className="max-h-52 overflow-y-auto divide-y divide-amber-100">
                     {hasLiveProgress ? (
                       livePendingCourses.length === 0 ? (
-                        <p className="px-4 py-5 text-sm text-amber-700/80">No queued courses left in this run.</p>
+                        <p className="px-4 py-5 text-sm text-amber-700/80">All done</p>
                       ) : livePendingCourses.map(course => (
                         <div key={course.course_id} className="px-4 py-3 text-sm font-medium text-slate-800">
                           {formatCourseLabel(course.name, course.course_code)}
                         </div>
                       ))
                     ) : whitelistLoading ? (
-                      <p className="px-4 py-5 text-sm text-amber-700/80">Loading whitelist…</p>
+                      <p className="px-4 py-5 text-sm text-amber-700/80">Loading…</p>
                     ) : pendingWhitelistedCourses.length === 0 ? (
-                      <p className="px-4 py-5 text-sm text-amber-700/80">Nothing is waiting on sync right now.</p>
+                      <p className="px-4 py-5 text-sm text-amber-700/80">All synced</p>
                     ) : pendingWhitelistedCourses.map(course => (
+                      <div key={course.course_id} className="px-4 py-3 text-sm font-medium text-slate-800">
+                        {formatCourseLabel(course.name, course.course_code)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70">
+                  <div className="flex items-center justify-between border-b border-emerald-100 px-4 py-3">
+                    <p className="text-sm font-semibold text-emerald-900">
+                      {hasLiveProgress ? 'Completed' : 'Synced'}
+                    </p>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                      {hasLiveProgress ? liveCompletedCourses.length : syncedWhitelistedCourses.length}
+                    </span>
+                  </div>
+                  <div className="max-h-52 overflow-y-auto divide-y divide-emerald-100">
+                    {hasLiveProgress ? (
+                      liveCompletedCourses.length === 0 ? (
+                        <p className="px-4 py-5 text-sm text-emerald-700/80">None yet</p>
+                      ) : liveCompletedCourses.map(course => (
+                        <div key={course.course_id} className="px-4 py-3 text-sm font-medium text-slate-800">
+                          {formatCourseLabel(course.name, course.course_code)}
+                        </div>
+                      ))
+                    ) : syncedCoursesLoading ? (
+                      <p className="px-4 py-5 text-sm text-emerald-700/80">Loading…</p>
+                    ) : syncedWhitelistedCourses.length === 0 ? (
+                      <p className="px-4 py-5 text-sm text-emerald-700/80">None yet</p>
+                    ) : syncedWhitelistedCourses.map(course => (
                       <div key={course.course_id} className="px-4 py-3 text-sm font-medium text-slate-800">
                         {formatCourseLabel(course.name, course.course_code)}
                       </div>

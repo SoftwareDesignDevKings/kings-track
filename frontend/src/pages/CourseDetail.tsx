@@ -11,12 +11,13 @@ import {
   getCanvasDueNowCount,
   prepareCanvasActivityView,
 } from '../components/activityTableModel'
-import { useCourseMatrix, useCourseEngagement, useEdStemMatrix, useGradeoReport, useGradeoTopicBands } from '../services/api'
+import { useCourseMatrix, useCourseEngagement, useEdStemMatrix, useGradeoReport, useGradeoTopicBands, useTrackableAssignments } from '../services/api'
 import EngagementTable from '../components/EngagementTable'
 import EngagementTimelineChart from '../components/charts/EngagementTimelineChart'
 import { downloadCsv } from '../lib/downloadCsv'
+import AssignmentTrackingTab from '../components/AssignmentTrackingTab'
 
-type TabId = 'activities' | 'engagement' | 'gradeo' | 'topic_bands' | 'edstem'
+type TabId = 'activities' | 'engagement' | 'gradeo' | 'topic_bands' | 'edstem' | 'tracking'
 
 interface Tab {
   id: TabId
@@ -29,10 +30,11 @@ const TABS: Tab[] = [
   { id: 'gradeo', label: 'Gradeo' },
   { id: 'topic_bands', label: 'Topic Bands' },
   { id: 'engagement', label: 'Engagement' },
+  { id: 'tracking', label: 'Tracking' },
 ]
 
 function getTabFromSearch(value: string | null): TabId {
-  if (value === 'gradeo' || value === 'edstem' || value === 'engagement') return value
+  if (value === 'gradeo' || value === 'edstem' || value === 'engagement' || value === 'tracking') return value
   if (value === 'topic-bands' || value === 'topic_bands') return 'topic_bands'
   return 'activities'
 }
@@ -58,6 +60,7 @@ export default function CourseDetail() {
     isLoading: gradeoTopicBandsLoading,
     error: gradeoTopicBandsError,
   } = useGradeoTopicBands(id)
+  const { data: trackableAssignments, isLoading: trackingLoading } = useTrackableAssignments(id)
 
   const totalStudents = matrix?.students.length ?? 0
   const totalAssignments = matrix?.assignment_groups.reduce(
@@ -79,9 +82,10 @@ export default function CourseDetail() {
     if (tab.id === 'gradeo') return gradeoMapped
     if (tab.id === 'topic_bands') return gradeoMapped
     if (tab.id === 'edstem') return edStemMatrix?.mapped
+    if (tab.id === 'tracking') return (trackableAssignments?.length ?? 0) > 0
     return true
-  }), [edStemMatrix?.mapped, gradeoMapped])
-  const tabAvailabilityLoaded = !edStemLoading && !engagementLoading && !gradeoLoading && !gradeoTopicBandsLoading
+  }), [edStemMatrix?.mapped, gradeoMapped, trackableAssignments])
+  const tabAvailabilityLoaded = !edStemLoading && !engagementLoading && !gradeoLoading && !gradeoTopicBandsLoading && !trackingLoading
   const [downloadingClass, setDownloadingClass] = useState(false)
   const [downloadingGradeo, setDownloadingGradeo] = useState(false)
   const [downloadingClassList, setDownloadingClassList] = useState(false)
@@ -366,6 +370,12 @@ export default function CourseDetail() {
                   No Gradeo topic bands have been imported for this course yet.
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'tracking' && (
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              <AssignmentTrackingTab courseId={id} />
             </div>
           )}
         </section>

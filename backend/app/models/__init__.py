@@ -34,6 +34,9 @@ from app.models.meeting import Meeting
 from app.models.attendance_record import AttendanceRecord
 from app.models.canvas_engagement import CanvasEngagement
 from app.models.canvas_course_activity import CanvasCourseActivity
+from app.models.rubric_criterion import RubricCriterion
+from app.models.tracking_snapshot import TrackingSnapshot
+from app.models.tracking_score import TrackingScore
 
 __all__ = [
     "Base",
@@ -72,4 +75,7 @@ __all__ = [
     "AttendanceRecord",
     "CanvasEngagement",
     "CanvasCourseActivity",
+    "RubricCriterion",
+    "TrackingSnapshot",
+    "TrackingScore",
 ]
