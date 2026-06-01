@@ -312,6 +312,27 @@ export default function Admin() {
             {/* Progress */}
             <div className="px-5 py-5 border-b border-slate-100 bg-slate-50/60 space-y-4">
               <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+                <div className="mb-3 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {hasLiveProgress ? 'Current sync progress' : 'Sync coverage'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {hasLiveProgress
+                        ? liveTotalSteps > 0
+                          ? `${liveCompletedSteps} of ${liveTotalSteps} sync steps have finished in this run`
+                          : 'Preparing sync steps for this run'
+                        : whitelist.length === 0
+                          ? 'No whitelisted courses are ready to sync'
+                          : `${syncedWhitelistedCourses.length} of ${whitelist.length} whitelisted courses have been synced into the dashboard`}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {hasLiveProgress
+                      ? liveTotalSteps > 0 ? `${liveRemainingSteps} left` : 'Preparing'
+                      : whitelist.length === 0 ? '—' : `${syncedWhitelistedCourses.length}/${whitelist.length} synced`}
+                  </span>
+                </div>
                 <div className="flex items-center justify-between gap-4">
                   <p className="text-sm font-medium text-slate-700">
                     {hasLiveProgress
@@ -336,6 +357,11 @@ export default function Admin() {
                     Syncing {formatCourseLabel(liveCurrentCourse.name, liveCurrentCourse.course_code)}
                   </p>
                 )}
+                {hasLiveProgress && liveProgress?.current_step && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Current step: {liveProgress.current_step}
+                  </p>
+                )}
                 {!hasLiveProgress && latestSyncLog?.error_message && (
                   <p className="mt-3 text-xs text-red-600">{latestSyncLog.error_message}</p>
                 )}
@@ -346,7 +372,7 @@ export default function Admin() {
                 <div className="rounded-xl border border-amber-200 bg-amber-50/70">
                   <div className="flex items-center justify-between border-b border-amber-100 px-4 py-3">
                     <p className="text-sm font-semibold text-amber-900">
-                      {hasLiveProgress ? 'Queued' : 'Pending'}
+                      {hasLiveProgress ? 'Still queued in this run' : 'Still waiting on sync'}
                     </p>
                     <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-700">
                       {hasLiveProgress ? livePendingCourses.length : pendingWhitelistedCourses.length}
@@ -376,7 +402,7 @@ export default function Admin() {
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/70">
                   <div className="flex items-center justify-between border-b border-emerald-100 px-4 py-3">
                     <p className="text-sm font-semibold text-emerald-900">
-                      {hasLiveProgress ? 'Completed' : 'Synced'}
+                      {hasLiveProgress ? 'Finished this run' : 'Synced'}
                     </p>
                     <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700">
                       {hasLiveProgress ? liveCompletedCourses.length : syncedWhitelistedCourses.length}
