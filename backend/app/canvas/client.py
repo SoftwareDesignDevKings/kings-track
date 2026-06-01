@@ -219,7 +219,7 @@ class CanvasClient:
             f"/api/v1/courses/{course_id}/assignments",
             params={
                 "per_page": 100,
-                "include[]": ["assignment_group", "score_statistics"],
+                "include[]": ["assignment_group", "score_statistics", "rubric_definition"],
                 "order_by": "position",
             },
         )

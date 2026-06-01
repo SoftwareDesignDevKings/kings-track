@@ -28,6 +28,8 @@ def _submission_status(workflow_state: str | None, score, excused: bool | None) 
     if excused:
         return "excused"
     if workflow_state == "graded":
+        if score == 0:
+            return "not_started"
         return "completed"
     if workflow_state in ("submitted", "pending_review"):
         return "in_progress"
@@ -127,7 +129,7 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
                     WHEN e.user_id IS NULL OR COUNT(a.id) = 0 THEN NULL
                     ELSE 1.0 * SUM(
                         CASE
-                            WHEN s.excused = true OR s.workflow_state IN ('graded', 'submitted', 'pending_review') THEN 1
+                            WHEN s.excused = true OR s.workflow_state IN ('submitted', 'pending_review', 'graded') THEN 1
                             ELSE 0
                         END
                     ) / COUNT(a.id)

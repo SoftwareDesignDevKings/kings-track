@@ -528,3 +528,49 @@ export interface StudentLearningOverview {
   gradeo: Record<string, GradeoCourseBreakdown>
   struggling_areas: StrugglingArea[]
 }
+
+// ─── Assignment Tracking ──────────────────────────────────────────────────────
+
+export interface TrackableAssignment {
+  id: number
+  name: string
+  criteria_count: number
+}
+
+export interface RubricCriterion {
+  id: string
+  description: string
+  long_description: string | null
+  points: number | null
+  position: number
+}
+
+export interface TrackingCell {
+  score: number | null
+  comment: string | null
+}
+
+export interface TrackingScores {
+  [userId: string]: { [criterionId: string]: TrackingCell }
+}
+
+export interface TrackingSnapshotSummary {
+  id: number
+  committed_at: string
+  label: string | null
+}
+
+export interface TrackingDraftSnapshot {
+  id: number
+  created_at: string
+  label: string | null
+  scores: TrackingScores
+}
+
+export interface TrackingGrid {
+  assignment: { id: number; name: string }
+  criteria: RubricCriterion[]
+  students: Array<{ id: number; name: string; sortable_name: string | null }>
+  draft_snapshot: TrackingDraftSnapshot | null
+  committed_snapshots: TrackingSnapshotSummary[]
+}

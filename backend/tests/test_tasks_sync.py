@@ -272,7 +272,7 @@ async def test_compute_metrics_writes_completion_rate(db):
         {"cid": COURSE_ID},
     )
     seed(
-        "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, late, missing) VALUES (66601, 55501, :uid, :cid, 'graded', false, false) ON CONFLICT (assignment_id, user_id) DO NOTHING",
+        "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, score, late, missing) VALUES (66601, 55501, :uid, :cid, 'graded', 8.0, false, false) ON CONFLICT (assignment_id, user_id) DO NOTHING",
         {"uid": USER_ID, "cid": COURSE_ID},
     )
 
@@ -284,8 +284,54 @@ async def test_compute_metrics_writes_completion_rate(db):
         {"cid": COURSE_ID, "uid": USER_ID},
     )
     rate = result.scalar()
-    assert rate == 1.0  # 1 graded / 1 assignment = 100%
+    assert rate == 1.0  # 1 scored graded / 1 assignment = 100%
 
     # Cleanup in FK-safe order (submissions before assignments)
     cleanup("DELETE FROM submissions WHERE id = 66601")
     cleanup("DELETE FROM assignments WHERE id = 55501")
+
+
+async def test_compute_metrics_does_not_count_unscored_graded_submissions(db):
+    now = datetime.now(timezone.utc).isoformat()
+    seed(
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
+        {"id": COURSE_ID, "now": now},
+    )
+    seed(
+        "INSERT INTO users (id, name, sis_id) VALUES (:id, 'S', :sis) ON CONFLICT (id) DO NOTHING",
+        {"id": USER_ID, "sis": str(USER_ID)},
+    )
+    seed(
+        "INSERT INTO enrollments (id, course_id, user_id, role, enrollment_state) VALUES (:id, :cid, :uid, 'StudentEnrollment', 'active') ON CONFLICT (id) DO NOTHING",
+        {"id": ENROLLMENT_ID, "cid": COURSE_ID, "uid": USER_ID},
+    )
+    seed(
+        "INSERT INTO assignments (id, course_id, name, workflow_state) VALUES (55502, :cid, 'A2', 'published') ON CONFLICT (id) DO NOTHING",
+        {"cid": COURSE_ID},
+    )
+    seed(
+        "INSERT INTO assignments (id, course_id, name, workflow_state) VALUES (55503, :cid, 'A3', 'published') ON CONFLICT (id) DO NOTHING",
+        {"cid": COURSE_ID},
+    )
+    seed(
+        "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, late, missing) VALUES (66602, 55502, :uid, :cid, 'graded', false, false) ON CONFLICT (assignment_id, user_id) DO NOTHING",
+        {"uid": USER_ID, "cid": COURSE_ID},
+    )
+    seed(
+        "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, score, late, missing) VALUES (66603, 55503, :uid, :cid, 'graded', 0, false, false) ON CONFLICT (assignment_id, user_id) DO NOTHING",
+        {"uid": USER_ID, "cid": COURSE_ID},
+    )
+
+    count = await compute_metrics(db, COURSE_ID)
+
+    assert count == 1
+    result = await db.execute(
+        text("SELECT completion_rate, on_time_rate FROM student_metrics WHERE course_id = :cid AND user_id = :uid"),
+        {"cid": COURSE_ID, "uid": USER_ID},
+    )
+    rate, on_time_rate = result.fetchone()
+    assert rate == 0.0
+    assert on_time_rate == 0.0
+
+    cleanup("DELETE FROM submissions WHERE id IN (66602, 66603)")
+    cleanup("DELETE FROM assignments WHERE id IN (55502, 55503)")

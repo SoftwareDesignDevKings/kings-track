@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
@@ -80,9 +82,27 @@ async def list_available_courses():
         raise HTTPException(status_code=503, detail="Canvas API not configured")
     async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
         courses = await canvas.list_courses()
+        
+    current_courses = []
+    now = datetime.now(timezone.utc)
+    for c in courses:
+        term = c.get("term") or {}
+        start_at_str = term.get("start_at")
+        end_at_str = term.get("end_at")
+        
+        start_at = datetime.fromisoformat(start_at_str.replace("Z", "+00:00")) if start_at_str else None
+        end_at = datetime.fromisoformat(end_at_str.replace("Z", "+00:00")) if end_at_str else None
+        
+        if start_at and now < start_at:
+            continue
+        if end_at and now > end_at:
+            continue
+            
+        current_courses.append(c)
+
     return [
         {"id": c["id"], "name": c.get("name", ""), "course_code": c.get("course_code")}
-        for c in sorted(courses, key=lambda c: c.get("name", ""))
+        for c in sorted(current_courses, key=lambda c: c.get("name", ""))
     ]
 
 
