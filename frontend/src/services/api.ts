@@ -498,7 +498,7 @@ export function useTrackingGrid(courseId: number, assignmentId: number | null) {
 export function useSaveTrackingScores(courseId: number, assignmentId: number | null) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (scores: Array<{ user_id: number; criterion_id: string; score: number }>) =>
+    mutationFn: (scores: Array<{ user_id: number; criterion_id: string; score: number | null; comment: string | null }>) =>
       fetchJSON(`/courses/${courseId}/tracking/${assignmentId}/scores`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

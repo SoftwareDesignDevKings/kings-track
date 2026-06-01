@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -14,4 +14,5 @@ class TrackingScore(Base):
     snapshot_id: Mapped[int] = mapped_column(Integer, ForeignKey("tracking_snapshots.id"), index=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     rubric_criterion_id: Mapped[str] = mapped_column(String, ForeignKey("rubric_criteria.id"))
-    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)

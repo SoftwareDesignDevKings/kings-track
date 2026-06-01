@@ -75,14 +75,14 @@ async def get_tracking_grid(
     draft = draft_row.fetchone()
     if draft:
         score_rows = await db.execute(
-            text("SELECT user_id, rubric_criterion_id, score FROM tracking_scores WHERE snapshot_id = :sid"),
+            text("SELECT user_id, rubric_criterion_id, score, comment FROM tracking_scores WHERE snapshot_id = :sid"),
             {"sid": draft[0]},
         )
-        scores: dict[str, dict[str, int]] = {}
+        scores: dict[str, dict[str, dict]] = {}
         for sr in score_rows.fetchall():
             uid = str(sr[0])
             cid = str(sr[1])
-            scores.setdefault(uid, {})[cid] = sr[2]
+            scores.setdefault(uid, {})[cid] = {"score": sr[2], "comment": sr[3]}
         draft_snapshot = {"id": draft[0], "created_at": draft[1].isoformat(), "label": draft[2], "scores": scores}
 
     committed_rows = await db.execute(
@@ -111,7 +111,8 @@ async def get_tracking_grid(
 class ScoreEntry(BaseModel):
     user_id: int
     criterion_id: str
-    score: int
+    score: int | None = None
+    comment: str | None = None
 
 
 class SaveScoresRequest(BaseModel):
@@ -127,7 +128,7 @@ async def save_scores(
     user: dict = Depends(require_auth),
 ):
     for entry in body.scores:
-        if entry.score < 0 or entry.score > 3:
+        if entry.score is not None and (entry.score < 0 or entry.score > 3):
             raise HTTPException(400, f"Score must be 0-3, got {entry.score}")
 
     draft_row = await db.execute(
@@ -151,13 +152,25 @@ async def save_scores(
         snapshot_id = result.fetchone()[0]
 
     for entry in body.scores:
+        comment = entry.comment.strip() if entry.comment and entry.comment.strip() else None
+        # A cell with neither a score nor a comment is empty — remove the row entirely.
+        if entry.score is None and comment is None:
+            await db.execute(
+                text("""
+                    DELETE FROM tracking_scores
+                    WHERE snapshot_id = :sid AND user_id = :uid AND rubric_criterion_id = :cid
+                """),
+                {"sid": snapshot_id, "uid": entry.user_id, "cid": entry.criterion_id},
+            )
+            continue
         await db.execute(
             text("""
-                INSERT INTO tracking_scores (snapshot_id, user_id, rubric_criterion_id, score)
-                VALUES (:sid, :uid, :cid, :score)
-                ON CONFLICT (snapshot_id, user_id, rubric_criterion_id) DO UPDATE SET score = EXCLUDED.score
+                INSERT INTO tracking_scores (snapshot_id, user_id, rubric_criterion_id, score, comment)
+                VALUES (:sid, :uid, :cid, :score, :comment)
+                ON CONFLICT (snapshot_id, user_id, rubric_criterion_id)
+                DO UPDATE SET score = EXCLUDED.score, comment = EXCLUDED.comment
             """),
-            {"sid": snapshot_id, "uid": entry.user_id, "cid": entry.criterion_id, "score": entry.score},
+            {"sid": snapshot_id, "uid": entry.user_id, "cid": entry.criterion_id, "score": entry.score, "comment": comment},
         )
 
     await db.commit()
@@ -209,14 +222,14 @@ async def get_snapshot(
         raise HTTPException(404, "Snapshot not found")
 
     score_rows = await db.execute(
-        text("SELECT user_id, rubric_criterion_id, score FROM tracking_scores WHERE snapshot_id = :sid"),
+        text("SELECT user_id, rubric_criterion_id, score, comment FROM tracking_scores WHERE snapshot_id = :sid"),
         {"sid": snapshot_id},
     )
-    scores: dict[str, dict[str, int]] = {}
+    scores: dict[str, dict[str, dict]] = {}
     for sr in score_rows.fetchall():
         uid = str(sr[0])
         cid = str(sr[1])
-        scores.setdefault(uid, {})[cid] = sr[2]
+        scores.setdefault(uid, {})[cid] = {"score": sr[2], "comment": sr[3]}
 
     return {
         "id": snap[0],

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTrackableAssignments, useTrackingGrid, useSaveTrackingScores, useCommitSnapshot } from '../services/api'
-import type { TrackingScores } from '../types'
+import type { TrackingScores, TrackingCell } from '../types'
 import AssignmentTrackingTable from './AssignmentTrackingTable'
 
 interface Props {
@@ -119,11 +119,12 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
 
   const flushScores = useCallback(async () => {
     const current = dirtyRef.current
-    const entries = Object.entries(current).flatMap(([userId, criteria]) =>
-      Object.entries(criteria).map(([criterionId, score]) => ({
+    const entries = Object.entries(current).flatMap(([userId, cells]) =>
+      Object.entries(cells).map(([criterionId, cell]) => ({
         user_id: Number(userId),
         criterion_id: criterionId,
-        score,
+        score: cell.score,
+        comment: cell.comment,
       }))
     )
     if (entries.length === 0) return
@@ -162,15 +163,35 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
     return merged
   })()
 
-  const handleScoreChange = useCallback((userId: number, criterionId: string, score: number) => {
+  // The current value of a cell = dirty (unsaved) override, else the saved draft, else empty.
+  const currentCell = useCallback((userId: number, criterionId: string): TrackingCell => {
+    const uid = String(userId)
+    const dirty = dirtyRef.current[uid]?.[criterionId]
+    const base = grid?.draft_snapshot?.scores?.[uid]?.[criterionId]
+    return dirty ?? base ?? { score: null, comment: null }
+  }, [grid])
+
+  const setCell = useCallback((userId: number, criterionId: string, cell: TrackingCell) => {
     setDirtyScores((prev) => ({
       ...prev,
       [String(userId)]: {
         ...(prev[String(userId)] ?? {}),
-        [criterionId]: score,
+        [criterionId]: cell,
       },
     }))
   }, [])
+
+  const handleScoreChange = useCallback((userId: number, criterionId: string, score: number) => {
+    setCell(userId, criterionId, { ...currentCell(userId, criterionId), score })
+  }, [setCell, currentCell])
+
+  const handleClearScore = useCallback((userId: number, criterionId: string) => {
+    setCell(userId, criterionId, { ...currentCell(userId, criterionId), score: null })
+  }, [setCell, currentCell])
+
+  const handleCommentChange = useCallback((userId: number, criterionId: string, comment: string) => {
+    setCell(userId, criterionId, { ...currentCell(userId, criterionId), comment: comment.trim() ? comment : null })
+  }, [setCell, currentCell])
 
   const handleCommit = useCallback(async () => {
     if (Object.keys(dirtyRef.current).length > 0) {
@@ -264,6 +285,8 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
               students={grid.students}
               scores={displayScores}
               onScoreChange={handleScoreChange}
+              onClearScore={handleClearScore}
+              onCommentChange={handleCommentChange}
             />
           </div>
 
