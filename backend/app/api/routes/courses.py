@@ -129,7 +129,7 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
                     WHEN e.user_id IS NULL OR COUNT(a.id) = 0 THEN NULL
                     ELSE 1.0 * SUM(
                         CASE
-                            WHEN s.excused = true OR s.workflow_state IN ('submitted', 'pending_review') OR (s.workflow_state = 'graded' AND COALESCE(s.score, 0) > 0) THEN 1
+                            WHEN s.excused = true OR s.workflow_state IN ('submitted', 'pending_review', 'graded') THEN 1
                             ELSE 0
                         END
                     ) / COUNT(a.id)

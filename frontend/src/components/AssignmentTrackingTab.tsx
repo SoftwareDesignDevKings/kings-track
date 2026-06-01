@@ -9,6 +9,28 @@ interface Props {
 
 const AUTO_SAVE_DELAY_MS = 800
 
+function sameTrackingCell(a: TrackingCell | undefined, b: TrackingCell | undefined): boolean {
+  return a?.score === b?.score && a?.comment === b?.comment
+}
+
+export function removeSavedTrackingScores(current: TrackingScores, saved: TrackingScores): TrackingScores {
+  const next: TrackingScores = {}
+
+  for (const [userId, cells] of Object.entries(current)) {
+    const nextCells: TrackingScores[string] = {}
+    for (const [criterionId, cell] of Object.entries(cells)) {
+      if (!sameTrackingCell(cell, saved[userId]?.[criterionId])) {
+        nextCells[criterionId] = cell
+      }
+    }
+    if (Object.keys(nextCells).length > 0) {
+      next[userId] = nextCells
+    }
+  }
+
+  return next
+}
+
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg
@@ -100,7 +122,6 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
   const [dirtyScores, setDirtyScores] = useState<TrackingScores>({})
   const [commitLabel, setCommitLabel] = useState('')
   const [showCommitDialog, setShowCommitDialog] = useState(false)
-  const [saving, setSaving] = useState(false)
 
   const { data: assignments, isLoading: assignmentsLoading } = useTrackableAssignments(courseId)
   const { data: grid, isLoading: gridLoading } = useTrackingGrid(courseId, selectedAssignmentId)
@@ -116,10 +137,22 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
 
   const dirtyRef = useRef(dirtyScores)
   dirtyRef.current = dirtyScores
+  const saveInFlightRef = useRef<Promise<void> | null>(null)
+  const pendingFlushRef = useRef(false)
 
   const flushScores = useCallback(async () => {
-    const current = dirtyRef.current
-    const entries = Object.entries(current).flatMap(([userId, cells]) =>
+    if (saveInFlightRef.current) {
+      pendingFlushRef.current = true
+      await saveInFlightRef.current
+      if (pendingFlushRef.current) {
+        pendingFlushRef.current = false
+        await flushScores()
+      }
+      return
+    }
+
+    const savedSnapshot = dirtyRef.current
+    const entries = Object.entries(savedSnapshot).flatMap(([userId, cells]) =>
       Object.entries(cells).map(([criterionId, cell]) => ({
         user_id: Number(userId),
         criterion_id: criterionId,
@@ -128,12 +161,23 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
       }))
     )
     if (entries.length === 0) return
-    setSaving(true)
-    try {
+
+    const savePromise = (async () => {
       await saveMutation.mutateAsync(entries)
-      setDirtyScores({})
+      const nextDirtyScores = removeSavedTrackingScores(dirtyRef.current, savedSnapshot)
+      dirtyRef.current = nextDirtyScores
+      setDirtyScores(nextDirtyScores)
+    })()
+
+    saveInFlightRef.current = savePromise
+    try {
+      await savePromise
     } finally {
-      setSaving(false)
+      saveInFlightRef.current = null
+      if (pendingFlushRef.current && Object.keys(dirtyRef.current).length > 0) {
+        pendingFlushRef.current = false
+        void flushScores()
+      }
     }
   }, [saveMutation])
 
@@ -172,13 +216,17 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
   }, [grid])
 
   const setCell = useCallback((userId: number, criterionId: string, cell: TrackingCell) => {
-    setDirtyScores((prev) => ({
-      ...prev,
-      [String(userId)]: {
-        ...(prev[String(userId)] ?? {}),
-        [criterionId]: cell,
-      },
-    }))
+    setDirtyScores((prev) => {
+      const next = {
+        ...prev,
+        [String(userId)]: {
+          ...(prev[String(userId)] ?? {}),
+          [criterionId]: cell,
+        },
+      }
+      dirtyRef.current = next
+      return next
+    })
   }, [])
 
   const handleScoreChange = useCallback((userId: number, criterionId: string, score: number) => {
@@ -205,6 +253,7 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
 
   const handleAssignmentChange = useCallback((id: number | null) => {
     setSelectedAssignmentId(id)
+    dirtyRef.current = {}
     setDirtyScores({})
     setShowCommitDialog(false)
   }, [])

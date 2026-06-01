@@ -499,12 +499,52 @@ export function useSaveTrackingScores(courseId: number, assignmentId: number | n
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (scores: Array<{ user_id: number; criterion_id: string; score: number | null; comment: string | null }>) =>
-      fetchJSON(`/courses/${courseId}/tracking/${assignmentId}/scores`, {
+      fetchJSON<{ snapshot_id: number; saved: number }>(`/courses/${courseId}/tracking/${assignmentId}/scores`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scores }),
       }),
-    onSuccess: () => {
+    onSuccess: (data, scores) => {
+      queryClient.setQueryData<TrackingGrid>(['tracking-grid', courseId, assignmentId], (current) => {
+        if (!current) return current
+
+        const draft = current.draft_snapshot ?? {
+          id: data.snapshot_id,
+          created_at: new Date().toISOString(),
+          label: null,
+          scores: {},
+        }
+        const nextScores = { ...draft.scores }
+
+        for (const entry of scores) {
+          const userId = String(entry.user_id)
+          const existingUserScores = nextScores[userId] ?? {}
+          const nextUserScores = { ...existingUserScores }
+
+          if (entry.score === null && entry.comment === null) {
+            delete nextUserScores[entry.criterion_id]
+          } else {
+            nextUserScores[entry.criterion_id] = {
+              score: entry.score,
+              comment: entry.comment,
+            }
+          }
+
+          if (Object.keys(nextUserScores).length === 0) {
+            delete nextScores[userId]
+          } else {
+            nextScores[userId] = nextUserScores
+          }
+        }
+
+        return {
+          ...current,
+          draft_snapshot: {
+            ...draft,
+            scores: nextScores,
+          },
+        }
+      })
       queryClient.invalidateQueries({ queryKey: ['tracking-grid', courseId, assignmentId] })
     },
   })

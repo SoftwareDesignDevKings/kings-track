@@ -545,8 +545,13 @@ export interface RubricCriterion {
   position: number
 }
 
+export interface TrackingCell {
+  score: number | null
+  comment: string | null
+}
+
 export interface TrackingScores {
-  [userId: string]: { [criterionId: string]: number }
+  [userId: string]: { [criterionId: string]: TrackingCell }
 }
 
 export interface TrackingSnapshotSummary {

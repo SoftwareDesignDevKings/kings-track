@@ -40,6 +40,10 @@ const SCORE_LEGEND_COLORS: Record<number, string> = {
   3: 'bg-emerald-600 text-white',
 }
 
+export function countsTowardTrackingProgress(score: number | null | undefined): boolean {
+  return score !== null && score !== undefined && score > 0
+}
+
 // Shared base for the circular action buttons that reveal on hover.
 const CIRCLE_BASE =
   'flex h-6 w-6 translate-y-1 scale-90 transform items-center justify-center rounded-full opacity-0 transition duration-200 ease-out hover:-translate-y-0.5 focus:outline-none group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 motion-reduce:transform-none motion-reduce:transition-none'
@@ -282,7 +286,7 @@ export default function AssignmentTrackingTable({ criteria, students, scores, on
       }],
       rows: students.map(student => {
         const studentScores = scores[String(student.id)] ?? {}
-        const scoredCount = criteria.filter(c => studentScores[c.id]?.score != null).length
+        const scoredCount = criteria.filter(c => countsTowardTrackingProgress(studentScores[c.id]?.score)).length
         const summaryValue = criteria.length > 0 ? scoredCount / criteria.length : 0
 
         return {

@@ -344,7 +344,7 @@ async def compute_metrics(db: AsyncSession, course_id: int) -> int:
             SELECT
                 e.course_id,
                 e.user_id,
-                -- completion_rate: % of published assignments with any submission
+                -- completion_rate: % of published assignments with submitted or scored work
                 COALESCE(
                     1.0 * SUM(CASE WHEN s.excused = true OR s.workflow_state IN ('submitted', 'pending_review') OR (s.workflow_state = 'graded' AND COALESCE(s.score, 0) > 0) THEN 1 ELSE 0 END) /
                     NULLIF(COUNT(a.id), 0),
