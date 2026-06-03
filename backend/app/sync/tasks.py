@@ -226,11 +226,17 @@ async def sync_assignments(
                 crit_id = criterion.get("id")
                 if not crit_id:
                     continue
+                # Canvas rubric criterion ids are only unique within a rubric, and the same
+                # rubric is reused across assignments/sections — so the raw id collides on our
+                # global primary key. Namespace it per assignment to keep each assignment's
+                # criteria distinct (see migration 0021).
+                row_id = f"{assignment['id']}:{crit_id}"
                 await db.execute(
                     text("""
                         INSERT INTO rubric_criteria (id, assignment_id, description, long_description, points, position, synced_at)
                         VALUES (:id, :assignment_id, :description, :long_description, :points, :position, :synced_at)
                         ON CONFLICT (id) DO UPDATE SET
+                            assignment_id = EXCLUDED.assignment_id,
                             description = EXCLUDED.description,
                             long_description = EXCLUDED.long_description,
                             points = EXCLUDED.points,
@@ -238,7 +244,7 @@ async def sync_assignments(
                             synced_at = EXCLUDED.synced_at
                     """),
                     {
-                        "id": str(crit_id),
+                        "id": row_id,
                         "assignment_id": assignment["id"],
                         "description": criterion.get("description", ""),
                         "long_description": criterion.get("long_description"),
