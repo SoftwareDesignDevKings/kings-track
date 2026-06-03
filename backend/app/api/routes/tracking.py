@@ -198,12 +198,35 @@ async def commit_snapshot(
         raise HTTPException(404, "No draft snapshot to commit")
 
     now = datetime.now(timezone.utc)
+    committed_id = draft[0]
     await db.execute(
         text("UPDATE tracking_snapshots SET committed_at = :now, label = :label WHERE id = :id"),
-        {"now": now, "label": body.label, "id": draft[0]},
+        {"now": now, "label": body.label, "id": committed_id},
     )
+
+    # Recording a snapshot freezes a point-in-time copy but the teacher keeps working,
+    # so seed a fresh draft pre-populated with the just-committed scores to carry forward.
+    new_draft_result = await db.execute(
+        text("""
+            INSERT INTO tracking_snapshots (assignment_id, created_by_email, created_at)
+            VALUES (:aid, :email, :now)
+            RETURNING id
+        """),
+        {"aid": assignment_id, "email": user["email"], "now": now},
+    )
+    new_draft_id = new_draft_result.fetchone()[0]
+    await db.execute(
+        text("""
+            INSERT INTO tracking_scores (snapshot_id, user_id, rubric_criterion_id, score, comment)
+            SELECT :new_draft_id, user_id, rubric_criterion_id, score, comment
+            FROM tracking_scores
+            WHERE snapshot_id = :committed_id
+        """),
+        {"new_draft_id": new_draft_id, "committed_id": committed_id},
+    )
+
     await db.commit()
-    return {"id": draft[0], "committed_at": now.isoformat(), "label": body.label}
+    return {"id": committed_id, "committed_at": now.isoformat(), "label": body.label}
 
 
 @router.get("/{assignment_id}/snapshots/{snapshot_id}")

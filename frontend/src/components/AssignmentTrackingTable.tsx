@@ -17,6 +17,7 @@ interface Props {
   onScoreChange: (userId: number, criterionId: string, score: number) => void
   onClearScore: (userId: number, criterionId: string) => void
   onCommentChange: (userId: number, criterionId: string, comment: string) => void
+  readOnly?: boolean
 }
 
 const SCORE_LABELS: Record<number, string> = {
@@ -75,13 +76,42 @@ interface ScoreCellProps {
   onSelect: (v: number) => void
   onClear: () => void
   onCommentChange: (comment: string) => void
+  readOnly?: boolean
 }
 
-function ScoreCell({ score, comment, onSelect, onClear, onCommentChange }: ScoreCellProps) {
+function ScoreCell({ score, comment, onSelect, onClear, onCommentChange, readOnly = false }: ScoreCellProps) {
   const [commentOpen, setCommentOpen] = useState(false)
   const commentBtnRef = useRef<HTMLButtonElement>(null)
   const hasScore = score !== null
   const hasComment = !!comment
+
+  // Read-only (viewing a committed snapshot): show the static summary, no edit affordances.
+  if (readOnly) {
+    return (
+      <div className="flex h-full min-h-[40px] w-full items-center justify-center px-1">
+        {hasScore ? (
+          <span
+            title={hasComment ? `Comment: ${comment}` : undefined}
+            className={`relative flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold tabular-nums ring-2 ${SCORE_COLORS[score].ring} ${SCORE_COLORS[score].bg} ${SCORE_COLORS[score].text}`}
+          >
+            {score}
+            {hasComment && (
+              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-white" />
+            )}
+          </span>
+        ) : hasComment ? (
+          <span
+            title={`Comment: ${comment}`}
+            className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-600 ring-1 ring-inset ring-blue-200"
+          >
+            <ChatIcon />
+          </span>
+        ) : (
+          <span className="h-1.5 w-1.5 rounded-full bg-slate-200" />
+        )}
+      </div>
+    )
+  }
 
   const commentButton = (
     <button
@@ -261,7 +291,7 @@ function CommentPopover({ anchorRef, initialValue, onSave, onClose }: CommentPop
   )
 }
 
-export default function AssignmentTrackingTable({ criteria, students, scores, onScoreChange, onClearScore, onCommentChange }: Props) {
+export default function AssignmentTrackingTable({ criteria, students, scores, onScoreChange, onClearScore, onCommentChange, readOnly = false }: Props) {
   const model = useMemo<MatrixTableModel>(() => {
     return {
       title: 'Assignment Tracking',
@@ -311,6 +341,7 @@ export default function AssignmentTrackingTable({ criteria, students, scores, on
                     onSelect={(v) => onScoreChange(student.id, c.id, v)}
                     onClear={() => onClearScore(student.id, c.id)}
                     onCommentChange={(text) => onCommentChange(student.id, c.id, text)}
+                    readOnly={readOnly}
                   />
                 ),
                 flags: {},
@@ -330,7 +361,7 @@ export default function AssignmentTrackingTable({ criteria, students, scores, on
         ),
       })),
     }
-  }, [criteria, students, scores, onScoreChange, onClearScore, onCommentChange])
+  }, [criteria, students, scores, onScoreChange, onClearScore, onCommentChange, readOnly])
 
   return <MatrixTable model={model} />
 }

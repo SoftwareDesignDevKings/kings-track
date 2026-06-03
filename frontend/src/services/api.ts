@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import type {
   Course, CourseMatrix, CourseEngagement, SyncStatus, HealthResponse, CanvasHealthResponse, AppUser,
   WhitelistedCourse, AvailableCourse,
@@ -6,7 +6,7 @@ import type {
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
   GradeoImportRun, GradeoCourseReport, GradeoTopicBands,
   StudentListItem, StudentProfileData, StudentLearningOverview,
-  TrackableAssignment, TrackingGrid,
+  TrackableAssignment, TrackingGrid, TrackingSnapshotDetail,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -562,5 +562,15 @@ export function useCommitSnapshot(courseId: number, assignmentId: number | null)
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tracking-grid', courseId, assignmentId] })
     },
+  })
+}
+
+export function useSnapshot(courseId: number, assignmentId: number | null, snapshotId: number | null) {
+  return useQuery<TrackingSnapshotDetail>({
+    queryKey: ['tracking-snapshot', courseId, assignmentId, snapshotId],
+    queryFn: () => fetchJSON<TrackingSnapshotDetail>(`/courses/${courseId}/tracking/${assignmentId}/snapshots/${snapshotId}`),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    enabled: !isNaN(courseId) && assignmentId !== null && snapshotId !== null,
   })
 }

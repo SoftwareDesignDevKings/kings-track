@@ -567,6 +567,13 @@ export interface TrackingDraftSnapshot {
   scores: TrackingScores
 }
 
+export interface TrackingSnapshotDetail {
+  id: number
+  committed_at: string | null
+  label: string | null
+  scores: TrackingScores
+}
+
 export interface TrackingGrid {
   assignment: { id: number; name: string }
   criteria: RubricCriterion[]
