@@ -91,6 +91,10 @@ def cleanup_tasks_data():
     cleanup("DELETE FROM student_metrics WHERE course_id = :id", {"id": COURSE_ID})
     cleanup("DELETE FROM submissions WHERE course_id = :id", {"id": COURSE_ID})
     cleanup("DELETE FROM enrollments WHERE course_id = :id", {"id": COURSE_ID})
+    cleanup(
+        "DELETE FROM rubric_criteria WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id = :id)",
+        {"id": COURSE_ID},
+    )
     cleanup("DELETE FROM assignments WHERE course_id = :id", {"id": COURSE_ID})
     cleanup("DELETE FROM users WHERE id = :id", {"id": USER_ID})
     cleanup("DELETE FROM courses WHERE id = :id", {"id": COURSE_ID})
@@ -190,6 +194,41 @@ async def test_sync_assignments_inserts_assignment(db):
     row = result.fetchone()
     assert row[0] == "Classwork"
     assert row[1] == 7
+
+
+async def test_sync_assignments_shared_rubric_criterion_id_does_not_collide(db):
+    """Two assignments reusing the same Canvas rubric (shared criterion ids like
+    '_3514') must each get their own namespaced rubric_criteria rows — not collide
+    on the global primary key (regression for course 12SENX showing no Tracking tab)."""
+    now = datetime.now(timezone.utc).isoformat()
+    seed(
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
+        {"id": COURSE_ID, "now": now},
+    )
+
+    shared_rubric = [
+        {"id": "_3514", "description": "Data Dictionary", "long_description": "d", "points": 10},
+        {"id": "blank", "description": "Other", "long_description": None, "points": 0},
+    ]
+    a1 = {**_make_assignment(60001), "rubric": shared_rubric}
+    a2 = {**_make_assignment(60002), "rubric": shared_rubric}
+
+    mock_canvas = MagicMock()
+    async def _groups(_course_id):
+        return [{"id": 10, "name": "Classwork", "position": 7}]
+    mock_canvas.list_assignment_groups = _groups
+    mock_canvas.list_assignments.return_value = _async_gen([a1, a2])
+
+    await sync_assignments(mock_canvas, db, COURSE_ID)
+
+    # Each assignment keeps its full set of criteria, keyed per assignment.
+    for aid in (60001, 60002):
+        result = await db.execute(
+            text("SELECT id FROM rubric_criteria WHERE assignment_id = :aid ORDER BY position"),
+            {"aid": aid},
+        )
+        ids = [r[0] for r in result.fetchall()]
+        assert ids == [f"{aid}:_3514", f"{aid}:blank"], f"assignment {aid} lost criteria to a collision: {ids}"
 
 
 # ---------------------------------------------------------------------------
