@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { useTrackableAssignments, useTrackingGrid, useSaveTrackingScores, useCommitSnapshot } from '../services/api'
-import type { TrackingScores, TrackingCell } from '../types'
+import { useTrackableAssignments, useTrackingGrid, useSaveTrackingScores, useCommitSnapshot, useSnapshot } from '../services/api'
+import type { TrackingScores, TrackingCell, TrackingSnapshotSummary } from '../types'
 import AssignmentTrackingTable from './AssignmentTrackingTable'
 
 interface Props {
@@ -8,6 +8,13 @@ interface Props {
 }
 
 const AUTO_SAVE_DELAY_MS = 800
+
+function formatSnapshotDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
 
 function sameTrackingCell(a: TrackingCell | undefined, b: TrackingCell | undefined): boolean {
   return a?.score === b?.score && a?.comment === b?.comment
@@ -117,14 +124,106 @@ function AssignmentPicker({ assignments, selectedId, onChange }: AssignmentPicke
   )
 }
 
+interface SnapshotPickerProps {
+  snapshots: TrackingSnapshotSummary[]
+  viewingId: number | null
+  onChange: (id: number | null) => void
+}
+
+// Compact toolbar selector for switching between the live draft and committed snapshots.
+// Keeps the snapshot list bounded (scrollable popover) so it never grows down the page.
+function SnapshotPicker({ snapshots, viewingId, onChange }: SnapshotPickerProps) {
+  const [open, setOpen] = useState(false)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const viewing = snapshots.find((s) => s.id === viewingId)
+
+  useEffect(() => {
+    if (!open) return
+    const handleOutside = (e: MouseEvent) => {
+      if (!popoverRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [open])
+
+  const select = (id: number | null) => {
+    onChange(id)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={popoverRef} className="relative w-64">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`inline-flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-1.5 text-sm font-medium shadow-sm transition-colors ${
+          open
+            ? 'border-brand-300 ring-2 ring-brand-100 text-slate-800'
+            : 'border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-800'
+        }`}
+      >
+        <span className="flex-1 truncate text-left">
+          {viewing
+            ? `${formatSnapshotDate(viewing.committed_at)}${viewing.label ? ` · ${viewing.label}` : ''}`
+            : 'Current draft'}
+        </span>
+        <ChevronIcon open={open} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-[calc(100%+0.4rem)] z-50 w-full origin-top-right rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+          <div className="max-h-64 overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => select(null)}
+              className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                viewingId === null
+                  ? 'bg-brand-50 text-brand-700'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              <span className="min-w-0 truncate font-medium">Current draft</span>
+              <span className="ml-auto text-xs text-slate-400">editing</span>
+            </button>
+            {snapshots.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => select(s.id)}
+                className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  s.id === viewingId
+                    ? 'bg-brand-50 text-brand-700'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate tabular-nums">{formatSnapshotDate(s.committed_at)}</span>
+                {s.label && <span className="min-w-0 truncate font-medium text-slate-700">{s.label}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AssignmentTrackingTab({ courseId }: Props) {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<number | null>(null)
   const [dirtyScores, setDirtyScores] = useState<TrackingScores>({})
   const [commitLabel, setCommitLabel] = useState('')
   const [showCommitDialog, setShowCommitDialog] = useState(false)
+  const [viewingSnapshotId, setViewingSnapshotId] = useState<number | null>(null)
 
   const { data: assignments, isLoading: assignmentsLoading } = useTrackableAssignments(courseId)
   const { data: grid, isLoading: gridLoading } = useTrackingGrid(courseId, selectedAssignmentId)
+  const { data: viewingSnapshot } = useSnapshot(courseId, selectedAssignmentId, viewingSnapshotId)
   const saveMutation = useSaveTrackingScores(courseId, selectedAssignmentId)
   const commitMutation = useCommitSnapshot(courseId, selectedAssignmentId)
 
@@ -249,12 +348,19 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
     await commitMutation.mutateAsync(commitLabel || undefined)
     setCommitLabel('')
     setShowCommitDialog(false)
+    setViewingSnapshotId(null)
   }, [flushScores, commitMutation, commitLabel])
 
   const handleAssignmentChange = useCallback((id: number | null) => {
     setSelectedAssignmentId(id)
     dirtyRef.current = {}
     setDirtyScores({})
+    setShowCommitDialog(false)
+    setViewingSnapshotId(null)
+  }, [])
+
+  const handleViewSnapshot = useCallback((id: number | null) => {
+    setViewingSnapshotId(id)
     setShowCommitDialog(false)
   }, [])
 
@@ -281,13 +387,26 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
 
         {selectedAssignmentId && grid && (
           <div className="flex items-center gap-2 ml-auto">
-            <button
-              onClick={() => setShowCommitDialog(true)}
-              disabled={commitMutation.isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Record Snapshot
-            </button>
+            {grid.committed_snapshots.length > 0 && (
+              <SnapshotPicker
+                snapshots={grid.committed_snapshots}
+                viewingId={viewingSnapshotId}
+                onChange={handleViewSnapshot}
+              />
+            )}
+            {viewingSnapshotId !== null ? (
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-500">
+                Read-only
+              </span>
+            ) : (
+              <button
+                onClick={() => setShowCommitDialog(true)}
+                disabled={commitMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Record Snapshot
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -327,39 +446,17 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
       )}
 
       {selectedAssignmentId && grid && (
-        <>
-          <div className="min-h-0 min-w-0 flex-1">
-            <AssignmentTrackingTable
-              criteria={grid.criteria}
-              students={grid.students}
-              scores={displayScores}
-              onScoreChange={handleScoreChange}
-              onClearScore={handleClearScore}
-              onCommentChange={handleCommentChange}
-            />
-          </div>
-
-          {grid.committed_snapshots.length > 0 && (
-            <div className="shrink-0">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                Snapshot History
-              </h3>
-              <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-                {grid.committed_snapshots.map((snap) => (
-                  <div key={snap.id} className="flex items-center gap-3 text-sm px-4 py-2.5">
-                    <span className="text-slate-400 tabular-nums">
-                      {new Date(snap.committed_at).toLocaleDateString(undefined, {
-                        year: 'numeric', month: 'short', day: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                      })}
-                    </span>
-                    {snap.label && <span className="font-medium text-slate-700">{snap.label}</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
+        <div className="min-h-0 min-w-0 flex-1">
+          <AssignmentTrackingTable
+            criteria={grid.criteria}
+            students={grid.students}
+            scores={viewingSnapshotId !== null ? (viewingSnapshot?.scores ?? displayScores) : displayScores}
+            onScoreChange={handleScoreChange}
+            onClearScore={handleClearScore}
+            onCommentChange={handleCommentChange}
+            readOnly={viewingSnapshotId !== null}
+          />
+        </div>
       )}
     </div>
   )
