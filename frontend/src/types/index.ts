@@ -581,3 +581,20 @@ export interface TrackingGrid {
   draft_snapshot: TrackingDraftSnapshot | null
   committed_snapshots: TrackingSnapshotSummary[]
 }
+
+// ─── AI chat assistant ───────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatStatus {
+  enabled: boolean
+  model: string
+}
+
+export interface ChatResponse {
+  reply: string
+  tool_calls: string[]
+}

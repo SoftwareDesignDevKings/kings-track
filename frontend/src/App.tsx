@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import Overview from './pages/Overview'
 import CourseDetail from './pages/CourseDetail'
 import Students from './pages/Students'
@@ -7,6 +7,14 @@ import Login from './pages/Login'
 import Admin from './pages/Admin'
 import ExtensionBridge from './pages/ExtensionBridge'
 import ProtectedRoute from './components/ProtectedRoute'
+import ChatWidget from './components/ChatWidget'
+
+function GlobalChat() {
+  // The assistant is available on every authenticated page, but not on login.
+  const { pathname } = useLocation()
+  if (pathname === '/login') return null
+  return <ChatWidget />
+}
 
 export default function App() {
   return (
@@ -20,6 +28,7 @@ export default function App() {
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
         <Route path="/extension-bridge" element={<ProtectedRoute><ExtensionBridge /></ProtectedRoute>} />
       </Routes>
+      <GlobalChat />
     </BrowserRouter>
   )
 }

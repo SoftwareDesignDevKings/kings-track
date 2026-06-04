@@ -44,3 +44,6 @@ run_local.py
 
 # Logs
 *.log
+
+# Local DB snapshots (contain real student PII — never commit)
+data-snapshots/

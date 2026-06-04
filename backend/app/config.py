@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # Cron / sync security
     cron_secret: str = ""
 
+    # AI chat assistant (Google Gemini)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_max_tool_iterations: int = 6
+
     # Environment & deployment
     environment: str = "development"
     deployment_target: str = "vercel"
@@ -84,6 +89,10 @@ class Settings(BaseSettings):
     @property
     def redis_configured(self) -> bool:
         return bool(self.redis_url)
+
+    @property
+    def gemini_configured(self) -> bool:
+        return bool(self.gemini_api_key)
 
 
 settings = Settings()

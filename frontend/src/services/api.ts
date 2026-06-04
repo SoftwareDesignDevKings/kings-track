@@ -7,6 +7,7 @@ import type {
   GradeoImportRun, GradeoCourseReport, GradeoTopicBands,
   StudentListItem, StudentProfileData, StudentLearningOverview,
   TrackableAssignment, TrackingGrid, TrackingSnapshotDetail,
+  ChatMessage, ChatStatus, ChatResponse,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -572,5 +573,25 @@ export function useSnapshot(courseId: number, assignmentId: number | null, snaps
     staleTime: 60_000,
     placeholderData: keepPreviousData,
     enabled: !isNaN(courseId) && assignmentId !== null && snapshotId !== null,
+  })
+}
+
+// ─── AI chat assistant ───────────────────────────────────────────────────────
+
+export function useChatStatus() {
+  return useQuery<ChatStatus>({
+    queryKey: ['chat-status'],
+    queryFn: () => fetchJSON<ChatStatus>('/chat/status'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+}
+
+/** Send the full conversation and get the assistant's next reply. */
+export function sendChatMessage(messages: ChatMessage[]): Promise<ChatResponse> {
+  return fetchJSON<ChatResponse>('/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
   })
 }
