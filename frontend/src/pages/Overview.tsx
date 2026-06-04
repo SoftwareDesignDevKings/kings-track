@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import Header from '../components/Header'
 import CourseCard from '../components/CourseCard'
 import CanvasOutageBanner from '../components/CanvasOutageBanner'
 import { useCourses, useHealth } from '../services/api'
+import type { Course } from '../types'
 
 function SetupBanner() {
   return (
@@ -25,11 +27,44 @@ function SetupBanner() {
   )
 }
 
+function CourseGrid({ courses }: { courses: Course[] }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {courses.map(course => (
+        <CourseCard key={course.id} course={course} />
+      ))}
+    </div>
+  )
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-4 w-4 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </svg>
+  )
+}
+
 export default function Overview() {
   const { data: courses, isLoading, error } = useCourses()
   const { data: health } = useHealth()
+  const [archivedOpen, setArchivedOpen] = useState(false)
 
   const canvasConfigured = health?.canvas_configured ?? true
+  const currentCourses = courses?.filter(course => !course.is_archived) ?? []
+  const archivedCourses = courses?.filter(course => course.is_archived) ?? []
+  const hasArchivedCourses = archivedCourses.length > 0
+  const courseSummary = courses
+    ? hasArchivedCourses
+      ? `${currentCourses.length} current, ${archivedCourses.length} archived`
+      : `${currentCourses.length} course${currentCourses.length !== 1 ? 's' : ''} synced`
+    : 'Loading…'
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -44,7 +79,7 @@ export default function Overview() {
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-slate-900">Courses</h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            {courses ? `${courses.length} course${courses.length !== 1 ? 's' : ''} synced` : 'Loading…'}
+            {courseSummary}
           </p>
         </div>
 
@@ -88,11 +123,36 @@ export default function Overview() {
 
         {/* Course grid */}
         {!isLoading && courses && courses.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {courses.map(course => (
-              <CourseCard key={course.id} course={course} />
-            ))}
-          </div>
+          <>
+            {currentCourses.length > 0 && <CourseGrid courses={currentCourses} />}
+
+            {hasArchivedCourses && (
+              <section className={currentCourses.length > 0 ? 'mt-10' : ''}>
+                <div className="mb-4 flex items-center justify-between gap-4 border-t border-slate-200 pt-5">
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-900">Archived</h3>
+                    <p className="text-sm text-slate-500 mt-0.5">
+                      {archivedCourses.length} course{archivedCourses.length !== 1 ? 's' : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    aria-expanded={archivedOpen}
+                    onClick={() => setArchivedOpen(open => !open)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+                    title={archivedOpen ? 'Collapse archived courses' : 'Expand archived courses'}
+                  >
+                    <ChevronIcon open={archivedOpen} />
+                    <span className="sr-only">
+                      {archivedOpen ? 'Collapse archived courses' : 'Expand archived courses'}
+                    </span>
+                  </button>
+                </div>
+
+                {archivedOpen && <CourseGrid courses={archivedCourses} />}
+              </section>
+            )}
+          </>
         )}
       </main>
     </div>

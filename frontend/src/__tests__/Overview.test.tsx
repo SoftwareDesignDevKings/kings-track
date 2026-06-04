@@ -1,4 +1,5 @@
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import Overview from '../pages/Overview'
 import { renderWithProviders } from './utils'
@@ -20,6 +21,9 @@ const mockCourse = {
   course_code: '11SENX',
   workflow_state: 'available',
   last_synced: '2026-03-25T10:00:00Z',
+  term_start_at: '2026-01-01T00:00:00Z',
+  term_end_at: '2026-12-31T23:59:59Z',
+  is_archived: false,
   student_count: 25,
   avg_completion_rate: 0.8,
   avg_on_time_rate: 0.9,
@@ -63,6 +67,46 @@ describe('Overview', () => {
     renderWithProviders(<Overview />)
     expect(screen.getByText('Software Engineering 2026')).toBeInTheDocument()
     expect(screen.getByText('SE Year 12')).toBeInTheDocument()
+  })
+
+  it('does not show Archived when no courses are archived', () => {
+    vi.mocked(useHealth).mockReturnValue({ data: { canvas_configured: true, status: 'ok', integrations: [] } } as any)
+    vi.mocked(useCourses).mockReturnValue({
+      data: [mockCourse],
+      isLoading: false,
+      error: null,
+    } as any)
+    renderWithProviders(<Overview />)
+    expect(screen.queryByRole('heading', { name: 'Archived' })).not.toBeInTheDocument()
+    expect(screen.getByText('1 course synced')).toBeInTheDocument()
+  })
+
+  it('shows archived courses below current courses and expands the section', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useHealth).mockReturnValue({ data: { canvas_configured: true, status: 'ok', integrations: [] } } as any)
+    vi.mocked(useCourses).mockReturnValue({
+      data: [
+        mockCourse,
+        { ...mockCourse, id: 2, name: 'Ancient History 2025', is_archived: true },
+      ],
+      isLoading: false,
+      error: null,
+    } as any)
+
+    renderWithProviders(<Overview />)
+
+    expect(screen.getByText('Software Engineering 2026')).toBeInTheDocument()
+    expect(screen.getByText('1 current, 1 archived')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Archived' })).toBeInTheDocument()
+    expect(screen.queryByText('Ancient History 2025')).not.toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: 'Expand archived courses' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(toggle)
+
+    expect(screen.getByText('Ancient History 2025')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Collapse archived courses' })).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('shows error message when API fails', () => {

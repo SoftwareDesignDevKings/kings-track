@@ -16,7 +16,8 @@ def clean_courses():
     cleanup("DELETE FROM assignments WHERE course_id = 5001")
     cleanup("DELETE FROM users WHERE id IN (500101, 500102)")
     cleanup("DELETE FROM course_whitelist WHERE course_id = 5001")
-    for course_id in [1001, 2001, 2002, 3001, 4001, 4002, 5001]:
+    cleanup("DELETE FROM course_whitelist WHERE course_id IN (6001, 6002)")
+    for course_id in [1001, 2001, 2002, 3001, 4001, 4002, 5001, 6001, 6002]:
         cleanup("DELETE FROM courses WHERE id = :id", {"id": course_id})
 
 
@@ -92,6 +93,39 @@ def test_list_courses_filters_by_whitelist(app_client):
     ids = [c["id"] for c in resp.json()]
     assert 4001 in ids
     assert 4002 not in ids
+
+
+def test_list_courses_marks_archived_from_term_end(app_client):
+    now = datetime.now(timezone.utc)
+    active_end = (now + timedelta(days=30)).isoformat()
+    archived_end = (now - timedelta(days=30)).isoformat()
+
+    seed(
+        """
+        INSERT INTO courses (id, name, course_code, workflow_state, synced_at, term_end_at, total_students)
+        VALUES (6001, 'Current Course', 'CUR6001', 'available', :now, :active_end, 0)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        {"now": now.isoformat(), "active_end": active_end},
+    )
+    seed(
+        """
+        INSERT INTO courses (id, name, course_code, workflow_state, synced_at, term_end_at, total_students)
+        VALUES (6002, 'Archived Course', 'ARC6002', 'available', :now, :archived_end, 0)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        {"now": now.isoformat(), "archived_end": archived_end},
+    )
+    seed("INSERT INTO course_whitelist (course_id) VALUES (6001), (6002) ON CONFLICT DO NOTHING")
+
+    resp = app_client.get("/api/courses")
+
+    cleanup("DELETE FROM course_whitelist WHERE course_id IN (6001, 6002)")
+    assert resp.status_code == 200
+    courses = {course["id"]: course for course in resp.json()}
+    assert courses[6001]["is_archived"] is False
+    assert courses[6002]["is_archived"] is True
+    assert courses[6002]["term_end_at"] is not None
 
 
 def test_list_courses_uses_due_now_average_completion(app_client):

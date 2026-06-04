@@ -116,6 +116,27 @@ async def test_list_courses_uses_teacher_courses_when_present(client):
 
 
 @respx.mock
+async def test_get_course_fetches_term_metadata(client):
+    route = respx.get(f"{BASE_URL}/api/v1/courses/42").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": 42,
+                "name": "Archived Course",
+                "term": {"start_at": "2025-01-01T00:00:00Z", "end_at": "2025-12-31T23:59:59Z"},
+            },
+        )
+    )
+
+    async with client:
+        course = await client.get_course(42)
+
+    assert course["id"] == 42
+    assert course["term"]["end_at"] == "2025-12-31T23:59:59Z"
+    assert route.calls[0].request.url.params.get_list("include[]") == ["term", "total_students"]
+
+
+@respx.mock
 async def test_list_courses_falls_back_to_admin_accounts(client):
     respx.get(f"{BASE_URL}/api/v1/courses").mock(
         return_value=httpx.Response(200, json=[])

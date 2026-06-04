@@ -146,6 +146,15 @@ class CanvasClient:
 
         return await self.list_admin_courses()
 
+    async def get_course(self, course_id: int) -> dict:
+        """Return one course's metadata, including its Canvas term."""
+        resp = await self._request(
+            "GET",
+            f"/api/v1/courses/{course_id}",
+            params={"include[]": ["term", "total_students"]},
+        )
+        return resp.json()
+
     async def list_manageable_accounts(self) -> list[dict]:
         """Return accounts the current user can manage as an admin."""
         accounts = []

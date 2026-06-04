@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.canvas.client import CanvasClient
+from app.canvas.client import CanvasAPIError, CanvasClient
 from app.models.submission import Submission
 
 logger = logging.getLogger(__name__)
@@ -34,21 +34,55 @@ async def sync_courses(canvas: CanvasClient, db: AsyncSession, whitelist_ids: li
     """Fetch and upsert courses from Canvas, filtered to whitelist IDs."""
     courses = await canvas.list_courses()
     allowed_ids = set(whitelist_ids or [])
-    if allowed_ids:
-        courses = [c for c in courses if int(c["id"]) in allowed_ids]
     now = _now()
+    if allowed_ids:
+        courses_by_id = {int(c["id"]): c for c in courses if int(c["id"]) in allowed_ids}
+        missing_ids = allowed_ids - set(courses_by_id)
+        archived_ids: set[int] = set()
+
+        if missing_ids:
+            result = await db.execute(
+                text("""
+                    SELECT id
+                    FROM courses
+                    WHERE id = ANY(:ids)
+                      AND term_end_at IS NOT NULL
+                      AND term_end_at < :now
+                """),
+                {"ids": list(missing_ids), "now": now},
+            )
+            archived_ids = {row[0] for row in result.fetchall()}
+
+        for course_id in sorted(missing_ids - archived_ids):
+            try:
+                course = await canvas.get_course(course_id)
+            except CanvasAPIError as exc:
+                logger.warning("Could not fetch metadata for whitelisted course %s: %s", course_id, exc)
+                continue
+            courses_by_id[int(course["id"])] = course
+
+        courses = list(courses_by_id.values())
 
     for course in courses:
+        term = course.get("term") or {}
         await db.execute(
             text("""
-                INSERT INTO courses (id, name, course_code, workflow_state, account_id, term_id, total_students, synced_at)
-                VALUES (:id, :name, :course_code, :workflow_state, :account_id, :term_id, :total_students, :synced_at)
+                INSERT INTO courses (
+                    id, name, course_code, workflow_state, account_id, term_id,
+                    term_start_at, term_end_at, total_students, synced_at
+                )
+                VALUES (
+                    :id, :name, :course_code, :workflow_state, :account_id, :term_id,
+                    :term_start_at, :term_end_at, :total_students, :synced_at
+                )
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     course_code = EXCLUDED.course_code,
                     workflow_state = EXCLUDED.workflow_state,
                     account_id = EXCLUDED.account_id,
                     term_id = EXCLUDED.term_id,
+                    term_start_at = COALESCE(EXCLUDED.term_start_at, courses.term_start_at),
+                    term_end_at = COALESCE(EXCLUDED.term_end_at, courses.term_end_at),
                     total_students = EXCLUDED.total_students,
                     synced_at = EXCLUDED.synced_at
             """),
@@ -59,6 +93,8 @@ async def sync_courses(canvas: CanvasClient, db: AsyncSession, whitelist_ids: li
                 "workflow_state": course.get("workflow_state"),
                 "account_id": course.get("account_id"),
                 "term_id": course.get("enrollment_term_id"),
+                "term_start_at": _parse_dt(term.get("start_at")),
+                "term_end_at": _parse_dt(term.get("end_at")),
                 "total_students": course.get("total_students", 0) or 0,
                 "synced_at": now,
             },
