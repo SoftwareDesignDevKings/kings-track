@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.canvas.client import CanvasClient
+from app.canvas.client import CanvasAPIError, CanvasClient
 from app.models.submission import Submission
 
 logger = logging.getLogger(__name__)
@@ -34,21 +34,55 @@ async def sync_courses(canvas: CanvasClient, db: AsyncSession, whitelist_ids: li
     """Fetch and upsert courses from Canvas, filtered to whitelist IDs."""
     courses = await canvas.list_courses()
     allowed_ids = set(whitelist_ids or [])
-    if allowed_ids:
-        courses = [c for c in courses if int(c["id"]) in allowed_ids]
     now = _now()
+    if allowed_ids:
+        courses_by_id = {int(c["id"]): c for c in courses if int(c["id"]) in allowed_ids}
+        missing_ids = allowed_ids - set(courses_by_id)
+        archived_ids: set[int] = set()
+
+        if missing_ids:
+            result = await db.execute(
+                text("""
+                    SELECT id
+                    FROM courses
+                    WHERE id = ANY(:ids)
+                      AND term_end_at IS NOT NULL
+                      AND term_end_at < :now
+                """),
+                {"ids": list(missing_ids), "now": now},
+            )
+            archived_ids = {row[0] for row in result.fetchall()}
+
+        for course_id in sorted(missing_ids - archived_ids):
+            try:
+                course = await canvas.get_course(course_id)
+            except CanvasAPIError as exc:
+                logger.warning("Could not fetch metadata for whitelisted course %s: %s", course_id, exc)
+                continue
+            courses_by_id[int(course["id"])] = course
+
+        courses = list(courses_by_id.values())
 
     for course in courses:
+        term = course.get("term") or {}
         await db.execute(
             text("""
-                INSERT INTO courses (id, name, course_code, workflow_state, account_id, term_id, total_students, synced_at)
-                VALUES (:id, :name, :course_code, :workflow_state, :account_id, :term_id, :total_students, :synced_at)
+                INSERT INTO courses (
+                    id, name, course_code, workflow_state, account_id, term_id,
+                    term_start_at, term_end_at, total_students, synced_at
+                )
+                VALUES (
+                    :id, :name, :course_code, :workflow_state, :account_id, :term_id,
+                    :term_start_at, :term_end_at, :total_students, :synced_at
+                )
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     course_code = EXCLUDED.course_code,
                     workflow_state = EXCLUDED.workflow_state,
                     account_id = EXCLUDED.account_id,
                     term_id = EXCLUDED.term_id,
+                    term_start_at = COALESCE(EXCLUDED.term_start_at, courses.term_start_at),
+                    term_end_at = COALESCE(EXCLUDED.term_end_at, courses.term_end_at),
                     total_students = EXCLUDED.total_students,
                     synced_at = EXCLUDED.synced_at
             """),
@@ -59,6 +93,8 @@ async def sync_courses(canvas: CanvasClient, db: AsyncSession, whitelist_ids: li
                 "workflow_state": course.get("workflow_state"),
                 "account_id": course.get("account_id"),
                 "term_id": course.get("enrollment_term_id"),
+                "term_start_at": _parse_dt(term.get("start_at")),
+                "term_end_at": _parse_dt(term.get("end_at")),
                 "total_students": course.get("total_students", 0) or 0,
                 "synced_at": now,
             },
@@ -220,6 +256,40 @@ async def sync_assignments(
             },
         )
 
+        rubric = assignment.get("rubric", [])
+        if rubric and isinstance(rubric, list):
+            for idx, criterion in enumerate(rubric):
+                crit_id = criterion.get("id")
+                if not crit_id:
+                    continue
+                # Canvas rubric criterion ids are only unique within a rubric, and the same
+                # rubric is reused across assignments/sections — so the raw id collides on our
+                # global primary key. Namespace it per assignment to keep each assignment's
+                # criteria distinct (see migration 0021).
+                row_id = f"{assignment['id']}:{crit_id}"
+                await db.execute(
+                    text("""
+                        INSERT INTO rubric_criteria (id, assignment_id, description, long_description, points, position, synced_at)
+                        VALUES (:id, :assignment_id, :description, :long_description, :points, :position, :synced_at)
+                        ON CONFLICT (id) DO UPDATE SET
+                            assignment_id = EXCLUDED.assignment_id,
+                            description = EXCLUDED.description,
+                            long_description = EXCLUDED.long_description,
+                            points = EXCLUDED.points,
+                            position = EXCLUDED.position,
+                            synced_at = EXCLUDED.synced_at
+                    """),
+                    {
+                        "id": row_id,
+                        "assignment_id": assignment["id"],
+                        "description": criterion.get("description", ""),
+                        "long_description": criterion.get("long_description"),
+                        "points": criterion.get("points"),
+                        "position": idx,
+                        "synced_at": now,
+                    },
+                )
+
         count += 1
         if count % 50 == 0:
             await db.commit()
@@ -316,16 +386,16 @@ async def compute_metrics(db: AsyncSession, course_id: int) -> int:
             SELECT
                 e.course_id,
                 e.user_id,
-                -- completion_rate: % of published assignments with any submission
+                -- completion_rate: % of published assignments with submitted or scored work
                 COALESCE(
-                    1.0 * SUM(CASE WHEN s.workflow_state != 'unsubmitted' THEN 1 ELSE 0 END) /
+                    1.0 * SUM(CASE WHEN s.excused = true OR s.workflow_state IN ('submitted', 'pending_review') OR (s.workflow_state = 'graded' AND COALESCE(s.score, 0) > 0) THEN 1 ELSE 0 END) /
                     NULLIF(COUNT(a.id), 0),
                     0
                 ) AS completion_rate,
                 -- on_time_rate: % of submitted assignments that were not late
                 COALESCE(
-                    1.0 * SUM(CASE WHEN s.workflow_state != 'unsubmitted' AND s.late = false THEN 1 ELSE 0 END) /
-                    NULLIF(SUM(CASE WHEN s.workflow_state != 'unsubmitted' THEN 1 ELSE 0 END), 0),
+                    1.0 * SUM(CASE WHEN (s.excused = true OR s.workflow_state IN ('submitted', 'pending_review') OR (s.workflow_state = 'graded' AND COALESCE(s.score, 0) > 0)) AND s.late = false THEN 1 ELSE 0 END) /
+                    NULLIF(SUM(CASE WHEN s.excused = true OR s.workflow_state IN ('submitted', 'pending_review') OR (s.workflow_state = 'graded' AND COALESCE(s.score, 0) > 0) THEN 1 ELSE 0 END), 0),
                     0
                 ) AS on_time_rate,
                 e.current_score,

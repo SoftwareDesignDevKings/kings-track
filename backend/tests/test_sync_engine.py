@@ -2,9 +2,11 @@
 Tests for SyncEngine.full_sync() guards and edge cases.
 """
 import pytest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, AsyncMock
 
-from app.sync.engine import SyncEngine
+from app.sync.engine import SyncEngine, _get_active_course_ids
+from tests.conftest import cleanup, seed
 
 
 async def test_full_sync_returns_already_running_when_running():
@@ -20,6 +22,39 @@ async def test_full_sync_returns_not_configured_when_canvas_not_set():
         mock_settings.canvas_configured = False
         result = await engine.full_sync()
     assert result["status"] == "not_configured"
+
+
+async def test_get_active_course_ids_excludes_term_ended_courses(db):
+    active_id = 881001
+    archived_id = 881002
+    now = datetime.now(timezone.utc)
+    cleanup("DELETE FROM courses WHERE id IN (:active_id, :archived_id)", {
+        "active_id": active_id,
+        "archived_id": archived_id,
+    })
+    seed(
+        """
+        INSERT INTO courses (id, name, workflow_state, synced_at, term_end_at, total_students)
+        VALUES (:id, 'Active Course', 'available', :now, :term_end_at, 0)
+        """,
+        {"id": active_id, "now": now.isoformat(), "term_end_at": (now + timedelta(days=30)).isoformat()},
+    )
+    seed(
+        """
+        INSERT INTO courses (id, name, workflow_state, synced_at, term_end_at, total_students)
+        VALUES (:id, 'Archived Course', 'available', :now, :term_end_at, 0)
+        """,
+        {"id": archived_id, "now": now.isoformat(), "term_end_at": (now - timedelta(days=30)).isoformat()},
+    )
+
+    try:
+        course_ids = await _get_active_course_ids(db, [active_id, archived_id])
+        assert course_ids == [active_id]
+    finally:
+        cleanup("DELETE FROM courses WHERE id IN (:active_id, :archived_id)", {
+            "active_id": active_id,
+            "archived_id": archived_id,
+        })
 
 
 async def test_full_sync_resets_running_flag_after_error():
@@ -118,6 +153,44 @@ async def test_full_sync_writes_sync_log_on_completion():
 
     assert engine._running is False
     assert "elapsed_seconds" in result
+
+
+async def test_incremental_sync_refreshes_course_metadata_before_course_sync():
+    engine = SyncEngine()
+    last_full_sync_at = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    with patch("app.sync.engine.settings") as mock_settings, \
+         patch("app.sync.engine.CanvasClient") as mock_client_cls, \
+         patch("app.sync.engine.get_effective_whitelist", new_callable=AsyncMock, return_value=[12345]), \
+         patch.object(engine, "_get_last_full_sync_at", new_callable=AsyncMock, return_value=last_full_sync_at), \
+         patch.object(engine, "_sync_courses", new_callable=AsyncMock, return_value=([12345], {"courses": {"status": "ok", "records": 1}})) as mock_sync_courses, \
+         patch.object(engine, "_sync_course", new_callable=AsyncMock, return_value={"enrollments": 0}) as mock_sync_course, \
+         patch("app.sync.engine.AsyncSessionLocal") as mock_session_factory:
+
+        mock_settings.canvas_configured = True
+        mock_settings.canvas_api_url = "https://canvas.test"
+        mock_settings.canvas_api_token = "token"
+        mock_settings.edstem_configured = False
+
+        mock_canvas = AsyncMock()
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_canvas)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        log_result = AsyncMock()
+        log_result.scalar = lambda: 1
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=log_result)
+        mock_db.commit = AsyncMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_session_factory.return_value = mock_db
+
+        result = await engine.incremental_sync()
+
+    assert engine._running is False
+    assert result["courses"] == {"status": "ok", "records": 1}
+    mock_sync_courses.assert_awaited_once_with(mock_canvas, [12345])
+    mock_sync_course.assert_awaited_once()
 
 
 async def test_sync_course_calls_edstem_when_configured():

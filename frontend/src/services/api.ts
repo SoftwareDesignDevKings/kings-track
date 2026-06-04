@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import type {
   Course, CourseMatrix, CourseEngagement, SyncStatus, HealthResponse, CanvasHealthResponse, AppUser,
   WhitelistedCourse, AvailableCourse,
@@ -7,6 +7,7 @@ import type {
   GradeoImportRun, GradeoCourseReport, GradeoTopicBands,
   StudentListItem, StudentProfileData, StudentLearningOverview,
   CourseCycle,
+  TrackableAssignment, TrackingGrid, TrackingSnapshotDetail,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
 
@@ -481,5 +482,105 @@ export function useCourseCycles(courseId: number | null) {
     queryFn: () => fetchJSON<CourseCycle[]>(`/reports/courses/${courseId}/cycles`),
     staleTime: 300_000,
     enabled: courseId != null && courseId > 0,
+  })
+}
+
+// ─── Assignment Tracking ──────────────────────────────────────────────────────
+
+export function useTrackableAssignments(courseId: number) {
+  return useQuery<TrackableAssignment[]>({
+    queryKey: ['tracking-assignments', courseId],
+    queryFn: () => fetchJSON<TrackableAssignment[]>(`/courses/${courseId}/tracking/assignments`),
+    staleTime: 60_000,
+    enabled: !isNaN(courseId),
+  })
+}
+
+export function useTrackingGrid(courseId: number, assignmentId: number | null) {
+  return useQuery<TrackingGrid>({
+    queryKey: ['tracking-grid', courseId, assignmentId],
+    queryFn: () => fetchJSON<TrackingGrid>(`/courses/${courseId}/tracking/${assignmentId}`),
+    staleTime: 0,
+    enabled: !isNaN(courseId) && assignmentId !== null,
+  })
+}
+
+export function useSaveTrackingScores(courseId: number, assignmentId: number | null) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (scores: Array<{ user_id: number; criterion_id: string; score: number | null; comment: string | null }>) =>
+      fetchJSON<{ snapshot_id: number; saved: number }>(`/courses/${courseId}/tracking/${assignmentId}/scores`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scores }),
+      }),
+    onSuccess: (data, scores) => {
+      queryClient.setQueryData<TrackingGrid>(['tracking-grid', courseId, assignmentId], (current) => {
+        if (!current) return current
+
+        const draft = current.draft_snapshot ?? {
+          id: data.snapshot_id,
+          created_at: new Date().toISOString(),
+          label: null,
+          scores: {},
+        }
+        const nextScores = { ...draft.scores }
+
+        for (const entry of scores) {
+          const userId = String(entry.user_id)
+          const existingUserScores = nextScores[userId] ?? {}
+          const nextUserScores = { ...existingUserScores }
+
+          if (entry.score === null && entry.comment === null) {
+            delete nextUserScores[entry.criterion_id]
+          } else {
+            nextUserScores[entry.criterion_id] = {
+              score: entry.score,
+              comment: entry.comment,
+            }
+          }
+
+          if (Object.keys(nextUserScores).length === 0) {
+            delete nextScores[userId]
+          } else {
+            nextScores[userId] = nextUserScores
+          }
+        }
+
+        return {
+          ...current,
+          draft_snapshot: {
+            ...draft,
+            scores: nextScores,
+          },
+        }
+      })
+      queryClient.invalidateQueries({ queryKey: ['tracking-grid', courseId, assignmentId] })
+    },
+  })
+}
+
+export function useCommitSnapshot(courseId: number, assignmentId: number | null) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (label?: string) =>
+      fetchJSON(`/courses/${courseId}/tracking/${assignmentId}/commit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: label || null }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tracking-grid', courseId, assignmentId] })
+    },
+  })
+}
+
+export function useSnapshot(courseId: number, assignmentId: number | null, snapshotId: number | null) {
+  return useQuery<TrackingSnapshotDetail>({
+    queryKey: ['tracking-snapshot', courseId, assignmentId, snapshotId],
+    queryFn: () => fetchJSON<TrackingSnapshotDetail>(`/courses/${courseId}/tracking/${assignmentId}/snapshots/${snapshotId}`),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    enabled: !isNaN(courseId) && assignmentId !== null && snapshotId !== null,
   })
 }

@@ -11,6 +11,7 @@ vi.mock('../services/api', () => ({
   useEdStemMatrix: vi.fn(),
   useGradeoReport: vi.fn(),
   useGradeoTopicBands: vi.fn(),
+  useTrackableAssignments: vi.fn(() => ({ isLoading: false, data: [] })),
   useSyncStatus: vi.fn(() => ({ data: { is_running: false, logs: [] } })),
   useTriggerSync: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useCurrentUser: vi.fn(() => ({ data: { email: 'test@example.com', role: 'admin' } })),

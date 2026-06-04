@@ -4,7 +4,7 @@ compute_metrics. All use a mocked CanvasClient + real DB via the `db` fixture.
 """
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy import text
 
 from app.sync.tasks import sync_courses, sync_enrollments, sync_assignments, sync_submissions, compute_metrics
@@ -28,6 +28,10 @@ def _make_course(course_id=COURSE_ID):
         "workflow_state": "available",
         "account_id": 1,
         "enrollment_term_id": 1,
+        "term": {
+            "start_at": "2026-01-01T00:00:00Z",
+            "end_at": "2026-12-31T23:59:59Z",
+        },
         "total_students": 5,
     }
 
@@ -91,6 +95,10 @@ def cleanup_tasks_data():
     cleanup("DELETE FROM student_metrics WHERE course_id = :id", {"id": COURSE_ID})
     cleanup("DELETE FROM submissions WHERE course_id = :id", {"id": COURSE_ID})
     cleanup("DELETE FROM enrollments WHERE course_id = :id", {"id": COURSE_ID})
+    cleanup(
+        "DELETE FROM rubric_criteria WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id = :id)",
+        {"id": COURSE_ID},
+    )
     cleanup("DELETE FROM assignments WHERE course_id = :id", {"id": COURSE_ID})
     cleanup("DELETE FROM users WHERE id = :id", {"id": USER_ID})
     cleanup("DELETE FROM courses WHERE id = :id", {"id": COURSE_ID})
@@ -116,7 +124,100 @@ async def test_sync_courses_inserts_course(db):
     result = await db.execute(text("SELECT name FROM courses WHERE id = :id"), {"id": COURSE_ID})
     assert result.scalar() == "Test Course"
 
+    result = await db.execute(
+        text("SELECT term_start_at, term_end_at FROM courses WHERE id = :id"), {"id": COURSE_ID}
+    )
+    term_start_at, term_end_at = result.fetchone()
+    assert term_start_at.isoformat() == "2026-01-01T00:00:00+00:00"
+    assert term_end_at.isoformat() == "2026-12-31T23:59:59+00:00"
 
+
+
+
+async def test_sync_courses_fetches_missing_whitelisted_course_metadata(db):
+    mock_canvas = MagicMock()
+
+    async def _courses():
+        return []
+
+    mock_canvas.list_courses = _courses
+    mock_canvas.get_course = AsyncMock(return_value={
+        **_make_course(),
+        "workflow_state": "completed",
+        "term": {
+            "start_at": "2025-01-01T00:00:00Z",
+            "end_at": "2025-12-31T23:59:59Z",
+        },
+    })
+
+    count = await sync_courses(mock_canvas, db, whitelist_ids=[COURSE_ID])
+
+    assert count == 1
+    mock_canvas.get_course.assert_awaited_once_with(COURSE_ID)
+    result = await db.execute(
+        text("SELECT workflow_state, term_end_at FROM courses WHERE id = :id"), {"id": COURSE_ID}
+    )
+    workflow_state, term_end_at = result.fetchone()
+    assert workflow_state == "completed"
+    assert term_end_at.isoformat() == "2025-12-31T23:59:59+00:00"
+
+
+async def test_sync_courses_preserves_existing_term_dates_when_canvas_omits_term(db):
+    existing_term_end = "2026-12-31T23:59:59+00:00"
+    seed(
+        """
+        INSERT INTO courses (id, name, workflow_state, synced_at, term_start_at, term_end_at, total_students)
+        VALUES (:id, 'Existing Course', 'available', :now, :term_start_at, :term_end_at, 0)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        {
+            "id": COURSE_ID,
+            "now": datetime.now(timezone.utc).isoformat(),
+            "term_start_at": "2026-01-01T00:00:00+00:00",
+            "term_end_at": existing_term_end,
+        },
+    )
+    mock_canvas = MagicMock()
+
+    async def _courses():
+        course = _make_course()
+        course.pop("term")
+        return [course]
+
+    mock_canvas.list_courses = _courses
+
+    count = await sync_courses(mock_canvas, db, whitelist_ids=[COURSE_ID])
+
+    assert count == 1
+    result = await db.execute(text("SELECT term_end_at FROM courses WHERE id = :id"), {"id": COURSE_ID})
+    assert result.scalar().isoformat() == existing_term_end
+
+
+async def test_sync_courses_skips_direct_fetch_for_known_archived_missing_course(db):
+    seed(
+        """
+        INSERT INTO courses (id, name, workflow_state, synced_at, term_end_at, total_students)
+        VALUES (:id, 'Archived Course', 'available', :now, :term_end_at, 0)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        {
+            "id": COURSE_ID,
+            "now": datetime.now(timezone.utc).isoformat(),
+            "term_end_at": "2025-12-31T23:59:59+00:00",
+        },
+    )
+    mock_canvas = MagicMock()
+
+    async def _courses():
+        return []
+
+    mock_canvas.list_courses = _courses
+    mock_canvas.get_course = AsyncMock()
+
+    count = await sync_courses(mock_canvas, db, whitelist_ids=[COURSE_ID])
+
+    assert count == 0
+    mock_canvas.get_course.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +291,41 @@ async def test_sync_assignments_inserts_assignment(db):
     row = result.fetchone()
     assert row[0] == "Classwork"
     assert row[1] == 7
+
+
+async def test_sync_assignments_shared_rubric_criterion_id_does_not_collide(db):
+    """Two assignments reusing the same Canvas rubric (shared criterion ids like
+    '_3514') must each get their own namespaced rubric_criteria rows — not collide
+    on the global primary key (regression for course 12SENX showing no Tracking tab)."""
+    now = datetime.now(timezone.utc).isoformat()
+    seed(
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
+        {"id": COURSE_ID, "now": now},
+    )
+
+    shared_rubric = [
+        {"id": "_3514", "description": "Data Dictionary", "long_description": "d", "points": 10},
+        {"id": "blank", "description": "Other", "long_description": None, "points": 0},
+    ]
+    a1 = {**_make_assignment(60001), "rubric": shared_rubric}
+    a2 = {**_make_assignment(60002), "rubric": shared_rubric}
+
+    mock_canvas = MagicMock()
+    async def _groups(_course_id):
+        return [{"id": 10, "name": "Classwork", "position": 7}]
+    mock_canvas.list_assignment_groups = _groups
+    mock_canvas.list_assignments.return_value = _async_gen([a1, a2])
+
+    await sync_assignments(mock_canvas, db, COURSE_ID)
+
+    # Each assignment keeps its full set of criteria, keyed per assignment.
+    for aid in (60001, 60002):
+        result = await db.execute(
+            text("SELECT id FROM rubric_criteria WHERE assignment_id = :aid ORDER BY position"),
+            {"aid": aid},
+        )
+        ids = [r[0] for r in result.fetchall()]
+        assert ids == [f"{aid}:_3514", f"{aid}:blank"], f"assignment {aid} lost criteria to a collision: {ids}"
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +408,7 @@ async def test_compute_metrics_writes_completion_rate(db):
         {"cid": COURSE_ID},
     )
     seed(
-        "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, late, missing) VALUES (66601, 55501, :uid, :cid, 'graded', false, false) ON CONFLICT (assignment_id, user_id) DO NOTHING",
+        "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, score, late, missing) VALUES (66601, 55501, :uid, :cid, 'graded', 8.0, false, false) ON CONFLICT (assignment_id, user_id) DO NOTHING",
         {"uid": USER_ID, "cid": COURSE_ID},
     )
 
@@ -284,8 +420,54 @@ async def test_compute_metrics_writes_completion_rate(db):
         {"cid": COURSE_ID, "uid": USER_ID},
     )
     rate = result.scalar()
-    assert rate == 1.0  # 1 graded / 1 assignment = 100%
+    assert rate == 1.0  # 1 scored graded / 1 assignment = 100%
 
     # Cleanup in FK-safe order (submissions before assignments)
     cleanup("DELETE FROM submissions WHERE id = 66601")
     cleanup("DELETE FROM assignments WHERE id = 55501")
+
+
+async def test_compute_metrics_does_not_count_unscored_graded_submissions(db):
+    now = datetime.now(timezone.utc).isoformat()
+    seed(
+        "INSERT INTO courses (id, name, workflow_state, synced_at, total_students) VALUES (:id, 'C', 'available', :now, 0) ON CONFLICT (id) DO NOTHING",
+        {"id": COURSE_ID, "now": now},
+    )
+    seed(
+        "INSERT INTO users (id, name, sis_id) VALUES (:id, 'S', :sis) ON CONFLICT (id) DO NOTHING",
+        {"id": USER_ID, "sis": str(USER_ID)},
+    )
+    seed(
+        "INSERT INTO enrollments (id, course_id, user_id, role, enrollment_state) VALUES (:id, :cid, :uid, 'StudentEnrollment', 'active') ON CONFLICT (id) DO NOTHING",
+        {"id": ENROLLMENT_ID, "cid": COURSE_ID, "uid": USER_ID},
+    )
+    seed(
+        "INSERT INTO assignments (id, course_id, name, workflow_state) VALUES (55502, :cid, 'A2', 'published') ON CONFLICT (id) DO NOTHING",
+        {"cid": COURSE_ID},
+    )
+    seed(
+        "INSERT INTO assignments (id, course_id, name, workflow_state) VALUES (55503, :cid, 'A3', 'published') ON CONFLICT (id) DO NOTHING",
+        {"cid": COURSE_ID},
+    )
+    seed(
+        "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, late, missing) VALUES (66602, 55502, :uid, :cid, 'graded', false, false) ON CONFLICT (assignment_id, user_id) DO NOTHING",
+        {"uid": USER_ID, "cid": COURSE_ID},
+    )
+    seed(
+        "INSERT INTO submissions (id, assignment_id, user_id, course_id, workflow_state, score, late, missing) VALUES (66603, 55503, :uid, :cid, 'graded', 0, false, false) ON CONFLICT (assignment_id, user_id) DO NOTHING",
+        {"uid": USER_ID, "cid": COURSE_ID},
+    )
+
+    count = await compute_metrics(db, COURSE_ID)
+
+    assert count == 1
+    result = await db.execute(
+        text("SELECT completion_rate, on_time_rate FROM student_metrics WHERE course_id = :cid AND user_id = :uid"),
+        {"cid": COURSE_ID, "uid": USER_ID},
+    )
+    rate, on_time_rate = result.fetchone()
+    assert rate == 0.0
+    assert on_time_rate == 0.0
+
+    cleanup("DELETE FROM submissions WHERE id IN (66602, 66603)")
+    cleanup("DELETE FROM assignments WHERE id IN (55502, 55503)")

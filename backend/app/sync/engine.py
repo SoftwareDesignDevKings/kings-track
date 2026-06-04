@@ -28,6 +28,15 @@ from app.whitelist import get_effective_whitelist
 
 logger = logging.getLogger(__name__)
 
+ACTIVE_COURSE_IDS_SQL = """
+    SELECT id
+    FROM courses
+    WHERE workflow_state = 'available'
+      AND id = ANY(:ids)
+      AND (term_end_at IS NULL OR term_end_at >= :now)
+    ORDER BY id
+"""
+
 # Lua script for atomic compare-and-delete: only removes the lock if
 # the stored value matches our owner token.
 _RELEASE_LOCK_SCRIPT = """
@@ -36,6 +45,14 @@ if redis.call("get", KEYS[1]) == ARGV[1] then
 end
 return 0
 """
+
+
+async def _get_active_course_ids(db, whitelist: list[int]) -> list[int]:
+    result = await db.execute(
+        text(ACTIVE_COURSE_IDS_SQL),
+        {"ids": whitelist, "now": datetime.now(timezone.utc)},
+    )
+    return [row[0] for row in result.fetchall()]
 
 
 async def _log_sync(db, entity_type: str, course_id: int | None, status: str, records: int = 0, error: str | None = None) -> int:
@@ -186,11 +203,7 @@ class SyncEngine:
                 results["courses"] = {"status": "error", "error": str(exc)}
                 return [], results
 
-            result = await db.execute(
-                text("SELECT id FROM courses WHERE workflow_state = 'available' AND id = ANY(:ids)"),
-                {"ids": whitelist},
-            )
-            course_ids = [row[0] for row in result.fetchall()]
+            course_ids = await _get_active_course_ids(db, whitelist)
 
         return course_ids, results
 
@@ -363,9 +376,9 @@ class SyncEngine:
 
     async def incremental_sync(self) -> dict:
         """
-        Execute an incremental sync — only fetch records updated since the last full sync.
-        Skips course sync (rarely changes) and enrollment deletion (can't safely delete
-        without seeing the full list).
+        Execute an incremental sync — refresh course metadata, then fetch records
+        updated since the last full sync. Skips enrollment deletion because that
+        cannot be done safely without seeing the full list.
         """
         if not settings.canvas_configured:
             logger.warning("Canvas API not configured — skipping sync")
@@ -394,15 +407,10 @@ class SyncEngine:
                 if not whitelist:
                     results["skipped"] = "No courses in whitelist"
                 else:
-                    # Get available course IDs from DB (skip course sync)
-                    async with AsyncSessionLocal() as db:
-                        result = await db.execute(
-                            text("SELECT id FROM courses WHERE workflow_state = 'available' AND id = ANY(:ids)"),
-                            {"ids": whitelist},
-                        )
-                        course_ids = [row[0] for row in result.fetchall()]
-                    self._set_course_plan(course_ids)
                     self._mark_step_started("courses")
+                    course_ids, sync_results = await self._sync_courses(canvas, whitelist)
+                    results.update(sync_results)
+                    self._set_course_plan(course_ids)
                     self._mark_step_completed()
 
                     for course_id in course_ids:
