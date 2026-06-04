@@ -10,6 +10,9 @@ export interface Course {
   course_code: string | null
   workflow_state: string | null
   last_synced: string | null
+  term_start_at: string | null
+  term_end_at: string | null
+  is_archived: boolean
   student_count: number
   avg_completion_rate: number | null
   avg_on_time_rate: number | null

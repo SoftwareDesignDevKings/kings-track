@@ -14,6 +14,8 @@ class Course(Base):
     workflow_state: Mapped[str | None] = mapped_column(String)  # available, completed, etc.
     account_id: Mapped[int | None] = mapped_column(BigInteger)
     term_id: Mapped[int | None] = mapped_column(BigInteger)
+    term_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    term_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     total_students: Mapped[int] = mapped_column(Integer, default=0)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

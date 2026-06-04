@@ -108,7 +108,8 @@ def _topic_confidence(available_marks: float, exam_count: int) -> str:
 async def list_courses(db: AsyncSession = Depends(get_db)):
     """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
     whitelist = await get_effective_whitelist(db)
-    due_now_cutoff = _start_of_tomorrow_utc(datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    due_now_cutoff = _start_of_tomorrow_utc(now)
     base_query = """
         SELECT
             c.id,
@@ -116,6 +117,12 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
             c.course_code,
             c.workflow_state,
             c.synced_at,
+            c.term_start_at,
+            c.term_end_at,
+            CASE
+                WHEN c.term_end_at IS NOT NULL AND c.term_end_at < :now THEN true
+                ELSE false
+            END AS is_archived,
             COUNT(DISTINCT e.user_id) AS student_count,
             ROUND(CAST(AVG(due_now_metrics.completion_rate) AS numeric), 3) AS avg_completion_rate,
             ROUND(CAST(AVG(sm.on_time_rate) AS numeric), 3) AS avg_on_time_rate,
@@ -149,11 +156,11 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
         base_query
         + """
             WHERE c.id IN :ids
-            GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at
+            GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at, c.term_start_at, c.term_end_at
             ORDER BY c.name
         """
     ).bindparams(bindparam("ids", expanding=True))
-    result = await db.execute(statement, {"ids": whitelist, "due_now_cutoff": due_now_cutoff})
+    result = await db.execute(statement, {"ids": whitelist, "due_now_cutoff": due_now_cutoff, "now": now})
     rows = result.fetchall()
 
     return [
@@ -163,10 +170,13 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
             "course_code": row[2],
             "workflow_state": row[3],
             "last_synced": _to_iso(row[4]),
-            "student_count": row[5] or 0,
-            "avg_completion_rate": float(row[6]) if row[6] is not None else None,
-            "avg_on_time_rate": float(row[7]) if row[7] is not None else None,
-            "avg_current_score": float(row[8]) if row[8] is not None else None,
+            "term_start_at": _to_iso(row[5]),
+            "term_end_at": _to_iso(row[6]),
+            "is_archived": bool(row[7]),
+            "student_count": row[8] or 0,
+            "avg_completion_rate": float(row[9]) if row[9] is not None else None,
+            "avg_on_time_rate": float(row[10]) if row[10] is not None else None,
+            "avg_current_score": float(row[11]) if row[11] is not None else None,
         }
         for row in rows
     ]

@@ -4,7 +4,7 @@ compute_metrics. All use a mocked CanvasClient + real DB via the `db` fixture.
 """
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy import text
 
 from app.sync.tasks import sync_courses, sync_enrollments, sync_assignments, sync_submissions, compute_metrics
@@ -28,6 +28,10 @@ def _make_course(course_id=COURSE_ID):
         "workflow_state": "available",
         "account_id": 1,
         "enrollment_term_id": 1,
+        "term": {
+            "start_at": "2026-01-01T00:00:00Z",
+            "end_at": "2026-12-31T23:59:59Z",
+        },
         "total_students": 5,
     }
 
@@ -120,7 +124,100 @@ async def test_sync_courses_inserts_course(db):
     result = await db.execute(text("SELECT name FROM courses WHERE id = :id"), {"id": COURSE_ID})
     assert result.scalar() == "Test Course"
 
+    result = await db.execute(
+        text("SELECT term_start_at, term_end_at FROM courses WHERE id = :id"), {"id": COURSE_ID}
+    )
+    term_start_at, term_end_at = result.fetchone()
+    assert term_start_at.isoformat() == "2026-01-01T00:00:00+00:00"
+    assert term_end_at.isoformat() == "2026-12-31T23:59:59+00:00"
 
+
+
+
+async def test_sync_courses_fetches_missing_whitelisted_course_metadata(db):
+    mock_canvas = MagicMock()
+
+    async def _courses():
+        return []
+
+    mock_canvas.list_courses = _courses
+    mock_canvas.get_course = AsyncMock(return_value={
+        **_make_course(),
+        "workflow_state": "completed",
+        "term": {
+            "start_at": "2025-01-01T00:00:00Z",
+            "end_at": "2025-12-31T23:59:59Z",
+        },
+    })
+
+    count = await sync_courses(mock_canvas, db, whitelist_ids=[COURSE_ID])
+
+    assert count == 1
+    mock_canvas.get_course.assert_awaited_once_with(COURSE_ID)
+    result = await db.execute(
+        text("SELECT workflow_state, term_end_at FROM courses WHERE id = :id"), {"id": COURSE_ID}
+    )
+    workflow_state, term_end_at = result.fetchone()
+    assert workflow_state == "completed"
+    assert term_end_at.isoformat() == "2025-12-31T23:59:59+00:00"
+
+
+async def test_sync_courses_preserves_existing_term_dates_when_canvas_omits_term(db):
+    existing_term_end = "2026-12-31T23:59:59+00:00"
+    seed(
+        """
+        INSERT INTO courses (id, name, workflow_state, synced_at, term_start_at, term_end_at, total_students)
+        VALUES (:id, 'Existing Course', 'available', :now, :term_start_at, :term_end_at, 0)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        {
+            "id": COURSE_ID,
+            "now": datetime.now(timezone.utc).isoformat(),
+            "term_start_at": "2026-01-01T00:00:00+00:00",
+            "term_end_at": existing_term_end,
+        },
+    )
+    mock_canvas = MagicMock()
+
+    async def _courses():
+        course = _make_course()
+        course.pop("term")
+        return [course]
+
+    mock_canvas.list_courses = _courses
+
+    count = await sync_courses(mock_canvas, db, whitelist_ids=[COURSE_ID])
+
+    assert count == 1
+    result = await db.execute(text("SELECT term_end_at FROM courses WHERE id = :id"), {"id": COURSE_ID})
+    assert result.scalar().isoformat() == existing_term_end
+
+
+async def test_sync_courses_skips_direct_fetch_for_known_archived_missing_course(db):
+    seed(
+        """
+        INSERT INTO courses (id, name, workflow_state, synced_at, term_end_at, total_students)
+        VALUES (:id, 'Archived Course', 'available', :now, :term_end_at, 0)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        {
+            "id": COURSE_ID,
+            "now": datetime.now(timezone.utc).isoformat(),
+            "term_end_at": "2025-12-31T23:59:59+00:00",
+        },
+    )
+    mock_canvas = MagicMock()
+
+    async def _courses():
+        return []
+
+    mock_canvas.list_courses = _courses
+    mock_canvas.get_course = AsyncMock()
+
+    count = await sync_courses(mock_canvas, db, whitelist_ids=[COURSE_ID])
+
+    assert count == 0
+    mock_canvas.get_course.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
