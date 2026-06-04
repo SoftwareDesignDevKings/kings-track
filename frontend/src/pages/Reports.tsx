@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Header from '../components/Header'
-import { useCourses } from '../services/api'
+import { useCourses, useStudents, useCourseCycles } from '../services/api'
 import { downloadCsv } from '../lib/downloadCsv'
 
 interface ReportCardProps {
@@ -10,9 +10,11 @@ interface ReportCardProps {
   downloading: boolean
   disabled?: boolean
   disabledReason?: string
+  format?: 'csv' | 'pdf'
 }
 
-function ReportCard({ title, description, onDownload, downloading, disabled, disabledReason }: ReportCardProps) {
+function ReportCard({ title, description, onDownload, downloading, disabled, disabledReason, format = 'csv' }: ReportCardProps) {
+  const label = format === 'pdf' ? 'Download PDF' : 'Download CSV'
   return (
     <div className={`bg-white rounded-xl border border-slate-200 p-5 flex flex-col ${disabled ? 'opacity-50' : ''}`}>
       <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
@@ -29,7 +31,7 @@ function ReportCard({ title, description, onDownload, downloading, disabled, dis
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
           </svg>
-          {downloading ? 'Downloading\u2026' : 'Download CSV'}
+          {downloading ? 'Downloading\u2026' : label}
         </button>
       )}
     </div>
@@ -51,6 +53,16 @@ export default function Reports() {
   const [dlGradeo, setDlGradeo] = useState(false)
   const [dlCourseAtt, setDlCourseAtt] = useState(false)
   const [dlEdStem, setDlEdStem] = useState(false)
+
+  // Student report state
+  const { data: students } = useStudents()
+  const [pdfStudentId, setPdfStudentId] = useState<number | null>(null)
+  const [pdfCourseId, setPdfCourseId] = useState<number | null>(null)
+  const [pdfCycleNum, setPdfCycleNum] = useState<number | null>(null)
+  const { data: cycles, isLoading: cyclesLoading } = useCourseCycles(pdfCourseId)
+  const [dlCyclePdf, setDlCyclePdf] = useState(false)
+  const [dlMissingPdf, setDlMissingPdf] = useState(false)
+  const [dlStudentCsv, setDlStudentCsv] = useState(false)
 
   const selectedCourse = courses?.find(c => c.id === selectedCourseId)
   const courseCode = selectedCourse
@@ -171,6 +183,113 @@ export default function Reports() {
           ) : (
             <p className="text-sm text-slate-400 py-8 text-center">
               Select a course to see available course reports.
+            </p>
+          )}
+        </section>
+
+        {/* Student Reports */}
+        <section className="mt-8">
+          <h3 className="text-base font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-200">
+            Student Reports
+          </h3>
+          <p className="text-xs text-slate-500 mb-4">
+            Generate reports for individual students. PDF reports can be shared with parents.
+          </p>
+
+          <div className="flex flex-wrap items-end gap-4 mb-5">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Student</label>
+              <select
+                value={pdfStudentId ?? ''}
+                onChange={e => setPdfStudentId(e.target.value ? Number(e.target.value) : null)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-full max-w-xs"
+              >
+                <option value="">Select a student</option>
+                {students?.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Course (for Cycle Update)</label>
+              <select
+                value={pdfCourseId ?? ''}
+                onChange={e => {
+                  setPdfCourseId(e.target.value ? Number(e.target.value) : null)
+                  setPdfCycleNum(null)
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-full max-w-xs"
+              >
+                <option value="">Select a course</option>
+                {courses?.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.course_code ? `${c.course_code} — ${c.name}` : c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Cycle (optional)</label>
+              <select
+                value={pdfCycleNum ?? ''}
+                onChange={e => setPdfCycleNum(e.target.value ? Number(e.target.value) : null)}
+                disabled={!pdfCourseId || cyclesLoading}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-full max-w-xs disabled:opacity-50"
+              >
+                <option value="">Auto-detect (current)</option>
+                {cycles?.map(c => (
+                  <option key={c.cycle_num} value={c.cycle_num}>
+                    Cycle {c.cycle_num} — {c.topic}
+                    {c.start_week && c.end_week ? ` (T${c.term}: W${c.start_week}-${c.end_week})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {pdfStudentId ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <ReportCard
+                title={pdfCycleNum ? `Cycle ${pdfCycleNum} Update` : 'Current Cycle Update'}
+                description="Progress in the scope-and-sequence cycle with Gradeo quiz results."
+                onDownload={() => {
+                  const cyclePart = pdfCycleNum ? `&cycle_num=${pdfCycleNum}` : ''
+                  download(
+                    `/reports/students/${pdfStudentId}/cycle-update-pdf?course_id=${pdfCourseId}${cyclePart}`,
+                    'cycle-update.pdf',
+                    setDlCyclePdf,
+                  )
+                }}
+                downloading={dlCyclePdf}
+                disabled={!pdfCourseId}
+                disabledReason="Select a course above"
+                format="pdf"
+              />
+              <ReportCard
+                title="Missing Work Report"
+                description="All missing and incomplete work across Canvas, EdStem, and Gradeo."
+                onDownload={() => download(
+                  `/reports/students/${pdfStudentId}/missing-report-pdf`,
+                  'missing-report.pdf',
+                  setDlMissingPdf,
+                )}
+                downloading={dlMissingPdf}
+                format="pdf"
+              />
+              <ReportCard
+                title="Full Student Report"
+                description="Comprehensive CSV with metrics, submissions, attendance, and concern status."
+                onDownload={() => download(
+                  `/reports/students/${pdfStudentId}/report`,
+                  'student-report.csv',
+                  setDlStudentCsv,
+                )}
+                downloading={dlStudentCsv}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400 py-8 text-center">
+              Select a student to see available PDF reports.
             </p>
           )}
         </section>
