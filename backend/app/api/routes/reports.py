@@ -950,6 +950,19 @@ def _metric_box(value: str, label: str, styles: dict) -> Table:
     return t
 
 
+_FAR_FUTURE = datetime(9999, 12, 31)
+
+
+def _assignment_sort_key(a):
+    """Sort by due date (items without a date go to the end), then by name."""
+    has_due = a.due_at is not None
+    due = (
+        a.due_at.replace(tzinfo=None) if a.due_at and a.due_at.tzinfo
+        else (a.due_at or _FAR_FUTURE)
+    )
+    return (not has_due, due, a.name)
+
+
 # ---------------------------------------------------------------------------
 # 10a. List available cycles for a course
 # ---------------------------------------------------------------------------
@@ -1146,9 +1159,18 @@ async def export_cycle_update_pdf(
                 best_group = gname
                 break
 
-    current_assignments = groups[best_group]
+    all_unit_assignments = sorted(groups[best_group], key=_assignment_sort_key)
 
-    # Compute cycle stats
+    # Filter to only assignments due in the past 2 weeks
+    two_weeks_ago = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=14)
+    end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    current_assignments = [
+        a for a in all_unit_assignments
+        if a.due_at is not None
+        and two_weeks_ago <= (a.due_at.replace(tzinfo=None) if a.due_at.tzinfo else a.due_at) <= end_of_today
+    ]
+
+    # Compute cycle stats (based on filtered 2-week window)
     total = len(current_assignments)
     completed = sum(
         1 for a in current_assignments
@@ -1178,6 +1200,15 @@ async def export_cycle_update_pdf(
         {"uid": user_id, "cid": course_id},
     )
     gradeo_exams = gradeo_result.fetchall()
+
+    # Build lookup: cycle number → Gradeo exam result
+    # Matches Canvas "Cycle N Spaced Repetition" to Gradeo exams containing "Cycle N"
+    gradeo_by_cycle: dict[int, object] = {}
+    for ge in gradeo_exams:
+        m = re.search(r"Cycle\s+(\d+)", ge.exam_name, re.IGNORECASE)
+        if m:
+            gradeo_by_cycle[int(m.group(1))] = ge
+    matched_gradeo_cycles: set[int] = set()
 
     # ── Build PDF ──
     styles = _pdf_styles()
@@ -1221,37 +1252,33 @@ async def export_cycle_update_pdf(
     # Assignments table
     P = lambda t: _p(t, styles)
     PH = lambda t: _p(t, styles, header=True)
-    table_data = [[PH("Assignment"), PH("Due Date"), PH("Status"), PH("Score"), PH("Late")]]
+    has_gradeo = bool(gradeo_by_cycle)
+    headers = [PH("Canvas Quiz"), PH("Due Date"), PH("Status"), PH("Score"), PH("Late")]
+    if has_gradeo:
+        headers.append(PH("Gradeo"))
+    table_data = [headers]
     style_cmds = list(_base_table_style())
 
     # Determine "should be up to" boundary.
-    # When a specific cycle is chosen, compute cutoff from its week range.
-    # Otherwise, use today's date.  Falls back to submission status when
-    # no due dates are available.
+    # Always use today's date: the red line goes after the last assignment
+    # whose due date is before the start of tomorrow.
     divider_row: int | None = None
-
-    if cycle_num is not None:
-        divider_row = await _compute_schedule_divider_for_cycle(
-            course_id, current_assignments, cycle_num
-        )
-
-    if divider_row is None:
-        start_of_tomorrow = now.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) + timedelta(days=1)
-        has_due_dates = any(a.due_at for a in current_assignments)
-        if has_due_dates:
-            for i, a in enumerate(current_assignments):
-                if a.due_at:
-                    naive = (
-                        a.due_at.replace(tzinfo=None)
-                        if a.due_at.tzinfo
-                        else a.due_at
-                    )
-                    if naive < start_of_tomorrow:
-                        divider_row = i + 1
-        else:
-            for i, a in enumerate(current_assignments):
+    start_of_tomorrow = now.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) + timedelta(days=1)
+    has_due_dates = any(a.due_at for a in current_assignments)
+    if has_due_dates:
+        for i, a in enumerate(current_assignments):
+            if a.due_at:
+                naive = (
+                    a.due_at.replace(tzinfo=None)
+                    if a.due_at.tzinfo
+                    else a.due_at
+                )
+                if naive < start_of_tomorrow:
+                    divider_row = i + 1
+    else:
+        for i, a in enumerate(current_assignments):
                 if a.workflow_state in ("submitted", "graded"):
                     divider_row = i + 1
 
@@ -1277,7 +1304,23 @@ async def export_cycle_update_pdf(
             score_str = "—"
         late_str = "Yes" if a.late else ""
 
-        table_data.append([P(a.name), P(due_str), P(status), P(score_str), P(late_str)])
+        row = [P(a.name), P(due_str), P(status), P(score_str), P(late_str)]
+
+        # Match Gradeo results to "Cycle N" assignments
+        if has_gradeo:
+            cycle_m = re.match(r"Cycle\s+(\d+)", a.name, re.IGNORECASE)
+            if cycle_m:
+                cn = int(cycle_m.group(1))
+                ge = gradeo_by_cycle.get(cn)
+                if ge and ge.exam_mark is not None:
+                    matched_gradeo_cycles.add(cn)
+                    row.append(P(f"{ge.exam_mark}/{ge.marks_available}"))
+                else:
+                    row.append(P("—"))
+            else:
+                row.append(P(""))
+
+        table_data.append(row)
 
         # Row colour coding
         if status == "Missing":
@@ -1287,25 +1330,36 @@ async def export_cycle_update_pdf(
         elif status == "Graded":
             style_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
 
-    # "Should be up to" red divider line (allowed at the very bottom when all
-    # work should be complete according to the schedule)
-    if divider_row is not None and 0 < divider_row <= len(table_data) - 1:
+    # "Should be up to" red divider line — only shown when the table
+    # includes future items (i.e. the line isn't at the very bottom).
+    # When the report only covers past-due items the line is redundant.
+    if (divider_row is not None
+            and 0 < divider_row < len(table_data) - 1):
         style_cmds.append(
             ("LINEBELOW", (0, divider_row), (-1, divider_row), 2.5, _RED)
         )
 
     avail = A4[0] - 30 * mm
-    col_widths = [avail * 0.38, avail * 0.18, avail * 0.18, avail * 0.15, avail * 0.11]
+    if has_gradeo:
+        col_widths = [avail * 0.32, avail * 0.15, avail * 0.15, avail * 0.13, avail * 0.10, avail * 0.15]
+    else:
+        col_widths = [avail * 0.38, avail * 0.18, avail * 0.18, avail * 0.15, avail * 0.11]
     t = Table(table_data, colWidths=col_widths, repeatRows=1)
     t.setStyle(TableStyle(style_cmds))
     els.append(t)
 
-    # ── Gradeo section ──
-    els.append(Paragraph("Gradeo Quiz Results", styles["section"]))
-    if gradeo_exams:
+    # ── Gradeo section (only unmatched exams) ──
+    unmatched_gradeo = []
+    for ge in gradeo_exams:
+        cm = re.search(r"Cycle\s+(\d+)", ge.exam_name, re.IGNORECASE)
+        if cm and int(cm.group(1)) in matched_gradeo_cycles:
+            continue
+        unmatched_gradeo.append(ge)
+    if unmatched_gradeo:
+        els.append(Paragraph("Gradeo Quiz Results", styles["section"]))
         g_data = [[PH("Exam"), PH("Score"), PH("Class Avg"), PH("Topics")]]
         g_cmds = list(_base_table_style())
-        for ge in gradeo_exams:
+        for ge in unmatched_gradeo:
             mark_str = (
                 f"{ge.exam_mark}/{ge.marks_available}"
                 if ge.exam_mark is not None else "—"
@@ -1317,11 +1371,6 @@ async def export_cycle_update_pdf(
         gt = Table(g_data, colWidths=g_widths, repeatRows=1)
         gt.setStyle(TableStyle(g_cmds))
         els.append(gt)
-    else:
-        els.append(Paragraph(
-            "No Gradeo quiz results available for this course.",
-            styles["body_small"],
-        ))
 
     # ── Other units summary ──
     other_groups = [g for g in group_order if g != best_group]
