@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     attendance_late_threshold_minutes: int = 10
     attendance_partial_threshold_minutes: int = 30
 
+    # School term start dates for schedule-based red line in cycle PDF
+    school_term_starts: str = ""
+
     # Cron / sync security
     cron_secret: str = ""
 

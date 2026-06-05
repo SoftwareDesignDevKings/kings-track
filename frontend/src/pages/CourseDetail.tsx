@@ -89,6 +89,7 @@ export default function CourseDetail() {
   const [downloadingClass, setDownloadingClass] = useState(false)
   const [downloadingGradeo, setDownloadingGradeo] = useState(false)
   const [downloadingClassList, setDownloadingClassList] = useState(false)
+  const [downloadingEdStem, setDownloadingEdStem] = useState(false)
 
   const courseCode = (matrix?.course_code ?? '').replace(/\s+/g, '-') || String(id)
 
@@ -122,6 +123,17 @@ export default function CourseDetail() {
       // silent fail
     } finally {
       setDownloadingGradeo(false)
+    }
+  }
+
+  async function handleExportEdStemReport() {
+    setDownloadingEdStem(true)
+    try {
+      await downloadCsv(`/reports/courses/${id}/edstem-report`, `${courseCode}-edstem-report.csv`)
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingEdStem(false)
     }
   }
 
@@ -317,7 +329,7 @@ export default function CourseDetail() {
                   Failed to load EdStem data. Make sure the course has been synced.
                 </div>
               )}
-              {edStemMatrix?.mapped && <EdStemLessonTable matrix={edStemMatrix} />}
+              {edStemMatrix?.mapped && <EdStemLessonTable matrix={edStemMatrix} onExport={handleExportEdStemReport} exportLoading={downloadingEdStem} />}
             </div>
           )}
 

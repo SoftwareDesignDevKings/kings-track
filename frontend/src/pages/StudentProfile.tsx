@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
 import {
@@ -10,7 +10,8 @@ import {
   AttendanceDonutChart,
   AttendanceByClassChart,
 } from '../components/charts'
-import { useStudentProfile, useStudentLearningOverview } from '../services/api'
+import { useStudentProfile, useStudentLearningOverview, useCourseCycles } from '../services/api'
+import { downloadCsv } from '../lib/downloadCsv'
 
 type TabId = 'overview' | 'canvas' | 'edstem' | 'gradeo' | 'attendance'
 
@@ -69,6 +70,58 @@ export default function StudentProfile() {
 
   const { data: profile, isLoading: profileLoading, error: profileError } = useStudentProfile(id)
   const { data: learning, isLoading: learningLoading } = useStudentLearningOverview(id)
+  const [downloadingReport, setDownloadingReport] = useState(false)
+  const [downloadingCycle, setDownloadingCycle] = useState(false)
+  const [downloadingMissing, setDownloadingMissing] = useState(false)
+  const [cycleCourseSel, setCycleCourseSel] = useState<number | null>(null)
+  const [cycleSel, setCycleSel] = useState<number | null>(null)
+  const effectiveCycleCourseSel = cycleCourseSel ?? profile?.courses[0]?.course_id ?? null
+  const { data: cycles } = useCourseCycles(effectiveCycleCourseSel)
+
+  async function handleExportReport() {
+    setDownloadingReport(true)
+    try {
+      const nameSlug = (profile?.student.name ?? 'student').toLowerCase().replace(/\s+/g, '-')
+      await downloadCsv(`/reports/students/${id}/report`, `student-${nameSlug}-report.csv`)
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingReport(false)
+    }
+  }
+
+  async function handleCycleUpdatePdf() {
+    const courseId = cycleCourseSel ?? profile?.courses[0]?.course_id
+    if (!courseId) return
+    setDownloadingCycle(true)
+    try {
+      const nameSlug = (profile?.student.name ?? 'student').toLowerCase().replace(/\s+/g, '-')
+      const cyclePart = cycleSel ? `&cycle_num=${cycleSel}` : ''
+      await downloadCsv(
+        `/reports/students/${id}/cycle-update-pdf?course_id=${courseId}${cyclePart}`,
+        `${nameSlug}-cycle-update.pdf`,
+      )
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingCycle(false)
+    }
+  }
+
+  async function handleMissingReportPdf() {
+    setDownloadingMissing(true)
+    try {
+      const nameSlug = (profile?.student.name ?? 'student').toLowerCase().replace(/\s+/g, '-')
+      await downloadCsv(
+        `/reports/students/${id}/missing-report-pdf`,
+        `${nameSlug}-missing-report.pdf`,
+      )
+    } catch {
+      // silent fail
+    } finally {
+      setDownloadingMissing(false)
+    }
+  }
 
   const tabs = useMemo(() => {
     if (!learning) return ALL_TABS.filter(t => t.id === 'overview' || t.id === 'attendance')
@@ -158,6 +211,85 @@ export default function StudentProfile() {
                 <MetricCard label="On-Time" value={formatPct(profile.overview.avg_on_time_rate)} />
                 <MetricCard label="Avg Score" value={profile.overview.avg_score !== null ? `${Math.round(profile.overview.avg_score)}%` : '-'} />
                 <MetricCard label="Attendance" value={profile.overview.attendance_rate !== null ? `${profile.overview.attendance_rate}%` : '-'} />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportReport}
+                disabled={downloadingReport}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                </svg>
+                {downloadingReport ? 'Downloading\u2026' : 'Export CSV'}
+              </button>
+            </div>
+
+            {/* Parent Reports */}
+            <div className="mb-6 bg-white rounded-xl border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">Parent Reports (PDF)</h3>
+              <div className="flex flex-wrap items-end gap-3">
+                {/* Cycle Update */}
+                <div className="flex items-end gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Course</label>
+                    <select
+                      value={cycleCourseSel ?? profile.courses[0]?.course_id ?? ''}
+                      onChange={e => {
+                        setCycleCourseSel(e.target.value ? Number(e.target.value) : null)
+                        setCycleSel(null)
+                      }}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      {profile.courses.map(c => (
+                        <option key={c.course_id} value={c.course_id}>
+                          {c.course_code ? `${c.course_code} — ${c.course_name}` : c.course_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Cycle</label>
+                    <select
+                      value={cycleSel ?? ''}
+                      onChange={e => setCycleSel(e.target.value ? Number(e.target.value) : null)}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="">Auto-detect</option>
+                      {cycles?.map(c => (
+                        <option key={c.cycle_num} value={c.cycle_num}>
+                          Cycle {c.cycle_num} — {c.topic}
+                          {c.start_week && c.end_week ? ` (T${c.term}: W${c.start_week}-${c.end_week})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCycleUpdatePdf}
+                    disabled={downloadingCycle || profile.courses.length === 0}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                    </svg>
+                    {downloadingCycle ? 'Downloading\u2026' : 'Cycle Update'}
+                  </button>
+                </div>
+
+                {/* Missing Report */}
+                <button
+                  type="button"
+                  onClick={handleMissingReportPdf}
+                  disabled={downloadingMissing}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                  </svg>
+                  {downloadingMissing ? 'Downloading\u2026' : 'Missing Work Report'}
+                </button>
               </div>
             </div>
 

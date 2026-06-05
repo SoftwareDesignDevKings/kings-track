@@ -532,6 +532,15 @@ export interface StudentLearningOverview {
   struggling_areas: StrugglingArea[]
 }
 
+export interface CourseCycle {
+  cycle_num: number
+  term: number
+  start_week: number | null
+  end_week: number | null
+  topic: string
+  matched_unit: string | null
+}
+
 // ─── Assignment Tracking ──────────────────────────────────────────────────────
 
 export interface TrackableAssignment {

@@ -6,6 +6,7 @@ import type {
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
   GradeoImportRun, GradeoCourseReport, GradeoTopicBands,
   StudentListItem, StudentProfileData, StudentLearningOverview,
+  CourseCycle,
   TrackableAssignment, TrackingGrid, TrackingSnapshotDetail,
 } from '../types'
 import { getAccessToken } from '../lib/auth'
@@ -472,6 +473,15 @@ export function useStudentLearningOverview(userId: number) {
     queryFn: () => fetchJSON<StudentLearningOverview>(`/students/${userId}/learning-overview`),
     staleTime: 60_000,
     enabled: !isNaN(userId) && userId > 0,
+  })
+}
+
+export function useCourseCycles(courseId: number | null) {
+  return useQuery<CourseCycle[]>({
+    queryKey: ['course-cycles', courseId],
+    queryFn: () => fetchJSON<CourseCycle[]>(`/reports/courses/${courseId}/cycles`),
+    staleTime: 300_000,
+    enabled: courseId != null && courseId > 0,
   })
 }
 

@@ -3,6 +3,7 @@ import Overview from './pages/Overview'
 import CourseDetail from './pages/CourseDetail'
 import Students from './pages/Students'
 import StudentProfile from './pages/StudentProfile'
+import Reports from './pages/Reports'
 import Login from './pages/Login'
 import Admin from './pages/Admin'
 import ExtensionBridge from './pages/ExtensionBridge'
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="/courses/:courseId" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
         <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
         <Route path="/students/:userId" element={<ProtectedRoute><StudentProfile /></ProtectedRoute>} />
+        <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
         <Route path="/extension-bridge" element={<ProtectedRoute><ExtensionBridge /></ProtectedRoute>} />
       </Routes>
