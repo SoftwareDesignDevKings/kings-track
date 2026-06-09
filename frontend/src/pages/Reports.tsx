@@ -39,7 +39,7 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
     setBusy('preview')
     setError(null)
     try {
-      await previewPdf(path)
+      await previewPdf(path, title)
     } catch (e) {
       if (e instanceof Error && e.message.includes('422')) {
         setError('Too many columns for PDF preview. Use CSV instead.')
@@ -258,7 +258,7 @@ export default function Reports() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Course (for Cycle Update)</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Course</label>
               <select
                 value={pdfCourseId ?? ''}
                 onChange={e => {
@@ -307,9 +307,18 @@ export default function Reports() {
               />
               <ReportCard
                 title="Missing Work Report"
-                description="PDF listing all outstanding work for this student across every enrolled course. Includes missing Canvas assignments (with due dates and points), incomplete EdStem lessons, and any flagged Gradeo assessments."
+                description="PDF listing all outstanding work for this student across every enrolled course. Includes missing Canvas assignments (with due dates and points), incomplete EdStem lessons, flagged Gradeo assessments, and assessment tracking with rubric criteria scores for unsubmitted tasks."
                 path={`/reports/students/${pdfStudentId}/missing-report-pdf`}
                 fallbackName="missing-report"
+                formats={['pdf']}
+              />
+              <ReportCard
+                title="Complete Student Report"
+                description="Full progress report for this student in the selected course. Includes all assignment scores, assessment tracking with rubric criteria, Gradeo results, EdStem progress, and attendance records."
+                path={`/reports/students/${pdfStudentId}/student-report-pdf?course_id=${pdfCourseId}`}
+                fallbackName="student-report"
+                disabled={!pdfCourseId}
+                disabledReason="Select a course above"
                 formats={['pdf']}
               />
               <ReportCard
