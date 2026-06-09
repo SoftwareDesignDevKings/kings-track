@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
@@ -78,7 +78,7 @@ async def _get_course_code(db: AsyncSession, course_id: int) -> str:
 # ---------------------------------------------------------------------------
 
 @router.get("/student-progress")
-async def export_student_progress(db: AsyncSession = Depends(get_db)):
+async def export_student_progress(format: str = Query("csv"), preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export all students with aggregated metrics as CSV."""
     from app.attendance.service import get_all_students_with_stats
 
@@ -112,8 +112,10 @@ async def export_student_progress(db: AsyncSession = Depends(get_db)):
             "; ".join(concern.get("reasons", [])),
         ])
 
-    filename = f"student-progress-report-{date.today().isoformat()}.csv"
-    return _csv_response(rows, headers, filename)
+    filename = f"student-progress-report-{date.today().isoformat()}"
+    if format == "pdf" or preview:
+        return _build_table_pdf_response(rows, headers, "Student Progress Report", f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +123,7 @@ async def export_student_progress(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/courses/{course_id}/class-report")
-async def export_course_class_report(course_id: int, db: AsyncSession = Depends(get_db)):
+async def export_course_class_report(course_id: int, format: str = Query("csv"), preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export the activity completion matrix for a course as CSV."""
     from app.api.routes.courses import get_course_matrix
 
@@ -157,8 +159,10 @@ async def export_course_class_report(course_id: int, db: AsyncSession = Depends(
         rows.append(row)
 
     code = (matrix.get("course_code") or str(course_id)).replace(" ", "-")
-    filename = f"course-{code}-class-report-{date.today().isoformat()}.csv"
-    return _csv_response(rows, headers, filename)
+    filename = f"course-{code}-class-report-{date.today().isoformat()}"
+    if format == "pdf" or preview:
+        return _build_table_pdf_response(rows, headers, "Class Report", f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +170,7 @@ async def export_course_class_report(course_id: int, db: AsyncSession = Depends(
 # ---------------------------------------------------------------------------
 
 @router.get("/courses/{course_id}/gradeo-report")
-async def export_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
+async def export_gradeo_report(course_id: int, format: str = Query("csv"), preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export Gradeo topic band scores per student as CSV."""
     from app.api.routes.courses import get_gradeo_topic_bands
 
@@ -195,8 +199,10 @@ async def export_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db
         rows.append(row)
 
     code = await _get_course_code(db, course_id)
-    filename = f"course-{code}-gradeo-report-{date.today().isoformat()}.csv"
-    return _csv_response(rows, headers, filename)
+    filename = f"course-{code}-gradeo-report-{date.today().isoformat()}"
+    if format == "pdf" or preview:
+        return _build_table_pdf_response(rows, headers, "Gradeo Topic Bands Report", f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +210,7 @@ async def export_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db
 # ---------------------------------------------------------------------------
 
 @router.get("/courses/{course_id}/class-list")
-async def export_class_list(course_id: int, db: AsyncSession = Depends(get_db)):
+async def export_class_list(course_id: int, format: str = Query("csv"), preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export the enrolled student roster for a course as CSV."""
     course_result = await db.execute(
         text("SELECT id, name, course_code FROM courses WHERE id = :id"),
@@ -237,8 +243,10 @@ async def export_class_list(course_id: int, db: AsyncSession = Depends(get_db)):
         rows.append([first, last, email or ""])
 
     code = (course_row[2] or str(course_id)).replace(" ", "-")
-    filename = f"course-{code}-class-list-{date.today().isoformat()}.csv"
-    return _csv_response(rows, headers, filename)
+    filename = f"course-{code}-class-list-{date.today().isoformat()}"
+    if format == "pdf" or preview:
+        return _build_table_pdf_response(rows, headers, "Class List", f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +254,7 @@ async def export_class_list(course_id: int, db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/at-risk-students")
-async def export_at_risk_students(db: AsyncSession = Depends(get_db)):
+async def export_at_risk_students(format: str = Query("csv"), preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export only students flagged as moderate or high concern."""
     from app.attendance.service import get_all_students_with_stats
 
@@ -283,8 +291,10 @@ async def export_at_risk_students(db: AsyncSession = Depends(get_db)):
             "; ".join(concern.get("reasons", [])),
         ])
 
-    filename = f"at-risk-students-{date.today().isoformat()}.csv"
-    return _csv_response(rows, headers, filename)
+    filename = f"at-risk-students-{date.today().isoformat()}"
+    if format == "pdf" or preview:
+        return _build_table_pdf_response(rows, headers, "At-Risk Students Report", f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +302,7 @@ async def export_at_risk_students(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/attendance-summary")
-async def export_attendance_summary(db: AsyncSession = Depends(get_db)):
+async def export_attendance_summary(format: str = Query("csv"), preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export per-student attendance totals across all meetings."""
     from app.attendance.service import get_all_students_with_stats
 
@@ -349,8 +359,10 @@ async def export_attendance_summary(db: AsyncSession = Depends(get_db)):
             f"{att['rate']}%" if att.get("rate") is not None else "",
         ])
 
-    filename = f"attendance-summary-{date.today().isoformat()}.csv"
-    return _csv_response(rows, headers, filename)
+    filename = f"attendance-summary-{date.today().isoformat()}"
+    if format == "pdf" or preview:
+        return _build_table_pdf_response(rows, headers, "Attendance Summary", f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +370,7 @@ async def export_attendance_summary(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/courses/{course_id}/attendance-report")
-async def export_course_attendance(course_id: int, db: AsyncSession = Depends(get_db)):
+async def export_course_attendance(course_id: int, format: str = Query("csv"), preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export per-student attendance for each meeting in a course."""
     # Get meetings for this course
     meetings_result = await db.execute(
@@ -387,8 +399,11 @@ async def export_course_attendance(course_id: int, db: AsyncSession = Depends(ge
 
     if not meetings:
         code = await _get_course_code(db, course_id)
-        filename = f"course-{code}-attendance-{date.today().isoformat()}.csv"
-        return _csv_response([], ["Student", "Email", "Attendance Rate (%)"], filename)
+        filename = f"course-{code}-attendance-{date.today().isoformat()}"
+        empty_headers = ["Student", "Email", "Attendance Rate (%)"]
+        if format == "pdf" or preview:
+            return _build_table_pdf_response([], empty_headers, "Course Attendance Report", f"{filename}.pdf", inline=bool(preview))
+        return _csv_response([], empty_headers, f"{filename}.csv")
 
     # Fetch all attendance records for these meetings
     meeting_ids = [m.id for m in meetings]
@@ -425,8 +440,10 @@ async def export_course_attendance(course_id: int, db: AsyncSession = Depends(ge
         rows.append([s.name, f"{rate}%"] + statuses)
 
     code = await _get_course_code(db, course_id)
-    filename = f"course-{code}-attendance-{date.today().isoformat()}.csv"
-    return _csv_response(rows, headers, filename)
+    filename = f"course-{code}-attendance-{date.today().isoformat()}"
+    if format == "pdf" or preview:
+        return _build_table_pdf_response(rows, headers, "Course Attendance Report", f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +451,7 @@ async def export_course_attendance(course_id: int, db: AsyncSession = Depends(ge
 # ---------------------------------------------------------------------------
 
 @router.get("/courses/{course_id}/edstem-report")
-async def export_edstem_report(course_id: int, db: AsyncSession = Depends(get_db)):
+async def export_edstem_report(course_id: int, format: str = Query("csv"), preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export EdStem lesson completion per student as CSV."""
     from app.api.routes.courses import get_edstem_matrix
 
@@ -467,8 +484,10 @@ async def export_edstem_report(course_id: int, db: AsyncSession = Depends(get_db
         rows.append(row)
 
     code = await _get_course_code(db, course_id)
-    filename = f"course-{code}-edstem-report-{date.today().isoformat()}.csv"
-    return _csv_response(rows, headers, filename)
+    filename = f"course-{code}-edstem-report-{date.today().isoformat()}"
+    if format == "pdf" or preview:
+        return _build_table_pdf_response(rows, headers, "EdStem Progress Report", f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +495,7 @@ async def export_edstem_report(course_id: int, db: AsyncSession = Depends(get_db
 # ---------------------------------------------------------------------------
 
 @router.get("/students/{user_id}/report")
-async def export_student_report(user_id: int, db: AsyncSession = Depends(get_db)):
+async def export_student_report(user_id: int, preview: int = Query(0), db: AsyncSession = Depends(get_db)):
     """Export a comprehensive single-student report as a multi-section CSV."""
     from app.attendance.service import get_student_profile
 
@@ -574,10 +593,11 @@ async def export_student_report(user_id: int, db: AsyncSession = Depends(get_db)
     name_slug = re.sub(r"[^a-z0-9]+", "-", student["name"].lower()).strip("-")
     filename = f"student-{name_slug}-report-{date.today().isoformat()}.csv"
 
+    disposition = "inline" if preview else "attachment"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
     )
 
 
@@ -926,6 +946,56 @@ def _build_pdf(elements: list, filename: str, inline: bool = False) -> Streaming
         topMargin=15 * mm, bottomMargin=15 * mm,
     )
     doc.build(elements)
+    buf.seek(0)
+    disposition = "inline" if inline else "attachment"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
+
+
+def _build_table_pdf_response(
+    rows: list[list[str]],
+    headers: list[str],
+    title: str,
+    filename: str,
+    inline: bool = False,
+) -> StreamingResponse:
+    """Render tabular data as a styled PDF table."""
+    styles = _pdf_styles()
+    els: list = []
+
+    els.append(Paragraph(title, styles["title"]))
+    els.append(Paragraph(
+        f"{date.today().strftime('%d %B %Y')} &nbsp;|&nbsp; {len(rows)} records",
+        styles["subtitle"],
+    ))
+    els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
+
+    P = lambda t: _p(t, styles)
+    PH = lambda t: _p(t, styles, header=True)
+
+    table_data = [[PH(h) for h in headers]]
+    for row in rows:
+        table_data.append([P(str(cell)) for cell in row])
+
+    use_landscape = len(headers) > 6
+    page = landscape(A4) if use_landscape else A4
+    avail = page[0] - 30 * mm
+    col_widths = [avail / len(headers)] * len(headers)
+
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle(_base_table_style()))
+    els.append(t)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=page,
+        leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=15 * mm, bottomMargin=15 * mm,
+    )
+    doc.build(els)
     buf.seek(0)
     disposition = "inline" if inline else "attachment"
     return StreamingResponse(
@@ -1468,6 +1538,18 @@ async def export_class_cycle_pdf(
     students = students_result.fetchall()
     if not students:
         raise HTTPException(404, "No students enrolled in this course")
+
+    # Verify course has Unit-based assignment groups before looping
+    unit_check = await db.execute(
+        text("""
+            SELECT COUNT(*) FROM assignments
+            WHERE course_id = :cid AND workflow_state = 'published'
+            AND LOWER(assignment_group_name) LIKE 'unit %%'
+        """),
+        {"course_id": course_id},
+    )
+    if not (unit_check.scalar() or 0):
+        raise HTTPException(404, "This course has no Unit-based assignment groups for cycle reports")
 
     all_elements: list = []
     styles = _pdf_styles()
