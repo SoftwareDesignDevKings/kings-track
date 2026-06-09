@@ -16,6 +16,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
+    PageBreak,
 )
 
 from app.api.deps import require_auth
@@ -916,7 +917,7 @@ def _base_table_style() -> list:
     ]
 
 
-def _build_pdf(elements: list, filename: str) -> StreamingResponse:
+def _build_pdf(elements: list, filename: str, inline: bool = False) -> StreamingResponse:
     """Render a list of platypus flowables into a PDF StreamingResponse."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -926,10 +927,11 @@ def _build_pdf(elements: list, filename: str) -> StreamingResponse:
     )
     doc.build(elements)
     buf.seek(0)
+    disposition = "inline" if inline else "attachment"
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
     )
 
 
@@ -1029,18 +1031,15 @@ async def list_course_cycles(
 # 10b. Current Cycle Update PDF
 # ---------------------------------------------------------------------------
 
-@router.get("/students/{user_id}/cycle-update-pdf")
-async def export_cycle_update_pdf(
+async def _build_cycle_update_elements(
+    db: AsyncSession,
     user_id: int,
-    course_id: int = Query(..., description="Canvas course ID"),
-    cycle_num: int | None = Query(None, description="Specific cycle number (omit for auto-detect)"),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    PDF report showing a student's progress in the current assignment-group
-    cycle for a given course, plus any matched Gradeo quiz results.
-    When *cycle_num* is provided the report targets that specific cycle;
-    otherwise the first unit with incomplete work is auto-detected.
+    course_id: int,
+    cycle_num: int | None,
+) -> list:
+    """Build the ReportLab elements for a single student's cycle update.
+
+    Returns the flowable elements list.  Raises ``HTTPException`` on errors.
     """
     # ── Fetch student ──
     stu_result = await db.execute(
@@ -1077,9 +1076,6 @@ async def export_cycle_update_pdf(
     )
     rows = asg_result.fetchall()
 
-    # Group by assignment_group_name, keeping only teaching-cycle groups
-    # (those starting with "Unit "). Assessment tasks, classwork, homework,
-    # archive, etc. are excluded — assessments will be in a separate report.
     all_groups: dict[str, list] = {}
     all_group_order: list[str] = []
     for r in rows:
@@ -1101,10 +1097,9 @@ async def export_cycle_update_pdf(
 
     # ── Detect current unit ──
     now = datetime.utcnow()
-    cycle_label: str | None = None          # set when a specific cycle is chosen
+    cycle_label: str | None = None
 
     if cycle_num is not None:
-        # Resolve the unit from the selected cycle's topic
         modules = await _fetch_canvas_modules(course_id)
         target_topic: str | None = None
         target_term: int | None = None
@@ -1120,7 +1115,7 @@ async def export_cycle_update_pdf(
                     target_ew = parsed[3]
                     break
 
-        best_group = group_order[-1]        # fallback
+        best_group = group_order[-1]
         if target_topic:
             for gname in group_order:
                 um = re.match(r"Unit\s+\d+[:\s\-]+(.+)", gname)
@@ -1139,7 +1134,6 @@ async def export_cycle_update_pdf(
                     best_group = gname
                     break
 
-        # Build a human-readable label for the PDF header
         if target_sw and target_ew:
             cycle_label = (
                 f"Cycle {cycle_num} — Term {target_term}: "
@@ -1148,7 +1142,6 @@ async def export_cycle_update_pdf(
         else:
             cycle_label = f"Cycle {cycle_num}"
     else:
-        # Auto-detect: first unit with incomplete work
         best_group = group_order[-1]
         for gname in group_order:
             done = sum(
@@ -1161,7 +1154,6 @@ async def export_cycle_update_pdf(
 
     all_unit_assignments = sorted(groups[best_group], key=_assignment_sort_key)
 
-    # Filter to only assignments due in the past 2 weeks
     two_weeks_ago = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=14)
     end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
     current_assignments = [
@@ -1170,14 +1162,12 @@ async def export_cycle_update_pdf(
         and two_weeks_ago <= (a.due_at.replace(tzinfo=None) if a.due_at.tzinfo else a.due_at) <= end_of_today
     ]
 
-    # Compute cycle stats (based on filtered 2-week window)
     total = len(current_assignments)
     completed = sum(
         1 for a in current_assignments
         if a.workflow_state in ("submitted", "graded")
     )
     missing_count = sum(1 for a in current_assignments if a.missing)
-    late_count = sum(1 for a in current_assignments if a.late)
     scores = [float(a.score) for a in current_assignments if a.score is not None]
     points = [float(a.points_possible) for a in current_assignments
               if a.points_possible and a.score is not None]
@@ -1185,7 +1175,7 @@ async def export_cycle_update_pdf(
         round(sum(scores) / sum(points) * 100) if points and sum(points) > 0 else None
     )
 
-    # ── Fetch Gradeo results for this student + course ──
+    # ── Fetch Gradeo results ──
     gradeo_result = await db.execute(
         text("""
             SELECT gcea.exam_name, gcea.syllabus_title, gcea.topics,
@@ -1201,8 +1191,6 @@ async def export_cycle_update_pdf(
     )
     gradeo_exams = gradeo_result.fetchall()
 
-    # Build lookup: cycle number → Gradeo exam result
-    # Matches Canvas "Cycle N Spaced Repetition" to Gradeo exams containing "Cycle N"
     gradeo_by_cycle: dict[int, object] = {}
     for ge in gradeo_exams:
         m = re.search(r"Cycle\s+(\d+)", ge.exam_name, re.IGNORECASE)
@@ -1210,11 +1198,10 @@ async def export_cycle_update_pdf(
             gradeo_by_cycle[int(m.group(1))] = ge
     matched_gradeo_cycles: set[int] = set()
 
-    # ── Build PDF ──
+    # ── Build elements ──
     styles = _pdf_styles()
     els: list = []
 
-    # Header
     if cycle_label:
         els.append(Paragraph(f"{cycle_label} Update", styles["title"]))
     else:
@@ -1231,10 +1218,8 @@ async def export_cycle_update_pdf(
     ))
     els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
 
-    # Current unit heading
     els.append(Paragraph(f"Current Unit: {best_group}", styles["section"]))
 
-    # Metrics row
     comp_pct = f"{round(completed / total * 100)}%" if total else "—"
     metrics = Table(
         [[
@@ -1249,7 +1234,6 @@ async def export_cycle_update_pdf(
     els.append(metrics)
     els.append(Spacer(1, 10))
 
-    # Assignments table
     P = lambda t: _p(t, styles)
     PH = lambda t: _p(t, styles, header=True)
     has_gradeo = bool(gradeo_by_cycle)
@@ -1259,9 +1243,6 @@ async def export_cycle_update_pdf(
     table_data = [headers]
     style_cmds = list(_base_table_style())
 
-    # Determine "should be up to" boundary.
-    # Always use today's date: the red line goes after the last assignment
-    # whose due date is before the start of tomorrow.
     divider_row: int | None = None
     start_of_tomorrow = now.replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -1306,7 +1287,6 @@ async def export_cycle_update_pdf(
 
         row = [P(a.name), P(due_str), P(status), P(score_str), P(late_str)]
 
-        # Match Gradeo results to "Cycle N" assignments
         if has_gradeo:
             cycle_m = re.match(r"Cycle\s+(\d+)", a.name, re.IGNORECASE)
             if cycle_m:
@@ -1322,7 +1302,6 @@ async def export_cycle_update_pdf(
 
         table_data.append(row)
 
-        # Row colour coding
         if status == "Missing":
             style_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
         elif a.late:
@@ -1330,9 +1309,6 @@ async def export_cycle_update_pdf(
         elif status == "Graded":
             style_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
 
-    # "Should be up to" red divider line — only shown when the table
-    # includes future items (i.e. the line isn't at the very bottom).
-    # When the report only covers past-due items the line is redundant.
     if (divider_row is not None
             and 0 < divider_row < len(table_data) - 1):
         style_cmds.append(
@@ -1372,6 +1348,44 @@ async def export_cycle_update_pdf(
         gt.setStyle(TableStyle(g_cmds))
         els.append(gt)
 
+    # ── EdStem lesson completion ──
+    edstem_total_result = await db.execute(
+        text("""
+            SELECT COUNT(*) FROM edstem_lessons el
+            JOIN edstem_course_mappings ecm ON ecm.edstem_course_id = el.edstem_course_id
+            WHERE ecm.canvas_course_id = :cid
+        """),
+        {"cid": course_id},
+    )
+    edstem_total = edstem_total_result.scalar() or 0
+
+    if edstem_total > 0:
+        edstem_completed_result = await db.execute(
+            text("""
+                SELECT COUNT(*) FROM edstem_lesson_progress elp
+                JOIN edstem_lessons el ON el.id = elp.edstem_lesson_id
+                JOIN edstem_course_mappings ecm ON ecm.edstem_course_id = el.edstem_course_id
+                WHERE ecm.canvas_course_id = :cid
+                  AND elp.user_id = :uid
+                  AND elp.status = 'completed'
+            """),
+            {"cid": course_id, "uid": user_id},
+        )
+        edstem_completed = edstem_completed_result.scalar() or 0
+        edstem_pct = round(edstem_completed / edstem_total * 100) if edstem_total else 0
+
+        els.append(Paragraph("EdStem Lessons", styles["section"]))
+        edstem_metrics = Table(
+            [[
+                _metric_box(f"{edstem_completed}/{edstem_total}", "Completed", styles),
+                _metric_box(f"{edstem_pct}%", "Completion", styles),
+            ]],
+            hAlign="LEFT",
+        )
+        edstem_metrics.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+        els.append(edstem_metrics)
+        els.append(Spacer(1, 6))
+
     # ── Other units summary ──
     other_groups = [g for g in group_order if g != best_group]
     if other_groups:
@@ -1390,12 +1404,96 @@ async def export_cycle_update_pdf(
         ot.setStyle(TableStyle(oc_cmds))
         els.append(ot)
 
-    # Build and return
-    name_slug = re.sub(r"[^a-z0-9]+", "-", student.name.lower()).strip("-")
-    code = (course.course_code or "").replace(" ", "-") or str(course_id)
+    return els
+
+
+@router.get("/students/{user_id}/cycle-update-pdf")
+async def export_cycle_update_pdf(
+    user_id: int,
+    course_id: int = Query(..., description="Canvas course ID"),
+    cycle_num: int | None = Query(None, description="Specific cycle number (omit for auto-detect)"),
+    preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    PDF report showing a student's progress in the current assignment-group
+    cycle for a given course, plus any matched Gradeo quiz results.
+    """
+    els = await _build_cycle_update_elements(db, user_id, course_id, cycle_num)
+
+    # Build filename
+    stu_result = await db.execute(
+        text("SELECT name FROM users WHERE id = :id"), {"id": user_id},
+    )
+    stu_row = stu_result.fetchone()
+    name_slug = re.sub(r"[^a-z0-9]+", "-", (stu_row.name if stu_row else "student").lower()).strip("-")
+
+    crs_result = await db.execute(
+        text("SELECT course_code FROM courses WHERE id = :id"), {"id": course_id},
+    )
+    crs_row = crs_result.fetchone()
+    code = ((crs_row.course_code if crs_row else None) or "").replace(" ", "-") or str(course_id)
+
     cycle_part = f"-cycle-{cycle_num}" if cycle_num is not None else ""
     filename = f"{name_slug}{cycle_part}-update-{code}-{date.today().isoformat()}.pdf"
-    return _build_pdf(els, filename)
+    return _build_pdf(els, filename, inline=(preview == 1))
+
+
+# ---------------------------------------------------------------------------
+# 10c. Whole-Class Cycle Update PDF
+# ---------------------------------------------------------------------------
+
+@router.get("/courses/{course_id}/class-cycle-pdf")
+async def export_class_cycle_pdf(
+    course_id: int,
+    cycle_num: int | None = Query(None, description="Specific cycle number (omit for auto-detect)"),
+    preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Combined PDF with one cycle-update report per enrolled student,
+    separated by page breaks.
+    """
+    # Fetch enrolled students
+    students_result = await db.execute(
+        text("""
+            SELECT u.id, u.name
+            FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
+            ORDER BY u.sortable_name IS NULL, u.sortable_name
+        """),
+        {"course_id": course_id},
+    )
+    students = students_result.fetchall()
+    if not students:
+        raise HTTPException(404, "No students enrolled in this course")
+
+    all_elements: list = []
+    styles = _pdf_styles()
+
+    for idx, stu in enumerate(students):
+        try:
+            student_els = await _build_cycle_update_elements(
+                db, stu.id, course_id, cycle_num,
+            )
+            if idx > 0:
+                all_elements.append(PageBreak())
+            all_elements.extend(student_els)
+        except HTTPException:
+            # Insert a placeholder page for students with no data
+            if idx > 0:
+                all_elements.append(PageBreak())
+            all_elements.append(Paragraph("Cycle Update", styles["title"]))
+            all_elements.append(Paragraph(
+                f"{stu.name} — No cycle data available for this course.",
+                styles["body"],
+            ))
+
+    code = await _get_course_code(db, course_id)
+    cycle_part = f"-cycle-{cycle_num}" if cycle_num is not None else ""
+    filename = f"class{cycle_part}-cycle-update-{code}-{date.today().isoformat()}.pdf"
+    return _build_pdf(all_elements, filename, inline=(preview == 1))
 
 
 # ---------------------------------------------------------------------------
@@ -1405,6 +1503,7 @@ async def export_cycle_update_pdf(
 @router.get("/students/{user_id}/missing-report-pdf")
 async def export_missing_report_pdf(
     user_id: int,
+    preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -1607,4 +1706,4 @@ async def export_missing_report_pdf(
     # Build and return
     name_slug = re.sub(r"[^a-z0-9]+", "-", student.name.lower()).strip("-")
     filename = f"{name_slug}-missing-report-{date.today().isoformat()}.pdf"
-    return _build_pdf(els, filename)
+    return _build_pdf(els, filename, inline=(preview == 1))
