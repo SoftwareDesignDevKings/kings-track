@@ -15,17 +15,21 @@ interface ReportCardProps {
 
 function ReportCard({ title, description, path, fallbackName, disabled, disabledReason, formats = ['csv', 'pdf'] }: ReportCardProps) {
   const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const hasCsv = formats.includes('csv')
   const hasPdf = formats.includes('pdf')
 
   async function handleDownload(fmt: 'csv' | 'pdf') {
     setBusy(fmt)
+    setError(null)
     try {
       const sep = path.includes('?') ? '&' : '?'
       await downloadFile(`${path}${sep}format=${fmt}`, `${fallbackName}.${fmt}`)
-    } catch {
-      // silent
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('422')) {
+        setError('Too many columns for PDF. Use CSV instead.')
+      }
     } finally {
       setBusy(null)
     }
@@ -33,10 +37,13 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
 
   async function handlePreview() {
     setBusy('preview')
+    setError(null)
     try {
       await previewPdf(path)
-    } catch {
-      // silent
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('422')) {
+        setError('Too many columns for PDF preview. Use CSV instead.')
+      }
     } finally {
       setBusy(null)
     }
@@ -75,6 +82,7 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
               {busy === 'pdf' ? 'Downloading\u2026' : 'PDF'}
             </button>
           )}
+        {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
         </div>
       )}
     </div>

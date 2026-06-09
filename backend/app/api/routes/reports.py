@@ -976,6 +976,12 @@ def _build_table_pdf_response(
     P = lambda t: _p(t, styles)
     PH = lambda t: _p(t, styles, header=True)
 
+    if len(headers) > 20:
+        raise HTTPException(
+            422,
+            "This report has too many columns for PDF. Please export as CSV instead.",
+        )
+
     table_data = [[PH(h) for h in headers]]
     for row in rows:
         table_data.append([P(str(cell)) for cell in row])
@@ -1543,7 +1549,7 @@ async def export_class_cycle_pdf(
     unit_check = await db.execute(
         text("""
             SELECT COUNT(*) FROM assignments
-            WHERE course_id = :cid AND workflow_state = 'published'
+            WHERE course_id = :course_id AND workflow_state = 'published'
             AND LOWER(assignment_group_name) LIKE 'unit %%'
         """),
         {"course_id": course_id},
