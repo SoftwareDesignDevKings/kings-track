@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import Header from '../components/Header'
 import { useStudents } from '../services/api'
 import { downloadCsv } from '../lib/downloadCsv'
 import type { StudentListItem } from '../types'
@@ -119,8 +118,7 @@ export default function Students() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
+    <div className="h-full w-full overflow-auto">
 
       <main className="max-w-screen-2xl mx-auto px-6 py-8">
         <div className="mb-6">

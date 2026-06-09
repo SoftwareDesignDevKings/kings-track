@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import Header from '../components/Header'
 import { useCurrentUser } from '../services/api'
 import { installExtensionBridge, type BridgeEvent } from '../lib/extensionBridge'
 
@@ -20,8 +19,7 @@ export default function ExtensionBridge() {
   }, [isAdmin])
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
+    <div className="h-full w-full overflow-auto">
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-slate-900">Extension Bridge</h2>

@@ -1,4 +1,3 @@
-import Header from '../components/Header'
 import CourseCard from '../components/CourseCard'
 import CanvasOutageBanner from '../components/CanvasOutageBanner'
 import { useCourses, useHealth } from '../services/api'
@@ -32,8 +31,7 @@ export default function Overview() {
   const canvasConfigured = health?.canvas_configured ?? true
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
+    <div className="h-full w-full bg-slate-50 overflow-auto">
       <CanvasOutageBanner />
 
       <main className="max-w-screen-2xl mx-auto px-6 py-8">

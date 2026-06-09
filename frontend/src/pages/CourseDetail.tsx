@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
-import Header from '../components/Header'
 import ActivityTable from '../components/ActivityTable'
 import EdStemLessonTable from '../components/EdStemLessonTable'
 import GradeoReportTable from '../components/GradeoReportTable'
@@ -164,9 +163,7 @@ export default function CourseDetail() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
-      <Header />
-
+    <div className="flex h-full w-full flex-col min-h-0">
       <main className="mx-auto flex min-h-0 w-full max-w-screen-2xl flex-1 flex-col px-4 py-6 sm:px-6">
         <nav className="mb-5 flex shrink-0 items-center gap-2 text-sm text-slate-400">
           <Link to="/" className="hover:text-brand-600 transition-colors">Courses</Link>

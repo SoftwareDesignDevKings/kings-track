@@ -7,6 +7,8 @@ interface RenderWithProvidersOptions {
   initialEntries?: string[]
 }
 
+import { ChatProvider } from '../lib/ChatContext'
+
 export function renderWithProviders(
   ui: ReactElement,
   { initialEntries }: RenderWithProvidersOptions = {},
@@ -20,7 +22,11 @@ export function renderWithProviders(
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
+        <ChatProvider>
+          {ui}
+        </ChatProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }

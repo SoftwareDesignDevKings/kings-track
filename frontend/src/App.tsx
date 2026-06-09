@@ -7,28 +7,25 @@ import Login from './pages/Login'
 import Admin from './pages/Admin'
 import ExtensionBridge from './pages/ExtensionBridge'
 import ProtectedRoute from './components/ProtectedRoute'
-import ChatWidget from './components/ChatWidget'
-
-function GlobalChat() {
-  // The assistant is available on every authenticated page, but not on login.
-  const { pathname } = useLocation()
-  if (pathname === '/login') return null
-  return <ChatWidget />
-}
+import AppLayout from './components/AppLayout'
+import { ChatProvider } from './lib/ChatContext'
 
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
-        <Route path="/courses/:courseId" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
-        <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
-        <Route path="/students/:userId" element={<ProtectedRoute><StudentProfile /></ProtectedRoute>} />
-        <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
-        <Route path="/extension-bridge" element={<ProtectedRoute><ExtensionBridge /></ProtectedRoute>} />
-      </Routes>
-      <GlobalChat />
+      <ChatProvider>
+        <AppLayout>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
+            <Route path="/courses/:courseId" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
+            <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
+            <Route path="/students/:userId" element={<ProtectedRoute><StudentProfile /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+            <Route path="/extension-bridge" element={<ProtectedRoute><ExtensionBridge /></ProtectedRoute>} />
+          </Routes>
+        </AppLayout>
+      </ChatProvider>
     </BrowserRouter>
   )
 }
