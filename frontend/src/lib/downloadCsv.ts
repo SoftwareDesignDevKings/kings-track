@@ -2,7 +2,7 @@ import { getAccessToken } from './auth'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 
-export async function downloadCsv(path: string, fallbackFilename: string): Promise<void> {
+export async function downloadFile(path: string, fallbackFilename: string): Promise<void> {
   const token = await getAccessToken()
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -35,10 +35,13 @@ export async function downloadCsv(path: string, fallbackFilename: string): Promi
   URL.revokeObjectURL(url)
 }
 
+/** @deprecated Use downloadFile instead */
+export const downloadCsv = downloadFile
+
 export async function previewPdf(path: string): Promise<void> {
   const token = await getAccessToken()
   const separator = path.includes('?') ? '&' : '?'
-  const res = await fetch(`${API_BASE}${path}${separator}preview=1`, {
+  const res = await fetch(`${API_BASE}${path}${separator}preview=1&format=pdf`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
 
