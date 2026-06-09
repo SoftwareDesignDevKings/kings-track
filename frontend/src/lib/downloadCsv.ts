@@ -34,3 +34,20 @@ export async function downloadCsv(path: string, fallbackFilename: string): Promi
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
 }
+
+export async function previewPdf(path: string): Promise<void> {
+  const token = await getAccessToken()
+  const separator = path.includes('?') ? '&' : '?'
+  const res = await fetch(`${API_BASE}${path}${separator}preview=1`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Preview failed (${res.status}): ${text}`)
+  }
+
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  window.open(url, '_blank')
+}
