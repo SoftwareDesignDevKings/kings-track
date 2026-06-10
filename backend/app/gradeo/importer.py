@@ -1159,13 +1159,29 @@ async def import_class_batch(
             imported_question_results,
         )
 
+        # Determine pruning scope.
+        # - For explicit "marking_sessions" scope imports, use the declared
+        #   scope_marking_session_ids so that an empty scoped import correctly
+        #   prunes only the targeted sessions.
+        # - For "class" scope imports, narrow pruning to the marking sessions
+        #   actually present in the batch to avoid wiping sessions that were
+        #   not included in the current payload.
+        if import_scope == "marking_sessions" and scope_marking_session_ids:
+            prune_session_ids: set[str] | None = scope_marking_session_ids
+        else:
+            actual_marking_session_ids = {
+                agg.gradeo_marking_session_id
+                for agg in assignment_templates.values()
+                if agg.gradeo_marking_session_id
+            }
+            prune_session_ids = actual_marking_session_ids or None
         await prune_class_import_state(
             db,
             gradeo_class_id=batch.gradeo_class_id,
             imported_assignment_ids=imported_assignment_ids,
             imported_result_keys=imported_result_keys,
             imported_question_keys=imported_question_keys,
-            scope_marking_session_ids=scope_marking_session_ids if import_scope == "marking_sessions" else None,
+            scope_marking_session_ids=prune_session_ids,
         )
     except Exception as exc:
         await finish_import_run(

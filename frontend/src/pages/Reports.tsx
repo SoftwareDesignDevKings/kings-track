@@ -39,7 +39,7 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
     setBusy('preview')
     setError(null)
     try {
-      await previewPdf(path)
+      await previewPdf(path, title)
     } catch (e) {
       if (e instanceof Error && e.message.includes('422')) {
         setError('Too many columns for PDF preview. Use CSV instead.')
@@ -144,19 +144,19 @@ export default function Reports() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <ReportCard
               title="Student Progress Report"
-              description="All students with academic metrics, attendance, and concern flags."
+              description="Every student across all courses. Includes name, email, SIS ID, course count, average completion rate, on-time rate, score, attendance rate, concern level, and concern reasons."
               path="/reports/student-progress"
               fallbackName="student-progress-report"
             />
             <ReportCard
               title="At-Risk Students"
-              description="Students flagged as moderate or high concern, sorted by severity."
+              description="Only students flagged as moderate or high concern, sorted by severity. Same columns as Student Progress: completion, on-time, score, attendance, and the specific concern reasons."
               path="/reports/at-risk-students"
               fallbackName="at-risk-students"
             />
             <ReportCard
               title="Attendance Summary"
-              description="Per-student attendance rates across all meetings."
+              description="Per-student attendance breakdown across all meetings. Columns: name, email, SIS ID, total meetings, present, late, partial, absent, and overall attendance rate."
               path="/reports/attendance-summary"
               fallbackName="attendance-summary"
             />
@@ -191,37 +191,37 @@ export default function Reports() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <ReportCard
                 title="Class List"
-                description="Student roster with first name, last name, and email."
+                description="Enrolled student roster for this course. Columns: first name, last name, and email address."
                 path={`/reports/courses/${selectedCourseId}/class-list`}
                 fallbackName={`${courseCode}-class-list`}
               />
               <ReportCard
                 title="Class Report"
-                description="Assignment completion matrix with scores and submission status."
+                description="Assignment completion matrix. One row per student, one column per assignment showing score or submission status (submitted, graded, missing). Best exported as CSV for courses with many assignments."
                 path={`/reports/courses/${selectedCourseId}/class-report`}
                 fallbackName={`${courseCode}-class-report`}
               />
               <ReportCard
                 title="Course Attendance"
-                description="Per-student attendance status for each meeting."
+                description="Attendance record for every meeting in this course. One row per student with their attendance rate and status (present, late, partial, absent) for each meeting date."
                 path={`/reports/courses/${selectedCourseId}/attendance-report`}
                 fallbackName={`${courseCode}-attendance`}
               />
               <ReportCard
                 title="Gradeo Topic Bands"
-                description="Per-topic predicted bands and scores from Gradeo assessments."
+                description="Gradeo assessment results by topic. One row per student showing predicted band and score percentage for each assessed topic."
                 path={`/reports/courses/${selectedCourseId}/gradeo-report`}
                 fallbackName={`${courseCode}-gradeo-report`}
               />
               <ReportCard
                 title="EdStem Progress"
-                description="Lesson completion status per student across all modules."
+                description="EdStem lesson completion for each student. One column per lesson showing status (completed, in_progress, not_started) with student name, email, and SIS ID."
                 path={`/reports/courses/${selectedCourseId}/edstem-report`}
                 fallbackName={`${courseCode}-edstem-report`}
               />
               <ReportCard
                 title="Whole-Class Cycle Update"
-                description="Combined PDF of cycle update reports for every student in this course."
+                description="One PDF per student in this course, combined into a single document with page breaks. Each page shows the student's current cycle progress, scores, missing work, Gradeo results, and EdStem completion."
                 path={`/reports/courses/${selectedCourseId}/class-cycle-pdf`}
                 fallbackName={`${courseCode}-class-cycle-update`}
                 formats={['pdf']}
@@ -258,7 +258,7 @@ export default function Reports() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Course (for Cycle Update)</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Course</label>
               <select
                 value={pdfCourseId ?? ''}
                 onChange={e => {
@@ -298,7 +298,7 @@ export default function Reports() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <ReportCard
                 title={pdfCycleNum ? `Cycle ${pdfCycleNum} Update` : 'Current Cycle Update'}
-                description="Progress in the scope-and-sequence cycle with Gradeo quiz results."
+                description="PDF for the selected teaching cycle. Shows completion metrics (completed, missing, avg score), assignment table with due dates, scores, and late flags, Gradeo quiz results, EdStem lesson completion, and other units overview. Suitable for sharing with parents."
                 path={`/reports/students/${pdfStudentId}/cycle-update-pdf?course_id=${pdfCourseId}${cyclePart}`}
                 fallbackName="cycle-update"
                 disabled={!pdfCourseId}
@@ -307,14 +307,23 @@ export default function Reports() {
               />
               <ReportCard
                 title="Missing Work Report"
-                description="All missing and incomplete work across Canvas, EdStem, and Gradeo."
+                description="PDF listing all outstanding work for this student across every enrolled course. Includes missing Canvas assignments (with due dates and points), incomplete EdStem lessons, flagged Gradeo assessments, and assessment tracking with rubric criteria scores for unsubmitted tasks."
                 path={`/reports/students/${pdfStudentId}/missing-report-pdf`}
                 fallbackName="missing-report"
                 formats={['pdf']}
               />
               <ReportCard
+                title="Complete Student Report"
+                description="Full progress report for this student in the selected course. Includes all assignment scores, assessment tracking with rubric criteria, Gradeo results, EdStem progress, and attendance records."
+                path={`/reports/students/${pdfStudentId}/student-report-pdf?course_id=${pdfCourseId}`}
+                fallbackName="student-report"
+                disabled={!pdfCourseId}
+                disabledReason="Select a course above"
+                formats={['pdf']}
+              />
+              <ReportCard
                 title="Full Student Report"
-                description="Comprehensive CSV with metrics, submissions, attendance, and concern status."
+                description="Multi-section CSV with everything for one student: personal info, overview metrics, per-course completion/on-time/score, submission counts (total, submitted, graded, late, missing), attendance breakdown, recent attendance log, and concern status."
                 path={`/reports/students/${pdfStudentId}/report`}
                 fallbackName="student-report"
                 formats={['csv']}

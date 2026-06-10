@@ -38,7 +38,7 @@ export async function downloadFile(path: string, fallbackFilename: string): Prom
 /** @deprecated Use downloadFile instead */
 export const downloadCsv = downloadFile
 
-export async function previewPdf(path: string): Promise<void> {
+export async function previewPdf(path: string, title?: string): Promise<void> {
   const token = await getAccessToken()
   const separator = path.includes('?') ? '&' : '?'
   const res = await fetch(`${API_BASE}${path}${separator}preview=1&format=pdf`, {
@@ -52,5 +52,13 @@ export async function previewPdf(path: string): Promise<void> {
 
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
-  window.open(url, '_blank')
+  const w = window.open('', '_blank')
+  if (w) {
+    w.document.title = title || 'Report Preview'
+    w.document.body.style.margin = '0'
+    const iframe = w.document.createElement('iframe')
+    iframe.src = url
+    iframe.style.cssText = 'width:100%;height:100%;border:none'
+    w.document.body.appendChild(iframe)
+  }
 }
