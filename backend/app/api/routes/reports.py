@@ -1596,12 +1596,14 @@ async def export_class_cycle_pdf(
 @router.get("/students/{user_id}/missing-report-pdf")
 async def export_missing_report_pdf(
     user_id: int,
+    course_id: int | None = Query(None, description="Optional: filter to a single course"),
     preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
     db: AsyncSession = Depends(get_db),
 ):
     """
     PDF report listing all missing / incomplete work for a student
     across Canvas assignments, EdStem lessons, and Gradeo exams.
+    When course_id is provided, only that course is included.
     """
     from app.whitelist import get_effective_whitelist
 
@@ -1634,6 +1636,12 @@ async def export_missing_report_pdf(
     }
     if not courses_map:
         raise HTTPException(404, "Student has no active enrolments")
+
+    # If course_id is specified, filter to just that course
+    if course_id is not None:
+        if course_id not in courses_map:
+            raise HTTPException(404, "Student is not enrolled in this course")
+        courses_map = {course_id: courses_map[course_id]}
 
     enrolled_ids = list(courses_map.keys())
 
@@ -1743,10 +1751,18 @@ async def export_missing_report_pdf(
 
     # Header
     els.append(Paragraph("Missing Work Report", styles["title"]))
-    els.append(Paragraph(
-        f"{student.name} &nbsp;|&nbsp; {date.today().strftime('%d %B %Y')}",
-        styles["subtitle"],
-    ))
+    if course_id is not None:
+        c_info = courses_map[course_id]
+        c_label = c_info.get("code") or c_info.get("name") or str(course_id)
+        els.append(Paragraph(
+            f"{student.name} &nbsp;|&nbsp; {c_label} &nbsp;|&nbsp; {date.today().strftime('%d %B %Y')}",
+            styles["subtitle"],
+        ))
+    else:
+        els.append(Paragraph(
+            f"{student.name} &nbsp;|&nbsp; {date.today().strftime('%d %B %Y')}",
+            styles["subtitle"],
+        ))
     els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
 
     # Summary metrics
