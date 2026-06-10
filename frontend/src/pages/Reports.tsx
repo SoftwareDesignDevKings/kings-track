@@ -27,8 +27,14 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
       const sep = path.includes('?') ? '&' : '?'
       await downloadFile(`${path}${sep}format=${fmt}`, `${fallbackName}.${fmt}`)
     } catch (e) {
-      if (e instanceof Error && e.message.includes('422')) {
-        setError('Too many columns for PDF. Use CSV instead.')
+      if (e instanceof Error) {
+        if (e.message.includes('422')) {
+          setError('Too many columns for PDF. Use CSV instead.')
+        } else if (e.message.includes('404')) {
+          setError('No data available for this report.')
+        } else {
+          setError(`Download failed: ${e.message.slice(0, 120)}`)
+        }
       }
     } finally {
       setBusy(null)
@@ -41,8 +47,14 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
     try {
       await previewPdf(path, title)
     } catch (e) {
-      if (e instanceof Error && e.message.includes('422')) {
-        setError('Too many columns for PDF preview. Use CSV instead.')
+      if (e instanceof Error) {
+        if (e.message.includes('422')) {
+          setError('Too many columns for PDF preview. Use CSV instead.')
+        } else if (e.message.includes('404')) {
+          setError('No data available for this report.')
+        } else {
+          setError(`Preview failed: ${e.message.slice(0, 120)}`)
+        }
       }
     } finally {
       setBusy(null)
@@ -110,6 +122,9 @@ export default function Reports() {
   const courseCode = selectedCourse
     ? (selectedCourse.course_code ?? '').replace(/\s+/g, '-') || String(selectedCourse.id)
     : ''
+  const isEncCourse = selectedCourse?.course_code
+    ? /ENC/i.test(selectedCourse.course_code)
+    : false
 
   function handleStudentChange(id: number | null) {
     setPdfStudentId(id)
@@ -188,7 +203,7 @@ export default function Reports() {
           </div>
 
           {selectedCourseId ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div key={selectedCourseId} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <ReportCard
                 title="Class List"
                 description="Enrolled student roster for this course. Columns: first name, last name, and email address."
@@ -207,18 +222,22 @@ export default function Reports() {
                 path={`/reports/courses/${selectedCourseId}/attendance-report`}
                 fallbackName={`${courseCode}-attendance`}
               />
-              <ReportCard
-                title="Gradeo Topic Bands"
-                description="Gradeo assessment results by topic. One row per student showing predicted band and score percentage for each assessed topic."
-                path={`/reports/courses/${selectedCourseId}/gradeo-report`}
-                fallbackName={`${courseCode}-gradeo-report`}
-              />
-              <ReportCard
-                title="EdStem Progress"
-                description="EdStem lesson completion for each student. One column per lesson showing status (completed, in_progress, not_started) with student name, email, and SIS ID."
-                path={`/reports/courses/${selectedCourseId}/edstem-report`}
-                fallbackName={`${courseCode}-edstem-report`}
-              />
+              {!isEncCourse && (
+                <ReportCard
+                  title="Gradeo Topic Bands"
+                  description="Gradeo assessment results by topic. One row per student showing predicted band and score percentage for each assessed topic."
+                  path={`/reports/courses/${selectedCourseId}/gradeo-report`}
+                  fallbackName={`${courseCode}-gradeo-report`}
+                />
+              )}
+              {!isEncCourse && (
+                <ReportCard
+                  title="EdStem Progress"
+                  description="EdStem lesson completion for each student. One column per lesson showing status (completed, in_progress, not_started) with student name, email, and SIS ID."
+                  path={`/reports/courses/${selectedCourseId}/edstem-report`}
+                  fallbackName={`${courseCode}-edstem-report`}
+                />
+              )}
               <ReportCard
                 title="Whole-Class Cycle Update"
                 description="One PDF per student in this course, combined into a single document with page breaks. Each page shows the student's current cycle progress, scores, missing work, Gradeo results, and EdStem completion."
@@ -307,8 +326,14 @@ export default function Reports() {
               />
               <ReportCard
                 title="Missing Work Report"
-                description="PDF listing all outstanding work for this student across every enrolled course. Includes missing Canvas assignments (with due dates and points), incomplete EdStem lessons, flagged Gradeo assessments, and assessment tracking with rubric criteria scores for unsubmitted tasks."
-                path={`/reports/students/${pdfStudentId}/missing-report-pdf`}
+                description={pdfCourseId
+                  ? "PDF listing outstanding work for this student in the selected course. Includes missing Canvas assignments, incomplete EdStem lessons, flagged Gradeo assessments, and assessment tracking."
+                  : "PDF listing all outstanding work for this student across every enrolled course. Select a course above to filter to a single course."
+                }
+                path={pdfCourseId
+                  ? `/reports/students/${pdfStudentId}/missing-report-pdf?course_id=${pdfCourseId}`
+                  : `/reports/students/${pdfStudentId}/missing-report-pdf`
+                }
                 fallbackName="missing-report"
                 formats={['pdf']}
               />
