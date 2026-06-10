@@ -1701,32 +1701,36 @@ async def export_missing_report_pdf(
     missing_gradeo = gradeo_result.fetchall()
 
     # ── Assessment Tracking: current tasks with rubric criteria ──
-    tracking_result = await db.execute(
-        text("""
-            SELECT a.course_id, a.name AS assignment_name, a.due_at,
-                   rc.description AS criterion, rc.points AS criterion_points,
-                   ts2.score, ts2.comment
-            FROM assignments a
-            JOIN rubric_criteria rc ON rc.assignment_id = a.id
-            LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
-            LEFT JOIN LATERAL (
-                SELECT tsn.id FROM tracking_snapshots tsn
-                WHERE tsn.assignment_id = a.id
-                ORDER BY tsn.committed_at DESC NULLS FIRST
-                LIMIT 1
-            ) latest_snap ON TRUE
-            LEFT JOIN tracking_scores ts2
-                ON ts2.snapshot_id = latest_snap.id
-                AND ts2.user_id = :uid
-                AND ts2.rubric_criterion_id = rc.id
-            WHERE a.course_id = ANY(:enrolled)
-              AND a.workflow_state = 'published'
-              AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
-            ORDER BY a.course_id, a.name, rc.position
-        """),
-        {"uid": user_id, "enrolled": enrolled_ids},
-    )
-    tracking_rows = tracking_result.fetchall()
+    try:
+        tracking_result = await db.execute(
+            text("""
+                SELECT a.course_id, a.name AS assignment_name, a.due_at,
+                       rc.description AS criterion, rc.points AS criterion_points,
+                       ts2.score, ts2.comment
+                FROM assignments a
+                JOIN rubric_criteria rc ON rc.assignment_id = a.id
+                LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
+                LEFT JOIN LATERAL (
+                    SELECT tsn.id FROM tracking_snapshots tsn
+                    WHERE tsn.assignment_id = a.id
+                    ORDER BY tsn.committed_at DESC NULLS FIRST
+                    LIMIT 1
+                ) latest_snap ON TRUE
+                LEFT JOIN tracking_scores ts2
+                    ON ts2.snapshot_id = latest_snap.id
+                    AND ts2.user_id = :uid
+                    AND ts2.rubric_criterion_id = rc.id
+                WHERE a.course_id = ANY(:enrolled)
+                  AND a.workflow_state = 'published'
+                  AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
+                ORDER BY a.course_id, a.name, rc.position
+            """),
+            {"uid": user_id, "enrolled": enrolled_ids},
+        )
+        tracking_rows = tracking_result.fetchall()
+    except Exception:
+        await db.rollback()
+        tracking_rows = []
 
     # Count distinct assignments with tracking data
     tracking_assignments = {(r.course_id, r.assignment_name) for r in tracking_rows}
@@ -2023,32 +2027,36 @@ async def export_student_report_pdf(
 
     # ── Section 4: Assessment Tracking ──
     els.append(Paragraph("Assessment Tracking", styles["section"]))
-    tracking_result = await db.execute(
-        text("""
-            SELECT a.name AS assignment_name, a.due_at,
-                   rc.description AS criterion, rc.points AS criterion_points,
-                   ts2.score, ts2.comment
-            FROM assignments a
-            JOIN rubric_criteria rc ON rc.assignment_id = a.id
-            LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
-            LEFT JOIN LATERAL (
-                SELECT tsn.id FROM tracking_snapshots tsn
-                WHERE tsn.assignment_id = a.id
-                ORDER BY tsn.committed_at DESC NULLS FIRST
-                LIMIT 1
-            ) latest_snap ON TRUE
-            LEFT JOIN tracking_scores ts2
-                ON ts2.snapshot_id = latest_snap.id
-                AND ts2.user_id = :uid
-                AND ts2.rubric_criterion_id = rc.id
-            WHERE a.course_id = :cid
-              AND a.workflow_state = 'published'
-              AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
-            ORDER BY a.name, rc.position
-        """),
-        {"uid": user_id, "cid": course_id},
-    )
-    tracking_rows = tracking_result.fetchall()
+    try:
+        tracking_result = await db.execute(
+            text("""
+                SELECT a.name AS assignment_name, a.due_at,
+                       rc.description AS criterion, rc.points AS criterion_points,
+                       ts2.score, ts2.comment
+                FROM assignments a
+                JOIN rubric_criteria rc ON rc.assignment_id = a.id
+                LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
+                LEFT JOIN LATERAL (
+                    SELECT tsn.id FROM tracking_snapshots tsn
+                    WHERE tsn.assignment_id = a.id
+                    ORDER BY tsn.committed_at DESC NULLS FIRST
+                    LIMIT 1
+                ) latest_snap ON TRUE
+                LEFT JOIN tracking_scores ts2
+                    ON ts2.snapshot_id = latest_snap.id
+                    AND ts2.user_id = :uid
+                    AND ts2.rubric_criterion_id = rc.id
+                WHERE a.course_id = :cid
+                  AND a.workflow_state = 'published'
+                  AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
+                ORDER BY a.name, rc.position
+            """),
+            {"uid": user_id, "cid": course_id},
+        )
+        tracking_rows = tracking_result.fetchall()
+    except Exception:
+        await db.rollback()
+        tracking_rows = []
 
     if tracking_rows:
         tk_data = [[PH("Assignment"), PH("Due Date"), PH("Criterion"), PH("Score"), PH("Comment")]]
@@ -2152,12 +2160,12 @@ async def export_student_report_pdf(
     els.append(Paragraph("Attendance", styles["section"]))
     att_result = await db.execute(
         text("""
-            SELECT m.meeting_date, m.title,
+            SELECT m.start_time, m.title,
                    ar.status
             FROM meetings m
             LEFT JOIN attendance_records ar ON ar.meeting_id = m.id AND ar.user_id = :uid
             WHERE m.course_id = :cid
-            ORDER BY m.meeting_date
+            ORDER BY m.start_time
         """),
         {"uid": user_id, "cid": course_id},
     )
@@ -2189,7 +2197,7 @@ async def export_student_report_pdf(
         at_data = [[PH("Date"), PH("Meeting"), PH("Status")]]
         at_cmds = list(_base_table_style())
         for i, r in enumerate(att_rows, start=1):
-            date_str = r.meeting_date.strftime("%d %b %Y") if r.meeting_date else "—"
+            date_str = r.start_time.strftime("%d %b %Y") if r.start_time else "—"
             status = _status_display(r.status) if r.status else "—"
             at_data.append([P(date_str), P(r.title or "—"), P(status)])
             if r.status == "present":
