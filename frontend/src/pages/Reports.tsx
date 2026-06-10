@@ -222,14 +222,12 @@ export default function Reports() {
                 path={`/reports/courses/${selectedCourseId}/attendance-report`}
                 fallbackName={`${courseCode}-attendance`}
               />
-              {!isEncCourse && (
-                <ReportCard
-                  title="Gradeo Topic Bands"
-                  description="Gradeo assessment results by topic. One row per student showing predicted band and score percentage for each assessed topic."
-                  path={`/reports/courses/${selectedCourseId}/gradeo-report`}
-                  fallbackName={`${courseCode}-gradeo-report`}
-                />
-              )}
+              <ReportCard
+                title="Gradeo Topic Bands"
+                description="Gradeo assessment results by topic. One row per student showing predicted band and score percentage for each assessed topic."
+                path={`/reports/courses/${selectedCourseId}/gradeo-report`}
+                fallbackName={`${courseCode}-gradeo-report`}
+              />
               {!isEncCourse && (
                 <ReportCard
                   title="EdStem Progress"
