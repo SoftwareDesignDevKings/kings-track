@@ -632,7 +632,7 @@ async def get_gradeo_topic_bands(course_id: int, db: AsyncSession = Depends(get_
     evidence_result = await db.execute(
         text(
             """
-            SELECT
+            SELECT DISTINCT ON (gar.user_id, gaqr.gradeo_question_part_id)
                 gar.user_id,
                 gcea.gradeo_marking_session_id,
                 gaqr.mark,
@@ -651,6 +651,7 @@ async def get_gradeo_topic_bands(course_id: int, db: AsyncSession = Depends(get_
               AND gaqr.marks_available > 0
               AND gaqr.topics IS NOT NULL
               AND gaqr.topics <> ''
+            ORDER BY gar.user_id, gaqr.gradeo_question_part_id, gaqr.last_imported_at DESC NULLS LAST
             """
         ),
         {"course_id": course_id, "gradeo_class_id": gradeo_class_id},

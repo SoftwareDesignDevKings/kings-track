@@ -1251,17 +1251,18 @@ async def _build_cycle_update_elements(
         round(sum(scores) / sum(points) * 100) if points and sum(points) > 0 else None
     )
 
-    # ── Fetch Gradeo results ──
+    # ── Fetch Gradeo results (deduplicate by exam name, keep latest) ──
     gradeo_result = await db.execute(
         text("""
-            SELECT gcea.exam_name, gcea.syllabus_title, gcea.topics,
+            SELECT DISTINCT ON (gcea.exam_name)
+                   gcea.exam_name, gcea.syllabus_title, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.class_average, gar.status
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
             WHERE gar.user_id = :uid
               AND gar.canvas_course_id = :cid
-            ORDER BY gcea.exam_name
+            ORDER BY gcea.exam_name, gar.last_imported_at DESC NULLS LAST
         """),
         {"uid": user_id, "cid": course_id},
     )
@@ -1679,10 +1680,11 @@ async def export_missing_report_pdf(
     else:
         missing_edstem = []
 
-    # ── Gradeo: pending / low-score exams ──
+    # ── Gradeo: pending / low-score exams (deduplicate by exam name per course) ──
     gradeo_result = await db.execute(
         text("""
-            SELECT gar.canvas_course_id AS course_id,
+            SELECT DISTINCT ON (gar.canvas_course_id, gcea.exam_name)
+                   gar.canvas_course_id AS course_id,
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status
             FROM gradeo_assignment_results gar
@@ -1694,7 +1696,7 @@ async def export_missing_report_pdf(
                    OR gar.exam_mark IS NULL
                    OR (gar.marks_available > 0
                        AND gar.exam_mark / gar.marks_available < 0.5))
-            ORDER BY gar.canvas_course_id, gcea.exam_name
+            ORDER BY gar.canvas_course_id, gcea.exam_name, gar.last_imported_at DESC NULLS LAST
         """),
         {"uid": user_id, "enrolled": enrolled_ids},
     )
@@ -2084,17 +2086,18 @@ async def export_student_report_pdf(
 
     els.append(Spacer(1, 8))
 
-    # ── Section 5: Gradeo Results ──
+    # ── Section 5: Gradeo Results (deduplicate by exam name, keep latest) ──
     els.append(Paragraph("Gradeo Results", styles["section"]))
     gradeo_result = await db.execute(
         text("""
-            SELECT gcea.exam_name, gar.exam_mark, gar.marks_available,
+            SELECT DISTINCT ON (gcea.exam_name)
+                   gcea.exam_name, gar.exam_mark, gar.marks_available,
                    gcea.class_average, gcea.topics, gar.status
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
             WHERE gar.user_id = :uid AND gar.canvas_course_id = :cid
-            ORDER BY gcea.exam_name
+            ORDER BY gcea.exam_name, gar.last_imported_at DESC NULLS LAST
         """),
         {"uid": user_id, "cid": course_id},
     )

@@ -1159,13 +1159,22 @@ async def import_class_batch(
             imported_question_results,
         )
 
+        # Always scope pruning to the marking sessions actually present in
+        # the imported batch.  This prevents a partial class import from
+        # accidentally deleting results that belong to marking sessions
+        # not included in the current payload.
+        actual_marking_session_ids = {
+            agg.gradeo_marking_session_id
+            for agg in assignment_templates.values()
+            if agg.gradeo_marking_session_id
+        }
         await prune_class_import_state(
             db,
             gradeo_class_id=batch.gradeo_class_id,
             imported_assignment_ids=imported_assignment_ids,
             imported_result_keys=imported_result_keys,
             imported_question_keys=imported_question_keys,
-            scope_marking_session_ids=scope_marking_session_ids if import_scope == "marking_sessions" else None,
+            scope_marking_session_ids=actual_marking_session_ids or None,
         )
     except Exception as exc:
         await finish_import_run(
