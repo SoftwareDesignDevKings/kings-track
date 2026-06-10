@@ -13,6 +13,16 @@ interface ReportCardProps {
   formats?: ('csv' | 'pdf')[]
 }
 
+/** Extract the detail message from a backend error response. */
+function extractApiDetail(e: Error): string {
+  // FastAPI errors are JSON: {"detail":"..."} — try to extract
+  const match = e.message.match(/"detail"\s*:\s*"([^"]+)"/)
+  if (match) return match[1]
+  // Fallback: strip the prefix ("Download failed (404): ...")
+  const stripped = e.message.replace(/^(?:Download|Preview) failed \(\d+\):\s*/, '')
+  return stripped.slice(0, 150) || 'An unexpected error occurred.'
+}
+
 function ReportCard({ title, description, path, fallbackName, disabled, disabledReason, formats = ['csv', 'pdf'] }: ReportCardProps) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -27,15 +37,7 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
       const sep = path.includes('?') ? '&' : '?'
       await downloadFile(`${path}${sep}format=${fmt}`, `${fallbackName}.${fmt}`)
     } catch (e) {
-      if (e instanceof Error) {
-        if (e.message.includes('422')) {
-          setError('Too many columns for PDF. Use CSV instead.')
-        } else if (e.message.includes('404')) {
-          setError('No data available for this report.')
-        } else {
-          setError(`Download failed: ${e.message.slice(0, 120)}`)
-        }
-      }
+      if (e instanceof Error) setError(extractApiDetail(e))
     } finally {
       setBusy(null)
     }
@@ -47,15 +49,7 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
     try {
       await previewPdf(path, title)
     } catch (e) {
-      if (e instanceof Error) {
-        if (e.message.includes('422')) {
-          setError('Too many columns for PDF preview. Use CSV instead.')
-        } else if (e.message.includes('404')) {
-          setError('No data available for this report.')
-        } else {
-          setError(`Preview failed: ${e.message.slice(0, 120)}`)
-        }
-      }
+      if (e instanceof Error) setError(extractApiDetail(e))
     } finally {
       setBusy(null)
     }
