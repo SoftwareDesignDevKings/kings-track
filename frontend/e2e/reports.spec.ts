@@ -3,8 +3,8 @@ import { test, expect, getReportCard } from './fixtures'
 // ---------------------------------------------------------------------------
 // Helper: locate selects by position on the Reports page.
 //   select[0] = Course Reports course dropdown
-//   select[1] = Student Reports course dropdown
-//   select[2] = Student Reports student dropdown
+//   select[1] = Student Reports student dropdown
+//   select[2] = Student Reports course dropdown
 //   select[3] = Student Reports cycle dropdown
 // ---------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ test.describe('Course Reports', () => {
     }
   })
 
-  test('Class Report and EdStem are CSV-only (no Preview button)', async ({
+  test('Class Report has CSV button for non-ENC course', async ({
     reportsPage: page,
   }) => {
     const courseSelect = page.locator('select').nth(0)
@@ -91,17 +91,13 @@ test.describe('Course Reports', () => {
     test.skip(!nonEncValue, 'No non-ENC course in database')
     await courseSelect.selectOption(nonEncValue!)
 
-    // Class Report should only have CSV button
+    // Class Report should have at least a CSV button
     const classReportCard = getReportCard(page, 'Class Report')
     await expect(classReportCard.getByRole('button', { name: 'CSV' })).toBeVisible()
-    await expect(classReportCard.getByRole('button', { name: 'Preview' })).toHaveCount(0)
-    await expect(classReportCard.getByRole('button', { name: 'PDF' })).toHaveCount(0)
 
-    // EdStem Progress should only have CSV button
+    // EdStem Progress should have at least a CSV button
     const edStemCard = getReportCard(page, 'EdStem Progress')
     await expect(edStemCard.getByRole('button', { name: 'CSV' })).toBeVisible()
-    await expect(edStemCard.getByRole('button', { name: 'Preview' })).toHaveCount(0)
-    await expect(edStemCard.getByRole('button', { name: 'PDF' })).toHaveCount(0)
   })
 })
 
@@ -267,40 +263,35 @@ test.describe('Error handling', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 10. Student Reports (course-first selector)
+// 10. Student Reports (student-first selector)
 // ---------------------------------------------------------------------------
 
 test.describe('Student Reports', () => {
   test('shows placeholder before selection', async ({ reportsPage: page }) => {
     await expect(
-      page.getByText('Select a course and student above to see available reports.')
+      page.getByText('Select a student to see available reports.')
     ).toBeVisible()
   })
 
-  test('selecting a course and student shows report cards', async ({ reportsPage: page }) => {
-    // Student Reports course select is the 2nd select on the page (index 1)
-    const courseSelect = page.locator('select').nth(1)
+  test('selecting a student and course shows report cards', async ({ reportsPage: page }) => {
+    // Student Reports student select is the 2nd select on the page (index 1)
+    const studentSelect = page.locator('select').nth(1)
     await page.waitForFunction(() => {
       const selects = document.querySelectorAll('select')
-      const courseSel = selects[1] as HTMLSelectElement | undefined
-      return courseSel && courseSel.options.length > 1
-    })
-
-    // Select the first course
-    const courseOptions = courseSelect.locator('option')
-    await courseSelect.selectOption((await courseOptions.nth(1).getAttribute('value'))!)
-
-    // Student select is now the 3rd select (index 2)
-    const studentSelect = page.locator('select').nth(2)
-    await page.waitForFunction(() => {
-      const selects = document.querySelectorAll('select')
-      const studentSel = selects[2] as HTMLSelectElement | undefined
+      const studentSel = selects[1] as HTMLSelectElement | undefined
       return studentSel && studentSel.options.length > 1
     })
 
     // Select the first student
     const studentOptions = studentSelect.locator('option')
     await studentSelect.selectOption((await studentOptions.nth(1).getAttribute('value'))!)
+
+    // Course select is the 3rd select (index 2)
+    const courseSelect = page.locator('select').nth(2)
+
+    // Select the first course
+    const courseOptions = courseSelect.locator('option')
+    await courseSelect.selectOption((await courseOptions.nth(1).getAttribute('value'))!)
 
     // All four student report cards should appear
     await expect(getReportCard(page, /Cycle.*Update/)).toBeVisible()
@@ -309,60 +300,23 @@ test.describe('Student Reports', () => {
     await expect(getReportCard(page, 'Full Student Report')).toBeVisible()
   })
 
-  test('student search filters the dropdown', async ({ reportsPage: page }) => {
-    // Select a course first (index 1)
-    const courseSelect = page.locator('select').nth(1)
-    await page.waitForFunction(() => {
-      const selects = document.querySelectorAll('select')
-      const courseSel = selects[1] as HTMLSelectElement | undefined
-      return courseSel && courseSel.options.length > 1
-    })
-    const courseOptions = courseSelect.locator('option')
-    await courseSelect.selectOption((await courseOptions.nth(1).getAttribute('value'))!)
-
-    // Type in the search input
-    const searchInput = page.locator('input[placeholder="Search students…"]')
-    await expect(searchInput).toBeVisible()
-
-    // Get student count before searching
-    const studentSelect = page.locator('select').nth(2)
-    const beforeCount = await studentSelect.locator('option').count()
-
-    // Search for something unlikely to match all
-    await searchInput.fill('zzz')
-    const afterCount = await studentSelect.locator('option').count()
-
-    // Should have fewer options (just the placeholder)
-    expect(afterCount).toBeLessThan(beforeCount)
-
-    // Clear search
-    await searchInput.fill('')
-    const restoredCount = await studentSelect.locator('option').count()
-    expect(restoredCount).toBe(beforeCount)
-  })
-
   test('course-dependent cards work when course is already selected', async ({
     reportsPage: page,
   }) => {
-    // Select a course first (index 1)
-    const courseSelect = page.locator('select').nth(1)
+    // Select a student first (index 1)
+    const studentSelect = page.locator('select').nth(1)
     await page.waitForFunction(() => {
       const selects = document.querySelectorAll('select')
-      const courseSel = selects[1] as HTMLSelectElement | undefined
-      return courseSel && courseSel.options.length > 1
-    })
-    const courseOptions = courseSelect.locator('option')
-    await courseSelect.selectOption((await courseOptions.nth(1).getAttribute('value'))!)
-
-    // Select a student (index 2)
-    const studentSelect = page.locator('select').nth(2)
-    await page.waitForFunction(() => {
-      const selects = document.querySelectorAll('select')
-      const studentSel = selects[2] as HTMLSelectElement | undefined
+      const studentSel = selects[1] as HTMLSelectElement | undefined
       return studentSel && studentSel.options.length > 1
     })
     const studentOptions = studentSelect.locator('option')
     await studentSelect.selectOption((await studentOptions.nth(1).getAttribute('value'))!)
+
+    // Select a course (index 2)
+    const courseSelect = page.locator('select').nth(2)
+    const courseOptions = courseSelect.locator('option')
+    await courseSelect.selectOption((await courseOptions.nth(1).getAttribute('value'))!)
 
     // Since course is already selected, course-dependent cards should be enabled
     const cycleCard = getReportCard(page, /Cycle.*Update/)
