@@ -1485,6 +1485,38 @@ async def _build_cycle_update_elements(
         ot.setStyle(TableStyle(oc_cmds))
         els.append(ot)
 
+    # ── Missing Work (all past-due, unsubmitted/ungraded assignments across all groups) ──
+    now_naive = now.replace(tzinfo=None)
+    missing_assignments = [
+        r for r in rows
+        if r.due_at is not None
+        and (r.due_at.replace(tzinfo=None) if r.due_at.tzinfo else r.due_at) <= now_naive
+        and r.workflow_state not in ("submitted", "graded")
+    ]
+    if missing_assignments:
+        els.append(Paragraph("Missing Work", styles["section"]))
+        mw_data = [[PH("Assignment"), PH("Group"), PH("Due Date"), PH("Points"), PH("Status")]]
+        mw_cmds = list(_base_table_style())
+        for i, a in enumerate(missing_assignments, start=1):
+            due_str = a.due_at.strftime("%d %b %Y") if a.due_at else "—"
+            if a.points_possible:
+                pts = str(int(a.points_possible) if a.points_possible == int(a.points_possible) else round(a.points_possible, 1))
+            else:
+                pts = "—"
+            status = "Missing" if a.missing else "Not Submitted"
+            mw_data.append([
+                P(a.name),
+                P(a.assignment_group_name or "—"),
+                P(due_str),
+                P(pts),
+                P(status),
+            ])
+            mw_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+        mw_widths = [avail * 0.36, avail * 0.22, avail * 0.16, avail * 0.10, avail * 0.16]
+        mwt = Table(mw_data, colWidths=mw_widths, repeatRows=1)
+        mwt.setStyle(TableStyle(mw_cmds))
+        els.append(mwt)
+
     return els
 
 
@@ -1710,30 +1742,20 @@ async def export_missing_report_pdf(
     )
     missing_gradeo = gradeo_result.fetchall()
 
-    # ── Assessment Tracking: current tasks with rubric criteria ──
+    # ── Assessment Tracking: assignments that have rubric criteria (show Canvas mark, not rubric scores) ──
     try:
         tracking_result = await db.execute(
             text("""
-                SELECT a.course_id, a.name AS assignment_name, a.due_at,
-                       rc.description AS criterion, rc.points AS criterion_points,
-                       ts2.score, ts2.comment
+                SELECT DISTINCT a.course_id, a.name AS assignment_name, a.due_at,
+                       a.points_possible,
+                       s.score AS canvas_score, s.workflow_state
                 FROM assignments a
                 JOIN rubric_criteria rc ON rc.assignment_id = a.id
                 LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
-                LEFT JOIN LATERAL (
-                    SELECT tsn.id FROM tracking_snapshots tsn
-                    WHERE tsn.assignment_id = a.id
-                    ORDER BY tsn.committed_at DESC NULLS FIRST
-                    LIMIT 1
-                ) latest_snap ON TRUE
-                LEFT JOIN tracking_scores ts2
-                    ON ts2.snapshot_id = latest_snap.id
-                    AND ts2.user_id = :uid
-                    AND ts2.rubric_criterion_id = rc.id
                 WHERE a.course_id = ANY(:enrolled)
                   AND a.workflow_state = 'published'
                   AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
-                ORDER BY a.course_id, a.name, rc.position
+                ORDER BY a.course_id, a.name
             """),
             {"uid": user_id, "enrolled": enrolled_ids},
         )
@@ -1742,8 +1764,7 @@ async def export_missing_report_pdf(
         await db.rollback()
         tracking_rows = []
 
-    # Count distinct assignments with tracking data
-    tracking_assignments = {(r.course_id, r.assignment_name) for r in tracking_rows}
+    tracking_count = len(tracking_rows)
 
     # ── Build PDF ──
     styles = _pdf_styles()
@@ -1771,7 +1792,7 @@ async def export_missing_report_pdf(
             _metric_box(str(len(missing_canvas)), "Canvas Missing", styles),
             _metric_box(str(len(missing_edstem)), "EdStem Incomplete", styles),
             _metric_box(str(len(missing_gradeo)), "Gradeo Flagged", styles),
-            _metric_box(str(len(tracking_assignments)), "Tracking Items", styles),
+            _metric_box(str(tracking_count), "Tracking Items", styles),
         ]],
         hAlign="LEFT",
     )
@@ -1859,26 +1880,29 @@ async def export_missing_report_pdf(
     # ── Assessment Tracking — Current Tasks ──
     els.append(Paragraph("Assessment Tracking — Current Tasks", styles["section"]))
     if tracking_rows:
-        t_data = [[PH("Course"), PH("Assignment"), PH("Due Date"), PH("Criterion"), PH("Score"), PH("Comment")]]
+        t_data = [[PH("Course"), PH("Assignment"), PH("Due Date"), PH("Mark"), PH("Status")]]
         t_cmds = list(_base_table_style())
         for i, r in enumerate(tracking_rows, start=1):
             c_info = courses_map.get(r.course_id, {})
             c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
             due_str = r.due_at.strftime("%d %b %Y") if r.due_at else "—"
-            score_str = f"{r.score}/{int(r.criterion_points)}" if r.score is not None and r.criterion_points else ("—" if r.score is None else str(r.score))
+            if r.canvas_score is not None and r.points_possible:
+                pp = int(r.points_possible) if r.points_possible == int(r.points_possible) else round(r.points_possible, 1)
+                mark_str = f"{round(r.canvas_score, 1)}/{pp}"
+            else:
+                mark_str = "—"
+            ws = r.workflow_state or ""
+            status = "Graded" if ws == "graded" else ("Submitted" if ws == "submitted" else "Not Submitted")
             t_data.append([
                 P(c_label),
                 P(r.assignment_name),
                 P(due_str),
-                P(r.criterion),
-                P(score_str),
-                P(r.comment or ""),
+                P(mark_str),
+                P(status),
             ])
-            if r.score is None:
+            if r.canvas_score is None:
                 t_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-            elif r.criterion_points and r.score < r.criterion_points:
-                t_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-        t_widths = [avail * 0.10, avail * 0.22, avail * 0.10, avail * 0.28, avail * 0.08, avail * 0.22]
+        t_widths = [avail * 0.12, avail * 0.36, avail * 0.16, avail * 0.16, avail * 0.20]
         tt = Table(t_data, colWidths=t_widths, repeatRows=1)
         tt.setStyle(TableStyle(t_cmds))
         els.append(tt)
@@ -2043,31 +2067,21 @@ async def export_student_report_pdf(
 
     els.append(Spacer(1, 8))
 
-    # ── Section 4: Assessment Tracking ──
+    # ── Section 4: Assessment Tracking (Canvas marks, not rubric scores) ──
     els.append(Paragraph("Assessment Tracking", styles["section"]))
     try:
         tracking_result = await db.execute(
             text("""
-                SELECT a.name AS assignment_name, a.due_at,
-                       rc.description AS criterion, rc.points AS criterion_points,
-                       ts2.score, ts2.comment
+                SELECT DISTINCT a.name AS assignment_name, a.due_at,
+                       a.points_possible,
+                       s.score AS canvas_score, s.workflow_state
                 FROM assignments a
                 JOIN rubric_criteria rc ON rc.assignment_id = a.id
                 LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
-                LEFT JOIN LATERAL (
-                    SELECT tsn.id FROM tracking_snapshots tsn
-                    WHERE tsn.assignment_id = a.id
-                    ORDER BY tsn.committed_at DESC NULLS FIRST
-                    LIMIT 1
-                ) latest_snap ON TRUE
-                LEFT JOIN tracking_scores ts2
-                    ON ts2.snapshot_id = latest_snap.id
-                    AND ts2.user_id = :uid
-                    AND ts2.rubric_criterion_id = rc.id
                 WHERE a.course_id = :cid
                   AND a.workflow_state = 'published'
                   AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
-                ORDER BY a.name, rc.position
+                ORDER BY a.name
             """),
             {"uid": user_id, "cid": course_id},
         )
@@ -2077,23 +2091,26 @@ async def export_student_report_pdf(
         tracking_rows = []
 
     if tracking_rows:
-        tk_data = [[PH("Assignment"), PH("Due Date"), PH("Criterion"), PH("Score"), PH("Comment")]]
+        tk_data = [[PH("Assignment"), PH("Due Date"), PH("Mark"), PH("Status")]]
         tk_cmds = list(_base_table_style())
         for i, r in enumerate(tracking_rows, start=1):
             due_str = r.due_at.strftime("%d %b %Y") if r.due_at else "—"
-            score_str = f"{r.score}/{int(r.criterion_points)}" if r.score is not None and r.criterion_points else ("—" if r.score is None else str(r.score))
+            if r.canvas_score is not None and r.points_possible:
+                pp = int(r.points_possible) if r.points_possible == int(r.points_possible) else round(r.points_possible, 1)
+                mark_str = f"{round(r.canvas_score, 1)}/{pp}"
+            else:
+                mark_str = "—"
+            ws = r.workflow_state or ""
+            status = "Graded" if ws == "graded" else ("Submitted" if ws == "submitted" else "Not Submitted")
             tk_data.append([
                 P(r.assignment_name),
                 P(due_str),
-                P(r.criterion),
-                P(score_str),
-                P(r.comment or ""),
+                P(mark_str),
+                P(status),
             ])
-            if r.score is None:
+            if r.canvas_score is None:
                 tk_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-            elif r.criterion_points and r.score < r.criterion_points:
-                tk_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-        tk_widths = [avail * 0.25, avail * 0.12, avail * 0.30, avail * 0.10, avail * 0.23]
+        tk_widths = [avail * 0.40, avail * 0.20, avail * 0.20, avail * 0.20]
         tkt = Table(tk_data, colWidths=tk_widths, repeatRows=1)
         tkt.setStyle(TableStyle(tk_cmds))
         els.append(tkt)

@@ -65,13 +65,15 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
         <p className="text-xs text-slate-400 mt-3 italic">{disabledReason}</p>
       ) : (
         <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <button type="button" onClick={handlePreview} disabled={!!busy} className={btnClass}>
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-            </svg>
-            {busy === 'preview' ? 'Opening\u2026' : 'Preview'}
-          </button>
+          {hasPdf && (
+            <button type="button" onClick={handlePreview} disabled={!!busy} className={btnClass}>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              {busy === 'preview' ? 'Opening\u2026' : 'Preview'}
+            </button>
+          )}
           {hasCsv && (
             <button type="button" onClick={() => handleDownload('csv')} disabled={!!busy} className={btnClass}>
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -101,16 +103,19 @@ export default function Reports() {
 
   // Student report state
   const { data: students } = useStudents()
-  const [pdfStudentId, setPdfStudentId] = useState<number | null>(null)
   const [pdfCourseId, setPdfCourseId] = useState<number | null>(null)
+  const [pdfStudentId, setPdfStudentId] = useState<number | null>(null)
   const [pdfCycleNum, setPdfCycleNum] = useState<number | null>(null)
+  const [studentSearch, setStudentSearch] = useState('')
   const { data: cycles, isLoading: cyclesLoading } = useCourseCycles(pdfCourseId)
 
-  // Filter courses by student enrollment
-  const selectedStudent = students?.find(s => s.id === pdfStudentId)
-  const studentCourses = selectedStudent
-    ? courses?.filter(c => selectedStudent.courses.some(sc => sc.id === c.id))
-    : courses
+  // Filter students by selected course enrollment, then by search text
+  const courseStudents = pdfCourseId
+    ? students?.filter(s => s.courses.some(c => c.id === pdfCourseId))
+    : students
+  const filteredStudents = studentSearch
+    ? courseStudents?.filter(s => s.name.toLowerCase().includes(studentSearch.toLowerCase()))
+    : courseStudents
 
   const selectedCourse = courses?.find(c => c.id === selectedCourseId)
   const courseCode = selectedCourse
@@ -120,15 +125,11 @@ export default function Reports() {
     ? /ENC/i.test(selectedCourse.course_code)
     : false
 
-  function handleStudentChange(id: number | null) {
-    setPdfStudentId(id)
-    if (id && pdfCourseId) {
-      const student = students?.find(s => s.id === id)
-      if (student && !student.courses.some(c => c.id === pdfCourseId)) {
-        setPdfCourseId(null)
-        setPdfCycleNum(null)
-      }
-    }
+  function handlePdfCourseChange(id: number | null) {
+    setPdfCourseId(id)
+    setPdfStudentId(null)
+    setPdfCycleNum(null)
+    setStudentSearch('')
   }
 
   const cyclePart = pdfCycleNum ? `&cycle_num=${pdfCycleNum}` : ''
@@ -206,9 +207,10 @@ export default function Reports() {
               />
               <ReportCard
                 title="Class Report"
-                description="Assignment completion matrix. One row per student, one column per assignment showing score or submission status (submitted, graded, missing). Best exported as CSV for courses with many assignments."
+                description="Assignment completion matrix. One row per student, one column per assignment showing score or submission status (submitted, graded, missing)."
                 path={`/reports/courses/${selectedCourseId}/class-report`}
                 fallbackName={`${courseCode}-class-report`}
+                formats={['csv']}
               />
               <ReportCard
                 title="Course Attendance"
@@ -228,6 +230,7 @@ export default function Reports() {
                   description="EdStem lesson completion for each student. One column per lesson showing status (completed, in_progress, not_started) with student name, email, and SIS ID."
                   path={`/reports/courses/${selectedCourseId}/edstem-report`}
                   fallbackName={`${courseCode}-edstem-report`}
+                  formats={['csv']}
                 />
               )}
               <ReportCard
@@ -256,33 +259,37 @@ export default function Reports() {
 
           <div className="flex flex-wrap items-end gap-4 mb-5">
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Student</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Course</label>
               <select
-                value={pdfStudentId ?? ''}
-                onChange={e => handleStudentChange(e.target.value ? Number(e.target.value) : null)}
+                value={pdfCourseId ?? ''}
+                onChange={e => handlePdfCourseChange(e.target.value ? Number(e.target.value) : null)}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-full max-w-xs"
               >
-                <option value="">Select a student</option>
-                {students?.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                <option value="">Select a course</option>
+                {courses?.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.course_code ? `${c.course_code} — ${c.name}` : c.name}
+                  </option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Course</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Student</label>
+              <input
+                type="text"
+                placeholder="Search students…"
+                value={studentSearch}
+                onChange={e => setStudentSearch(e.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-full max-w-xs mb-1"
+              />
               <select
-                value={pdfCourseId ?? ''}
-                onChange={e => {
-                  setPdfCourseId(e.target.value ? Number(e.target.value) : null)
-                  setPdfCycleNum(null)
-                }}
+                value={pdfStudentId ?? ''}
+                onChange={e => setPdfStudentId(e.target.value ? Number(e.target.value) : null)}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-full max-w-xs"
               >
-                <option value="">{pdfStudentId && studentCourses?.length === 0 ? 'No courses for this student' : 'Select a course'}</option>
-                {studentCourses?.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.course_code ? `${c.course_code} — ${c.name}` : c.name}
-                  </option>
+                <option value="">{pdfCourseId && filteredStudents?.length === 0 ? 'No students found' : 'Select a student'}</option>
+                {filteredStudents?.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
             </div>
@@ -331,7 +338,7 @@ export default function Reports() {
               />
               <ReportCard
                 title="Complete Student Report"
-                description="Full progress report for this student in the selected course. Includes all assignment scores, assessment tracking with rubric criteria, Gradeo results, EdStem progress, and attendance records."
+                description="Full progress report for this student in the selected course. Includes all assignment scores, assessment tracking, Gradeo results, EdStem progress, and attendance records."
                 path={`/reports/students/${pdfStudentId}/student-report-pdf?course_id=${pdfCourseId}`}
                 fallbackName="student-report"
                 disabled={!pdfCourseId}
@@ -348,7 +355,7 @@ export default function Reports() {
             </div>
           ) : (
             <p className="text-sm text-slate-400 py-8 text-center">
-              Select a student to see available reports.
+              Select a course and student above to see available reports.
             </p>
           )}
         </section>
