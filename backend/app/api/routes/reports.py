@@ -1072,16 +1072,35 @@ async def list_course_cycles(
     )
     unit_names = [r[0] for r in grp_result.fetchall()]
 
+    # Fallback: if no Unit-prefixed groups, use all group names for matching
+    if not unit_names:
+        all_grp_result = await db.execute(
+            text("""
+                SELECT DISTINCT assignment_group_name
+                FROM assignments
+                WHERE course_id = :cid
+                  AND assignment_group_name IS NOT NULL
+                  AND workflow_state = 'published'
+            """),
+            {"cid": course_id},
+        )
+        unit_names = [r[0] for r in all_grp_result.fetchall()]
+
     result = []
     for cycle_num, term, sw, ew, topic in scheduled:
         matched_unit: str | None = None
         for uname in unit_names:
+            # Try "Unit N: Topic" pattern first
             um = re.match(r"Unit\s+\d+[:\s\-]+(.+)", uname)
-            if not um:
-                continue
+            if um:
+                topic_part = um.group(1)
+            else:
+                # Fallback: strip leading number/prefix, use full name
+                stripped = re.sub(r"^\d+[\.\)\s:\-]+\s*", "", uname).strip()
+                topic_part = stripped if stripped else uname
             utopics = [
                 t.strip()
-                for t in re.split(r"\s*[–\-,&]\s*", um.group(1))
+                for t in re.split(r"\s*[–\-,&]\s*", topic_part)
                 if t.strip()
             ]
             for ut in utopics:
@@ -1168,8 +1187,13 @@ async def _build_cycle_update_elements(
             groups[gname] = all_groups[gname]
             group_order.append(gname)
 
+    # Fallback: if no Unit-prefixed groups, use all groups (e.g. ENC courses)
     if not groups:
-        raise HTTPException(404, "No teaching cycles (Unit groups) found for this course")
+        groups = dict(all_groups)
+        group_order = list(all_group_order)
+
+    if not groups:
+        raise HTTPException(404, "No assignment groups found for this course")
 
     # ── Detect current unit ──
     now = datetime.utcnow()
@@ -1194,12 +1218,18 @@ async def _build_cycle_update_elements(
         best_group = group_order[-1]
         if target_topic:
             for gname in group_order:
+                # Try "Unit N: Topic" pattern first
                 um = re.match(r"Unit\s+\d+[:\s\-]+(.+)", gname)
-                if not um:
-                    continue
+                if um:
+                    topic_part = um.group(1)
+                else:
+                    # Fallback: strip any leading number/prefix and use the
+                    # full name for matching (handles non-Unit group names)
+                    stripped = re.sub(r"^\d+[\.\)\s:\-]+\s*", "", gname).strip()
+                    topic_part = stripped if stripped else gname
                 utopics = [
                     t.strip()
-                    for t in re.split(r"\s*[–\-,&]\s*", um.group(1))
+                    for t in re.split(r"\s*[–\-,&]\s*", topic_part)
                     if t.strip()
                 ]
                 if any(
@@ -1582,17 +1612,16 @@ async def export_class_cycle_pdf(
     if not students:
         raise HTTPException(404, "No students enrolled in this course")
 
-    # Verify course has Unit-based assignment groups before looping
+    # Verify course has published assignments before looping
     unit_check = await db.execute(
         text("""
             SELECT COUNT(*) FROM assignments
             WHERE course_id = :course_id AND workflow_state = 'published'
-            AND LOWER(assignment_group_name) LIKE 'unit %%'
         """),
         {"course_id": course_id},
     )
     if not (unit_check.scalar() or 0):
-        raise HTTPException(404, "This course has no Unit-based assignment groups for cycle reports")
+        raise HTTPException(404, "This course has no published assignments for cycle reports")
 
     all_elements: list = []
     styles = _pdf_styles()
@@ -1787,13 +1816,17 @@ async def export_missing_report_pdf(
     els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
 
     # Summary metrics
+    metric_boxes = [
+        _metric_box(str(len(missing_canvas)), "Canvas Missing", styles),
+    ]
+    if edstem_enrolled:
+        metric_boxes.append(_metric_box(str(len(missing_edstem)), "EdStem Incomplete", styles))
+    metric_boxes.extend([
+        _metric_box(str(len(missing_gradeo)), "Gradeo Flagged", styles),
+        _metric_box(str(tracking_count), "Tracking Items", styles),
+    ])
     summary = Table(
-        [[
-            _metric_box(str(len(missing_canvas)), "Canvas Missing", styles),
-            _metric_box(str(len(missing_edstem)), "EdStem Incomplete", styles),
-            _metric_box(str(len(missing_gradeo)), "Gradeo Flagged", styles),
-            _metric_box(str(tracking_count), "Tracking Items", styles),
-        ]],
+        [metric_boxes],
         hAlign="LEFT",
     )
     summary.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
@@ -1829,30 +1862,31 @@ async def export_missing_report_pdf(
     else:
         els.append(Paragraph("No missing Canvas assignments.", styles["body_small"]))
 
-    # ── EdStem Incomplete Lessons ──
-    els.append(Paragraph("EdStem — Incomplete Lessons", styles["section"]))
-    if missing_edstem:
-        e_data = [[PH("Course"), PH("Module"), PH("Lesson"), PH("Status")]]
-        e_cmds = list(_base_table_style())
-        for i, r in enumerate(missing_edstem, start=1):
-            c_info = courses_map.get(r.course_id, {})
-            c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
-            e_data.append([
-                P(c_label),
-                P(r.module_name or "—"),
-                P(r.lesson_title),
-                P(_status_display(r.status)),
-            ])
-            if r.status == "not_started":
-                e_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-            elif r.status == "viewed":
-                e_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-        e_widths = [avail * 0.12, avail * 0.32, avail * 0.38, avail * 0.12]
-        et = Table(e_data, colWidths=e_widths, repeatRows=1)
-        et.setStyle(TableStyle(e_cmds))
-        els.append(et)
-    else:
-        els.append(Paragraph("All EdStem lessons completed.", styles["body_small"]))
+    # ── EdStem Incomplete Lessons (skip entirely for ENC-only reports) ──
+    if edstem_enrolled:
+        els.append(Paragraph("EdStem — Incomplete Lessons", styles["section"]))
+        if missing_edstem:
+            e_data = [[PH("Course"), PH("Module"), PH("Lesson"), PH("Status")]]
+            e_cmds = list(_base_table_style())
+            for i, r in enumerate(missing_edstem, start=1):
+                c_info = courses_map.get(r.course_id, {})
+                c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
+                e_data.append([
+                    P(c_label),
+                    P(r.module_name or "—"),
+                    P(r.lesson_title),
+                    P(_status_display(r.status)),
+                ])
+                if r.status == "not_started":
+                    e_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+                elif r.status == "viewed":
+                    e_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+            e_widths = [avail * 0.12, avail * 0.32, avail * 0.38, avail * 0.12]
+            et = Table(e_data, colWidths=e_widths, repeatRows=1)
+            et.setStyle(TableStyle(e_cmds))
+            els.append(et)
+        else:
+            els.append(Paragraph("All EdStem lessons completed.", styles["body_small"]))
 
     # ── Gradeo Flagged Exams ──
     els.append(Paragraph("Gradeo — Flagged Assessments", styles["section"]))
