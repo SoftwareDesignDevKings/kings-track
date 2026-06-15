@@ -1828,7 +1828,7 @@ async def export_missing_report_pdf(
                 P(due_str),
                 P(pts),
             ])
-        c_widths = [avail * 0.12, avail * 0.18, avail * 0.36, avail * 0.15, avail * 0.09]
+        c_widths = [avail * 0.12, avail * 0.22, avail * 0.38, avail * 0.16, avail * 0.12]
         ct = Table(c_data, colWidths=c_widths, repeatRows=1)
         ct.setStyle(TableStyle(c_cmds))
         els.append(ct)
@@ -1854,7 +1854,7 @@ async def export_missing_report_pdf(
                     e_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
                 elif r.status == "viewed":
                     e_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            e_widths = [avail * 0.12, avail * 0.32, avail * 0.38, avail * 0.12]
+            e_widths = [avail * 0.12, avail * 0.34, avail * 0.40, avail * 0.14]
             et = Table(e_data, colWidths=e_widths, repeatRows=1)
             et.setStyle(TableStyle(e_cmds))
             els.append(et)
@@ -2078,7 +2078,7 @@ async def export_student_report_pdf(
                 a_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
             elif r.late:
                 a_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-        a_widths = [avail * 0.15, avail * 0.33, avail * 0.12, avail * 0.14, avail * 0.14, avail * 0.07]
+        a_widths = [avail * 0.15, avail * 0.35, avail * 0.13, avail * 0.14, avail * 0.14, avail * 0.09]
         at = Table(a_data, colWidths=a_widths, repeatRows=1)
         at.setStyle(TableStyle(a_cmds))
         els.append(at)
