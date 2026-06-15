@@ -1269,7 +1269,16 @@ async def _build_cycle_update_elements(
         and two_weeks_ago <= (a.due_at.replace(tzinfo=None) if a.due_at.tzinfo else a.due_at) <= end_of_today
     ]
 
+    # ── Look up Gradeo class mapping for this course ──
+    gcm_result = await db.execute(
+        text("SELECT gradeo_class_id FROM gradeo_class_mappings WHERE canvas_course_id = :cid"),
+        {"cid": course_id},
+    )
+    gradeo_class_ids = [r[0] for r in gcm_result.fetchall()]
+
     # ── Fetch Gradeo results (deduplicate by exam name, keep latest) ──
+    # Include results where canvas_course_id is NULL (multi-enrollment students)
+    # by also matching through the Gradeo class mapping.
     gradeo_result = await db.execute(
         text("""
             SELECT DISTINCT ON (gcea.exam_name)
@@ -1279,16 +1288,18 @@ async def _build_cycle_update_elements(
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
             WHERE gar.user_id = :uid
-              AND gar.canvas_course_id = :cid
+              AND (gar.canvas_course_id = :cid
+                   OR (gar.canvas_course_id IS NULL
+                       AND gcea.gradeo_class_id = ANY(:gcids)))
             ORDER BY gcea.exam_name, gar.last_imported_at DESC NULLS LAST
         """),
-        {"uid": user_id, "cid": course_id},
+        {"uid": user_id, "cid": course_id, "gcids": gradeo_class_ids or ["-1"]},
     )
     gradeo_exams = gradeo_result.fetchall()
 
     gradeo_by_cycle: dict[int, object] = {}
     for ge in gradeo_exams:
-        m = re.search(r"Cycle\s+(\d+)", ge.exam_name, re.IGNORECASE)
+        m = re.search(r"Cycle\s*(\d+)", ge.exam_name, re.IGNORECASE)
         if m:
             gradeo_by_cycle[int(m.group(1))] = ge
     matched_gradeo_cycles: set[int] = set()
@@ -1367,7 +1378,7 @@ async def _build_cycle_update_elements(
         row = [P(a.name), P(due_str), P(status), P(score_str), P(late_str)]
 
         if has_gradeo:
-            cycle_m = re.match(r"Cycle\s+(\d+)", a.name, re.IGNORECASE)
+            cycle_m = re.match(r"Cycle\s*(\d+)", a.name, re.IGNORECASE)
             if cycle_m:
                 cn = int(cycle_m.group(1))
                 ge = gradeo_by_cycle.get(cn)
@@ -1406,7 +1417,7 @@ async def _build_cycle_update_elements(
     # ── Gradeo section (only unmatched exams) ──
     unmatched_gradeo = []
     for ge in gradeo_exams:
-        cm = re.search(r"Cycle\s+(\d+)", ge.exam_name, re.IGNORECASE)
+        cm = re.search(r"Cycle\s*(\d+)", ge.exam_name, re.IGNORECASE)
         if cm and int(cm.group(1)) in matched_gradeo_cycles:
             continue
         unmatched_gradeo.append(ge)
@@ -1704,22 +1715,27 @@ async def export_missing_report_pdf(
         missing_edstem = []
 
     # ── Gradeo: pending / low-score exams (deduplicate by exam name per course) ──
+    # Also include results where canvas_course_id is NULL (multi-enrollment
+    # students) by resolving the course via gradeo_class_mappings.
     gradeo_result = await db.execute(
         text("""
-            SELECT DISTINCT ON (gar.canvas_course_id, gcea.exam_name)
-                   gar.canvas_course_id AS course_id,
+            SELECT DISTINCT ON (COALESCE(gar.canvas_course_id, gcm.canvas_course_id), gcea.exam_name)
+                   COALESCE(gar.canvas_course_id, gcm.canvas_course_id) AS course_id,
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
+            LEFT JOIN gradeo_class_mappings gcm
+                ON gcm.gradeo_class_id = gcea.gradeo_class_id
+               AND gar.canvas_course_id IS NULL
             WHERE gar.user_id = :uid
-              AND gar.canvas_course_id = ANY(:enrolled)
+              AND COALESCE(gar.canvas_course_id, gcm.canvas_course_id) = ANY(:enrolled)
               AND (gar.status = 'awaiting_marking'
                    OR gar.exam_mark IS NULL
                    OR (gar.marks_available > 0
                        AND gar.exam_mark / gar.marks_available < 0.5))
-            ORDER BY gar.canvas_course_id, gcea.exam_name, gar.last_imported_at DESC NULLS LAST
+            ORDER BY COALESCE(gar.canvas_course_id, gcm.canvas_course_id), gcea.exam_name, gar.last_imported_at DESC NULLS LAST
         """),
         {"uid": user_id, "enrolled": enrolled_ids},
     )
@@ -1941,6 +1957,13 @@ async def export_student_report_pdf(
 
     is_enc = "ENC" in (course.course_code or "").upper()
 
+    # Look up Gradeo class mapping for this course
+    gcm_result = await db.execute(
+        text("SELECT gradeo_class_id FROM gradeo_class_mappings WHERE canvas_course_id = :cid"),
+        {"cid": course_id},
+    )
+    gradeo_class_ids = [r[0] for r in gcm_result.fetchall()]
+
     styles = _pdf_styles()
     els: list = []
 
@@ -2117,10 +2140,13 @@ async def export_student_report_pdf(
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
-            WHERE gar.user_id = :uid AND gar.canvas_course_id = :cid
+            WHERE gar.user_id = :uid
+              AND (gar.canvas_course_id = :cid
+                   OR (gar.canvas_course_id IS NULL
+                       AND gcea.gradeo_class_id = ANY(:gcids)))
             ORDER BY gcea.exam_name, gar.last_imported_at DESC NULLS LAST
         """),
-        {"uid": user_id, "cid": course_id},
+        {"uid": user_id, "cid": course_id, "gcids": gradeo_class_ids or ["-1"]},
     )
     gradeo_rows = gradeo_result.fetchall()
 
