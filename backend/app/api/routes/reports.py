@@ -1871,7 +1871,7 @@ async def export_missing_report_pdf(
 
     enrolled_ids = list(courses_map.keys())
 
-    # ── Canvas: missing / not-submitted assignments ──
+    # ── Canvas: recent assignments (last 14 days, all statuses) ──
     canvas_result = await db.execute(
         text("""
             SELECT a.course_id, a.assignment_group_name, a.name AS assignment_name,
@@ -1881,13 +1881,18 @@ async def export_missing_report_pdf(
             LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
             WHERE a.course_id = ANY(:enrolled)
               AND a.workflow_state = 'published'
-              AND a.due_at IS NOT NULL AND a.due_at <= NOW()
-              AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
+              AND a.due_at IS NOT NULL
+              AND a.due_at >= NOW() - INTERVAL '14 days'
+              AND a.due_at <= NOW() + INTERVAL '1 day'
             ORDER BY a.course_id, a.assignment_group_name, a.due_at
         """),
         {"uid": user_id, "enrolled": enrolled_ids},
     )
-    missing_canvas = canvas_result.fetchall()
+    recent_canvas = canvas_result.fetchall()
+    missing_canvas_count = sum(
+        1 for r in recent_canvas
+        if r.workflow_state not in ('submitted', 'graded') or r.workflow_state is None
+    )
 
     # ── EdStem: incomplete lessons (exclude ENC courses) ──
     enc_ids = [cid for cid, info in courses_map.items()
@@ -1975,7 +1980,7 @@ async def export_missing_report_pdf(
 
     # Summary metrics
     metric_boxes = [
-        _metric_box(str(len(missing_canvas)), "Canvas Missing", styles),
+        _metric_box(str(len(recent_canvas)), "Canvas Recent", styles),
     ]
     if edstem_enrolled:
         metric_boxes.append(_metric_box(str(len(missing_edstem)), "EdStem Incomplete", styles))
@@ -1996,29 +2001,56 @@ async def export_missing_report_pdf(
     P = lambda t: _p(t, styles)
     PH = lambda t: _p(t, styles, header=True)
 
-    # ── Canvas Missing Assignments ──
-    els.append(Paragraph("Canvas — Missing Assignments", styles["section"]))
-    if missing_canvas:
-        c_data = [[PH("Course"), PH("Assignment Group"), PH("Assignment"), PH("Due Date"), PH("Points")]]
+    # ── Canvas — Recent Assignments (last 14 days) ──
+    els.append(Paragraph("Canvas — Recent Assignments (Last 14 Days)", styles["section"]))
+    if recent_canvas:
+        c_data = [[PH("Course"), PH("Assignment"), PH("Due Date"), PH("Score"), PH("Status")]]
         c_cmds = list(_base_table_style())
-        for r in missing_canvas:
+        for i, r in enumerate(recent_canvas, start=1):
             c_info = courses_map.get(r.course_id, {})
             c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
             due_str = r.due_at.strftime("%d %b %Y") if r.due_at else "—"
-            pts = str(r.points_possible) if r.points_possible else "—"
+
+            ws = r.workflow_state or ""
+            if ws == "graded":
+                status = "Graded"
+                if r.score is not None and r.points_possible:
+                    pp = int(r.points_possible) if r.points_possible == int(r.points_possible) else round(r.points_possible, 1)
+                    score_str = f"{round(r.score, 1)}/{pp}"
+                elif r.score is not None:
+                    score_str = str(round(r.score, 1))
+                else:
+                    score_str = "—"
+                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
+            elif ws == "submitted":
+                status = "Submitted"
+                score_str = "—"
+                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+            elif r.missing:
+                status = "Missing"
+                score_str = "—"
+                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+            else:
+                status = "Not Submitted"
+                score_str = "—"
+                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+
+            if r.late and ws in ("graded", "submitted"):
+                status += " (Late)"
+
             c_data.append([
                 P(c_label),
-                P(r.assignment_group_name or "—"),
                 P(r.assignment_name),
                 P(due_str),
-                P(pts),
+                P(score_str),
+                P(status),
             ])
-        c_widths = [avail * 0.12, avail * 0.22, avail * 0.38, avail * 0.16, avail * 0.12]
+        c_widths = [avail * 0.12, avail * 0.38, avail * 0.16, avail * 0.16, avail * 0.18]
         ct = Table(c_data, colWidths=c_widths, repeatRows=1)
         ct.setStyle(TableStyle(c_cmds))
         els.append(ct)
     else:
-        els.append(Paragraph("No missing Canvas assignments.", styles["body_small"]))
+        els.append(Paragraph("No Canvas assignments due in the last 14 days.", styles["body_small"]))
 
     # ── EdStem Incomplete Lessons (skip entirely for ENC-only reports) ──
     if edstem_enrolled:
