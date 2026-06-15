@@ -1276,9 +1276,9 @@ async def _build_cycle_update_elements(
     )
     gradeo_class_ids = [r[0] for r in gcm_result.fetchall()]
 
-    # ── Fetch Gradeo results (deduplicate by exam name, keep latest) ──
-    # Include results where canvas_course_id is NULL (multi-enrollment students)
-    # by also matching through the Gradeo class mapping.
+    # ── Fetch Gradeo results (deduplicate by exam name) ──
+    # Filter by gradeo_class_id (not canvas_course_id) to match the course page
+    # query and avoid picking stale rows. Prefer scored > awaiting > not_submitted.
     gradeo_result = await db.execute(
         text("""
             SELECT DISTINCT ON (gcea.exam_name)
@@ -1288,12 +1288,12 @@ async def _build_cycle_update_elements(
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
             WHERE gar.user_id = :uid
-              AND (gar.canvas_course_id = :cid
-                   OR (gar.canvas_course_id IS NULL
-                       AND gcea.gradeo_class_id = ANY(:gcids)))
-            ORDER BY gcea.exam_name, gar.last_imported_at DESC NULLS LAST
+              AND gcea.gradeo_class_id = ANY(:gcids)
+            ORDER BY gcea.exam_name,
+                     CASE gar.status WHEN 'scored' THEN 2 WHEN 'awaiting_marking' THEN 1 ELSE 0 END DESC,
+                     gar.last_imported_at DESC NULLS LAST
         """),
-        {"uid": user_id, "cid": course_id, "gcids": gradeo_class_ids or ["-1"]},
+        {"uid": user_id, "gcids": gradeo_class_ids or ["-1"]},
     )
     gradeo_exams = gradeo_result.fetchall()
 
@@ -1715,27 +1715,31 @@ async def export_missing_report_pdf(
         missing_edstem = []
 
     # ── Gradeo: pending / low-score exams (deduplicate by exam name per course) ──
-    # Also include results where canvas_course_id is NULL (multi-enrollment
-    # students) by resolving the course via gradeo_class_mappings.
+    # Use a CTE to first deduplicate results (preferring scored > awaiting > not_submitted),
+    # then filter for missing/low-score. This prevents stale not_submitted duplicates from
+    # hiding the actual scored result.
     gradeo_result = await db.execute(
         text("""
-            SELECT DISTINCT ON (COALESCE(gar.canvas_course_id, gcm.canvas_course_id), gcea.exam_name)
-                   COALESCE(gar.canvas_course_id, gcm.canvas_course_id) AS course_id,
-                   gcea.exam_name, gcea.topics,
-                   gar.exam_mark, gar.marks_available, gar.status
-            FROM gradeo_assignment_results gar
-            JOIN gradeo_class_exam_assignments gcea
-                ON gcea.id = gar.gradeo_class_exam_assignment_id
-            LEFT JOIN gradeo_class_mappings gcm
-                ON gcm.gradeo_class_id = gcea.gradeo_class_id
-               AND gar.canvas_course_id IS NULL
-            WHERE gar.user_id = :uid
-              AND COALESCE(gar.canvas_course_id, gcm.canvas_course_id) = ANY(:enrolled)
-              AND (gar.status = 'awaiting_marking'
-                   OR gar.exam_mark IS NULL
-                   OR (gar.marks_available > 0
-                       AND gar.exam_mark / gar.marks_available < 0.5))
-            ORDER BY COALESCE(gar.canvas_course_id, gcm.canvas_course_id), gcea.exam_name, gar.last_imported_at DESC NULLS LAST
+            WITH best AS (
+                SELECT DISTINCT ON (gcm.canvas_course_id, gcea.exam_name)
+                       gcm.canvas_course_id AS course_id,
+                       gcea.exam_name, gcea.topics,
+                       gar.exam_mark, gar.marks_available, gar.status
+                FROM gradeo_assignment_results gar
+                JOIN gradeo_class_exam_assignments gcea
+                    ON gcea.id = gar.gradeo_class_exam_assignment_id
+                JOIN gradeo_class_mappings gcm
+                    ON gcm.gradeo_class_id = gcea.gradeo_class_id
+                WHERE gar.user_id = :uid
+                  AND gcm.canvas_course_id = ANY(:enrolled)
+                ORDER BY gcm.canvas_course_id, gcea.exam_name,
+                         CASE gar.status WHEN 'scored' THEN 2 WHEN 'awaiting_marking' THEN 1 ELSE 0 END DESC,
+                         gar.last_imported_at DESC NULLS LAST
+            )
+            SELECT * FROM best
+            WHERE status = 'awaiting_marking'
+               OR exam_mark IS NULL
+               OR (marks_available > 0 AND exam_mark / marks_available < 0.5)
         """),
         {"uid": user_id, "enrolled": enrolled_ids},
     )
@@ -2141,12 +2145,12 @@ async def export_student_report_pdf(
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
             WHERE gar.user_id = :uid
-              AND (gar.canvas_course_id = :cid
-                   OR (gar.canvas_course_id IS NULL
-                       AND gcea.gradeo_class_id = ANY(:gcids)))
-            ORDER BY gcea.exam_name, gar.last_imported_at DESC NULLS LAST
+              AND gcea.gradeo_class_id = ANY(:gcids)
+            ORDER BY gcea.exam_name,
+                     CASE gar.status WHEN 'scored' THEN 2 WHEN 'awaiting_marking' THEN 1 ELSE 0 END DESC,
+                     gar.last_imported_at DESC NULLS LAST
         """),
-        {"uid": user_id, "cid": course_id, "gcids": gradeo_class_ids or ["-1"]},
+        {"uid": user_id, "gcids": gradeo_class_ids or ["-1"]},
     )
     gradeo_rows = gradeo_result.fetchall()
 
