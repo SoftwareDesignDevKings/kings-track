@@ -1299,7 +1299,7 @@ async def _build_cycle_update_elements(
 
     gradeo_by_cycle: dict[int, object] = {}
     for ge in gradeo_exams:
-        m = re.search(r"Cycle\s+(\d+)", ge.exam_name, re.IGNORECASE)
+        m = re.search(r"Cycle\s*(\d+)", ge.exam_name, re.IGNORECASE)
         if m:
             gradeo_by_cycle[int(m.group(1))] = ge
     matched_gradeo_cycles: set[int] = set()
@@ -1378,7 +1378,7 @@ async def _build_cycle_update_elements(
         row = [P(a.name), P(due_str), P(status), P(score_str), P(late_str)]
 
         if has_gradeo:
-            cycle_m = re.match(r"Cycle\s+(\d+)", a.name, re.IGNORECASE)
+            cycle_m = re.match(r"Cycle\s*(\d+)", a.name, re.IGNORECASE)
             if cycle_m:
                 cn = int(cycle_m.group(1))
                 ge = gradeo_by_cycle.get(cn)
@@ -1417,7 +1417,7 @@ async def _build_cycle_update_elements(
     # ── Gradeo section (only unmatched exams) ──
     unmatched_gradeo = []
     for ge in gradeo_exams:
-        cm = re.search(r"Cycle\s+(\d+)", ge.exam_name, re.IGNORECASE)
+        cm = re.search(r"Cycle\s*(\d+)", ge.exam_name, re.IGNORECASE)
         if cm and int(cm.group(1)) in matched_gradeo_cycles:
             continue
         unmatched_gradeo.append(ge)
