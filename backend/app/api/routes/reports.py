@@ -31,6 +31,53 @@ router = APIRouter(
 
 
 # ---------------------------------------------------------------------------
+# Diagnostic: raw assignment+submission data for a student/course
+# ---------------------------------------------------------------------------
+
+@router.get("/students/{user_id}/debug-submissions")
+async def debug_submissions(
+    user_id: int,
+    course_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return raw assignment + submission data for debugging sync issues."""
+    result = await db.execute(
+        text("""
+            SELECT a.id AS assignment_id, a.name, a.points_possible, a.due_at,
+                   a.assignment_group_name,
+                   s.id AS submission_id, s.score, s.grade,
+                   s.workflow_state, s.submitted_at, s.graded_at,
+                   s.late, s.missing, s.synced_at
+            FROM assignments a
+            LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
+            WHERE a.course_id = :cid AND a.workflow_state = 'published'
+            ORDER BY a.assignment_group_name, a.position NULLS LAST, a.due_at NULLS LAST
+        """),
+        {"uid": user_id, "cid": course_id},
+    )
+    rows = result.fetchall()
+    return [
+        {
+            "assignment_id": r.assignment_id,
+            "name": r.name,
+            "points_possible": r.points_possible,
+            "due_at": r.due_at.isoformat() if r.due_at else None,
+            "group": r.assignment_group_name,
+            "submission_id": r.submission_id,
+            "score": r.score,
+            "grade": r.grade,
+            "workflow_state": r.workflow_state,
+            "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+            "graded_at": r.graded_at.isoformat() if r.graded_at else None,
+            "late": r.late,
+            "missing": r.missing,
+            "synced_at": r.synced_at.isoformat() if r.synced_at else None,
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
