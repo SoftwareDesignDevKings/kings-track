@@ -77,6 +77,113 @@ async def debug_submissions(
     ]
 
 
+@router.get("/students/{user_id}/debug-canvas-live")
+async def debug_canvas_live(
+    user_id: int,
+    course_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare live Canvas API submission data with local DB for a student.
+
+    Fetches submissions directly from Canvas and returns both the live Canvas
+    response and the local DB record for each assignment, so we can see exactly
+    where data diverges.
+    """
+    if not settings.canvas_configured:
+        raise HTTPException(status_code=503, detail="Canvas API not configured")
+
+    from app.canvas.client import CanvasClient
+
+    # Get assignment IDs for this course
+    result = await db.execute(
+        text("SELECT id, name FROM assignments WHERE course_id = :cid AND workflow_state = 'published' ORDER BY position NULLS LAST"),
+        {"cid": course_id},
+    )
+    assignments = {row[0]: row[1] for row in result.fetchall()}
+
+    # Get DB submissions for comparison
+    result = await db.execute(
+        text("""
+            SELECT s.assignment_id, s.id AS submission_id, s.score, s.grade,
+                   s.workflow_state, s.submitted_at, s.graded_at, s.synced_at
+            FROM submissions s
+            WHERE s.user_id = :uid AND s.course_id = :cid
+        """),
+        {"uid": user_id, "cid": course_id},
+    )
+    db_subs = {row[0]: row for row in result.fetchall()}
+
+    # Get last sync time
+    result = await db.execute(
+        text("""
+            SELECT entity_type, status, completed_at
+            FROM sync_log
+            WHERE status = 'completed'
+              AND entity_type IN ('full_sync', 'incremental_sync')
+            ORDER BY id DESC LIMIT 5
+        """)
+    )
+    recent_syncs = [
+        {"type": r[0], "status": r[1], "completed_at": r[2].isoformat() if r[2] else None}
+        for r in result.fetchall()
+    ]
+
+    # Fetch live from Canvas API
+    canvas_subs: dict[int, dict] = {}
+    async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
+        async for sub in canvas.get_paginated(
+            f"/api/v1/courses/{course_id}/students/submissions",
+            params={"student_ids[]": str(user_id), "per_page": 100},
+        ):
+            aid = sub.get("assignment_id")
+            if aid:
+                canvas_subs[aid] = sub
+
+    # Build comparison
+    comparisons = []
+    for aid, aname in assignments.items():
+        db_row = db_subs.get(aid)
+        canvas_row = canvas_subs.get(aid)
+        comparisons.append({
+            "assignment_id": aid,
+            "name": aname,
+            "db": {
+                "submission_id": db_row[1] if db_row else None,
+                "score": db_row[2] if db_row else None,
+                "grade": db_row[3] if db_row else None,
+                "workflow_state": db_row[4] if db_row else None,
+                "submitted_at": db_row[5].isoformat() if db_row and db_row[5] else None,
+                "graded_at": db_row[6].isoformat() if db_row and db_row[6] else None,
+                "synced_at": db_row[7].isoformat() if db_row and db_row[7] else None,
+            } if db_row else None,
+            "canvas_live": {
+                "id": canvas_row.get("id"),
+                "score": canvas_row.get("score"),
+                "grade": canvas_row.get("grade"),
+                "workflow_state": canvas_row.get("workflow_state"),
+                "submitted_at": canvas_row.get("submitted_at"),
+                "graded_at": canvas_row.get("graded_at"),
+                "grader_id": canvas_row.get("grader_id"),
+                "submission_type": canvas_row.get("submission_type"),
+            } if canvas_row else None,
+            "score_match": (
+                (db_row[2] if db_row else None) == (canvas_row.get("score") if canvas_row else None)
+            ) if db_row and canvas_row else None,
+        })
+
+    mismatches = [c for c in comparisons if c["score_match"] is False]
+
+    return {
+        "student_id": user_id,
+        "course_id": course_id,
+        "total_assignments": len(assignments),
+        "canvas_submissions_returned": len(canvas_subs),
+        "mismatches": len(mismatches),
+        "recent_syncs": recent_syncs,
+        "comparisons": comparisons,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
