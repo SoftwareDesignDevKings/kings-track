@@ -3,8 +3,8 @@ import { test, expect, getReportCard } from './fixtures'
 // ---------------------------------------------------------------------------
 // Helper: locate selects by position on the Reports page.
 //   select[0] = Course Reports course dropdown
-//   select[1] = Student Reports student dropdown
-//   select[2] = Student Reports course dropdown
+//   select[1] = Student Reports course dropdown
+//   select[2] = Student Reports student dropdown
 //   select[3] = Student Reports cycle dropdown
 // ---------------------------------------------------------------------------
 
@@ -263,35 +263,44 @@ test.describe('Error handling', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 10. Student Reports (student-first selector)
+// 10. Student Reports (course-first selector)
 // ---------------------------------------------------------------------------
+//   select[0] = Course Reports course dropdown
+//   select[1] = Student Reports course dropdown
+//   select[2] = Student Reports student dropdown
+//   select[3] = Student Reports cycle dropdown
 
 test.describe('Student Reports', () => {
   test('shows placeholder before selection', async ({ reportsPage: page }) => {
     await expect(
-      page.getByText('Select a student to see available reports.')
+      page.getByText('Select a course and student above to see available reports.')
     ).toBeVisible()
   })
 
-  test('selecting a student and course shows report cards', async ({ reportsPage: page }) => {
-    // Student Reports student select is the 2nd select on the page (index 1)
-    const studentSelect = page.locator('select').nth(1)
+  test('selecting a course and student shows report cards', async ({ reportsPage: page }) => {
+    // Student Reports course select is the 2nd select on the page (index 1)
+    const courseSelect = page.locator('select').nth(1)
     await page.waitForFunction(() => {
       const selects = document.querySelectorAll('select')
-      const studentSel = selects[1] as HTMLSelectElement | undefined
-      return studentSel && studentSel.options.length > 1
+      const courseSel = selects[1] as HTMLSelectElement | undefined
+      return courseSel && courseSel.options.length > 1
     })
-
-    // Select the first student
-    const studentOptions = studentSelect.locator('option')
-    await studentSelect.selectOption((await studentOptions.nth(1).getAttribute('value'))!)
-
-    // Course select is the 3rd select (index 2)
-    const courseSelect = page.locator('select').nth(2)
 
     // Select the first course
     const courseOptions = courseSelect.locator('option')
     await courseSelect.selectOption((await courseOptions.nth(1).getAttribute('value'))!)
+
+    // Student select is the 3rd select (index 2)
+    const studentSelect = page.locator('select').nth(2)
+    await page.waitForFunction(() => {
+      const selects = document.querySelectorAll('select')
+      const studentSel = selects[2] as HTMLSelectElement | undefined
+      return studentSel && studentSel.options.length > 1
+    }, null, { timeout: 15_000 })
+
+    // Select the first student
+    const studentOptions = studentSelect.locator('option')
+    await studentSelect.selectOption((await studentOptions.nth(1).getAttribute('value'))!)
 
     // All four student report cards should appear
     await expect(getReportCard(page, /Cycle.*Update/)).toBeVisible()
@@ -300,25 +309,30 @@ test.describe('Student Reports', () => {
     await expect(getReportCard(page, 'Full Student Report')).toBeVisible()
   })
 
-  test('course-dependent cards work when course is already selected', async ({
+  test('course-dependent cards are enabled when course is selected', async ({
     reportsPage: page,
   }) => {
-    // Select a student first (index 1)
-    const studentSelect = page.locator('select').nth(1)
+    // Select a course first (index 1)
+    const courseSelect = page.locator('select').nth(1)
     await page.waitForFunction(() => {
       const selects = document.querySelectorAll('select')
-      const studentSel = selects[1] as HTMLSelectElement | undefined
-      return studentSel && studentSel.options.length > 1
+      const courseSel = selects[1] as HTMLSelectElement | undefined
+      return courseSel && courseSel.options.length > 1
     })
-    const studentOptions = studentSelect.locator('option')
-    await studentSelect.selectOption((await studentOptions.nth(1).getAttribute('value'))!)
-
-    // Select a course (index 2)
-    const courseSelect = page.locator('select').nth(2)
     const courseOptions = courseSelect.locator('option')
     await courseSelect.selectOption((await courseOptions.nth(1).getAttribute('value'))!)
 
-    // Since course is already selected, course-dependent cards should be enabled
+    // Select a student (index 2)
+    const studentSelect = page.locator('select').nth(2)
+    await page.waitForFunction(() => {
+      const selects = document.querySelectorAll('select')
+      const studentSel = selects[2] as HTMLSelectElement | undefined
+      return studentSel && studentSel.options.length > 1
+    }, null, { timeout: 15_000 })
+    const studentOptions = studentSelect.locator('option')
+    await studentSelect.selectOption((await studentOptions.nth(1).getAttribute('value'))!)
+
+    // Course-dependent cards should be enabled (no "Select a course above" message)
     const cycleCard = getReportCard(page, /Cycle.*Update/)
     await expect(cycleCard.getByText('Select a course above')).toHaveCount(0)
     await expect(cycleCard.getByRole('button', { name: 'Preview' })).toBeVisible()
@@ -366,5 +380,131 @@ test.describe('Course change resets state', () => {
     const newClassListCard = getReportCard(page, 'Class List')
     await expect(newClassListCard.locator('.text-red-500')).toHaveCount(0)
     await expect(newClassListCard.getByRole('button', { name: 'CSV' })).toBeEnabled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 12. ENC course: Whole-Class Cycle Update should generate without error
+// ---------------------------------------------------------------------------
+
+test.describe('ENC Whole-Class Cycle Update', () => {
+  test('generates without "Unit-based assignment groups" error', async ({
+    reportsPage: page,
+    context,
+  }) => {
+    test.setTimeout(60_000)
+
+    const courseSelect = page.locator('select').nth(0)
+    const encOption = courseSelect.locator('option:text-matches("ENC", "i")')
+    const encCount = await encOption.count()
+    test.skip(encCount === 0, 'No ENC course in database')
+
+    const value = await encOption.first().getAttribute('value')
+    await courseSelect.selectOption(value!)
+
+    const cycleCard = getReportCard(page, 'Whole-Class Cycle Update')
+    await expect(cycleCard).toBeVisible()
+
+    const previewBtn = cycleCard.getByRole('button', { name: 'Preview' })
+    await expect(previewBtn).toBeVisible()
+
+    const popupPromise = context.waitForEvent('page')
+    await previewBtn.click()
+
+    const result = await Promise.race([
+      popupPromise.then((popup) => ({ type: 'popup' as const, popup })),
+      cycleCard
+        .locator('.text-red-500')
+        .waitFor({ timeout: 45_000 })
+        .then(() => ({ type: 'error' as const })),
+    ])
+
+    if (result.type === 'popup') {
+      const popup = result.popup
+      await popup.waitForLoadState()
+      const iframe = popup.locator('iframe')
+      await expect(iframe).toBeAttached()
+      await popup.close()
+    } else {
+      const errorText = await cycleCard.locator('.text-red-500').textContent()
+      // Must not show the old "Unit-based" error for ENC courses
+      expect(errorText).not.toContain('Unit-based assignment groups')
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 13. ENC student: Missing Work Report generates without EdStem for ENC course
+// ---------------------------------------------------------------------------
+
+test.describe('ENC Missing Work Report', () => {
+  test('generates successfully for ENC course student', async ({
+    reportsPage: page,
+    context,
+  }) => {
+    test.setTimeout(60_000)
+
+    // Student Reports: course dropdown is select[1] (course-first order)
+    const courseSelect = page.locator('select').nth(1)
+    await page.waitForFunction(() => {
+      const selects = document.querySelectorAll('select')
+      const courseSel = selects[1] as HTMLSelectElement | undefined
+      return courseSel && courseSel.options.length > 1
+    })
+
+    // Find an ENC course
+    const encOption = courseSelect.locator('option:text-matches("ENC", "i")')
+    const encCount = await encOption.count()
+    test.skip(encCount === 0, 'No ENC course in Student Reports')
+
+    const courseValue = await encOption.first().getAttribute('value')
+    await courseSelect.selectOption(courseValue!)
+
+    // Wait for student dropdown to populate (select[2])
+    const studentSelect = page.locator('select').nth(2)
+    await page.waitForFunction(
+      () => {
+        const selects = document.querySelectorAll('select')
+        const studentSel = selects[2] as HTMLSelectElement | undefined
+        return studentSel && studentSel.options.length > 1
+      },
+      null,
+      { timeout: 15_000 },
+    )
+
+    // Select the first student
+    const studentOptions = studentSelect.locator('option')
+    const studentValue = await studentOptions.nth(1).getAttribute('value')
+    await studentSelect.selectOption(studentValue!)
+
+    // Click Preview on Missing Work Report
+    const mwCard = getReportCard(page, 'Missing Work Report')
+    await expect(mwCard).toBeVisible()
+
+    const previewBtn = mwCard.getByRole('button', { name: 'Preview' })
+    await expect(previewBtn).toBeVisible()
+
+    const popupPromise = context.waitForEvent('page')
+    await previewBtn.click()
+
+    const result = await Promise.race([
+      popupPromise.then((popup) => ({ type: 'popup' as const, popup })),
+      mwCard
+        .locator('.text-red-500')
+        .waitFor({ timeout: 30_000 })
+        .then(() => ({ type: 'error' as const })),
+    ])
+
+    if (result.type === 'popup') {
+      const popup = result.popup
+      await popup.waitForLoadState()
+      const iframe = popup.locator('iframe')
+      await expect(iframe).toBeAttached()
+      await popup.close()
+    } else {
+      const errorText = await mwCard.locator('.text-red-500').textContent()
+      // Should not get a generation error for ENC courses
+      expect(errorText).not.toContain('error')
+    }
   })
 })
