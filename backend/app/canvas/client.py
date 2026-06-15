@@ -243,21 +243,42 @@ class CanvasClient:
             groups.append(group)
         return groups
 
-    def list_submissions(self, course_id: int, since: str | None = None) -> AsyncIterator[dict]:
+    async def list_submissions(self, course_id: int, since: str | None = None) -> AsyncIterator[dict]:
         """
         Yield all student submissions for all assignments in a course.
         Uses the bulk endpoint to minimise API calls.
+
+        For incremental syncs (when ``since`` is set), makes two API calls:
+        one for newly submitted and one for newly graded submissions.
+        Canvas ANDs ``submitted_since`` and ``graded_since``, so we need
+        separate calls to capture teacher-entered grades that don't update
+        ``submitted_at``.
         """
-        params: dict[str, Any] = {
+        path = f"/api/v1/courses/{course_id}/students/submissions"
+        base_params: dict[str, Any] = {
             "student_ids[]": "all",
             "per_page": 100,
         }
-        if since:
-            params["submitted_since"] = since
-        return self.get_paginated(
-            f"/api/v1/courses/{course_id}/students/submissions",
-            params=params,
-        )
+        if not since:
+            async for item in self.get_paginated(path, params=base_params):
+                yield item
+            return
+
+        # 1. Submissions submitted since last sync
+        submitted_params = {**base_params, "submitted_since": since}
+        seen: set[int] = set()
+        async for item in self.get_paginated(path, params=submitted_params):
+            sid = item.get("id")
+            if sid:
+                seen.add(sid)
+            yield item
+
+        # 2. Submissions graded since last sync (catches teacher-entered grades)
+        graded_params = {**base_params, "graded_since": since}
+        async for item in self.get_paginated(path, params=graded_params):
+            sid = item.get("id")
+            if sid and sid not in seen:
+                yield item
 
     def list_student_summaries(self, course_id: int) -> AsyncIterator[dict]:
         """Yield per-student engagement summaries (page views, participations, tardiness)."""
