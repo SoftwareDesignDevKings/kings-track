@@ -1714,36 +1714,35 @@ async def export_missing_report_pdf(
     else:
         missing_edstem = []
 
-    # ── Gradeo: pending / low-score exams (deduplicate by exam name per course) ──
-    # Use a CTE to first deduplicate results (preferring scored > awaiting > not_submitted),
-    # then filter for missing/low-score. This prevents stale not_submitted duplicates from
-    # hiding the actual scored result.
+    # ── Gradeo: all results deduplicated by exam name per course ──
+    # Show all Gradeo results (not just flagged) so the report gives a complete picture.
+    # Deduplication prefers scored > awaiting > not_submitted.
     gradeo_result = await db.execute(
         text("""
-            WITH best AS (
-                SELECT DISTINCT ON (gcm.canvas_course_id, gcea.exam_name)
-                       gcm.canvas_course_id AS course_id,
-                       gcea.exam_name, gcea.topics,
-                       gar.exam_mark, gar.marks_available, gar.status
-                FROM gradeo_assignment_results gar
-                JOIN gradeo_class_exam_assignments gcea
-                    ON gcea.id = gar.gradeo_class_exam_assignment_id
-                JOIN gradeo_class_mappings gcm
-                    ON gcm.gradeo_class_id = gcea.gradeo_class_id
-                WHERE gar.user_id = :uid
-                  AND gcm.canvas_course_id = ANY(:enrolled)
-                ORDER BY gcm.canvas_course_id, gcea.exam_name,
-                         CASE gar.status WHEN 'scored' THEN 2 WHEN 'awaiting_marking' THEN 1 ELSE 0 END DESC,
-                         gar.last_imported_at DESC NULLS LAST
-            )
-            SELECT * FROM best
-            WHERE status = 'awaiting_marking'
-               OR exam_mark IS NULL
-               OR (marks_available > 0 AND exam_mark / marks_available < 0.5)
+            SELECT DISTINCT ON (gcm.canvas_course_id, gcea.exam_name)
+                   gcm.canvas_course_id AS course_id,
+                   gcea.exam_name, gcea.topics,
+                   gar.exam_mark, gar.marks_available, gar.status
+            FROM gradeo_assignment_results gar
+            JOIN gradeo_class_exam_assignments gcea
+                ON gcea.id = gar.gradeo_class_exam_assignment_id
+            JOIN gradeo_class_mappings gcm
+                ON gcm.gradeo_class_id = gcea.gradeo_class_id
+            WHERE gar.user_id = :uid
+              AND gcm.canvas_course_id = ANY(:enrolled)
+            ORDER BY gcm.canvas_course_id, gcea.exam_name,
+                     CASE gar.status WHEN 'scored' THEN 2 WHEN 'awaiting_marking' THEN 1 ELSE 0 END DESC,
+                     gar.last_imported_at DESC NULLS LAST
         """),
         {"uid": user_id, "enrolled": enrolled_ids},
     )
-    missing_gradeo = gradeo_result.fetchall()
+    all_gradeo = gradeo_result.fetchall()
+    gradeo_flagged = [
+        r for r in all_gradeo
+        if r.status == "awaiting_marking"
+        or r.exam_mark is None
+        or (r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5)
+    ]
 
     # ── Assessment Tracking: assignments that have rubric criteria (show Canvas mark, not rubric scores) ──
     try:
@@ -1796,7 +1795,7 @@ async def export_missing_report_pdf(
     if edstem_enrolled:
         metric_boxes.append(_metric_box(str(len(missing_edstem)), "EdStem Incomplete", styles))
     metric_boxes.extend([
-        _metric_box(str(len(missing_gradeo)), "Gradeo Flagged", styles),
+        _metric_box(str(len(gradeo_flagged)), "Gradeo Flagged", styles),
         _metric_box(str(tracking_count), "Tracking Items", styles),
     ])
     summary = Table(
@@ -1862,12 +1861,13 @@ async def export_missing_report_pdf(
         else:
             els.append(Paragraph("All EdStem lessons completed.", styles["body_small"]))
 
-    # ── Gradeo Flagged Exams ──
-    els.append(Paragraph("Gradeo — Flagged Assessments", styles["section"]))
-    if missing_gradeo:
+    # ── Gradeo Results (all exams, flagged items highlighted) ──
+    els.append(Paragraph("Gradeo — All Results", styles["section"]))
+    if all_gradeo:
         g_data = [[PH("Course"), PH("Exam"), PH("Score"), PH("Status"), PH("Topics")]]
         g_cmds = list(_base_table_style())
-        for r in missing_gradeo:
+        flagged_set = set(id(r) for r in gradeo_flagged)
+        for i, r in enumerate(all_gradeo, start=1):
             c_info = courses_map.get(r.course_id, {})
             c_label = c_info.get("code") or c_info.get("name") or str(r.course_id or 0)
             mark = (
@@ -1875,13 +1875,18 @@ async def export_missing_report_pdf(
                 if r.exam_mark is not None else "—"
             )
             g_data.append([P(c_label), P(r.exam_name), P(mark), P(r.status or "—"), P(r.topics or "")])
+            if id(r) in flagged_set:
+                if r.status == "not_submitted" or r.exam_mark is None:
+                    g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+                else:
+                    g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
         g_widths = [avail * 0.14, avail * 0.25, avail * 0.14, avail * 0.18, avail * 0.29]
         gt = Table(g_data, colWidths=g_widths, repeatRows=1)
         gt.setStyle(TableStyle(g_cmds))
         els.append(gt)
     else:
         els.append(Paragraph(
-            "No flagged Gradeo assessments.",
+            "No Gradeo results.",
             styles["body_small"],
         ))
 
