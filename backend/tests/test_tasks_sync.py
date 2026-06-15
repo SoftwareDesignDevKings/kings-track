@@ -379,10 +379,10 @@ async def test_sync_submissions_inserts_batch_and_skips_unused_fields(db):
     assert row[2] is False
     assert row[3] is False
     assert row[4] is False
-    assert row[5] is None
-    assert row[6] is None
-    assert row[7] is None
-    assert row[8] is None
+    assert row[5] == "B"
+    assert row[6] is not None  # submitted_at
+    assert row[7] is not None  # graded_at
+    assert row[8] == 2
 
 
 # ---------------------------------------------------------------------------
