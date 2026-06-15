@@ -1258,7 +1258,8 @@ async def _build_cycle_update_elements(
                 best_group = gname
                 break
 
-    all_unit_assignments = sorted(groups[best_group], key=_assignment_sort_key)
+    # Use ALL assignments across every group (so quizzes in separate groups appear)
+    all_unit_assignments = sorted(rows, key=_assignment_sort_key)
 
     two_weeks_ago = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=14)
     end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -1267,19 +1268,6 @@ async def _build_cycle_update_elements(
         if a.due_at is not None
         and two_weeks_ago <= (a.due_at.replace(tzinfo=None) if a.due_at.tzinfo else a.due_at) <= end_of_today
     ]
-
-    total = len(current_assignments)
-    completed = sum(
-        1 for a in current_assignments
-        if a.workflow_state in ("submitted", "graded")
-    )
-    missing_count = sum(1 for a in current_assignments if a.missing)
-    scores = [float(a.score) for a in current_assignments if a.score is not None]
-    points = [float(a.points_possible) for a in current_assignments
-              if a.points_possible and a.score is not None]
-    avg_score_pct = (
-        round(sum(scores) / sum(points) * 100) if points and sum(points) > 0 else None
-    )
 
     # ── Fetch Gradeo results (deduplicate by exam name, keep latest) ──
     gradeo_result = await db.execute(
@@ -1325,26 +1313,10 @@ async def _build_cycle_update_elements(
     ))
     els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
 
-    els.append(Paragraph(f"Current Unit: {best_group}", styles["section"]))
-
-    comp_pct = f"{round(completed / total * 100)}%" if total else "—"
-    metrics = Table(
-        [[
-            _metric_box(f"{completed}/{total}", "Completed", styles),
-            _metric_box(comp_pct, "Completion", styles),
-            _metric_box(str(missing_count), "Missing", styles),
-            _metric_box(f"{avg_score_pct}%" if avg_score_pct is not None else "—", "Avg Score", styles),
-        ]],
-        hAlign="LEFT",
-    )
-    metrics.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    els.append(metrics)
-    els.append(Spacer(1, 10))
-
     P = lambda t: _p(t, styles)
     PH = lambda t: _p(t, styles, header=True)
     has_gradeo = bool(gradeo_by_cycle)
-    headers = [PH("Canvas Quiz"), PH("Due Date"), PH("Status"), PH("Score"), PH("Late")]
+    headers = [PH("Assignment"), PH("Due Date"), PH("Status"), PH("Score"), PH("Late")]
     if has_gradeo:
         headers.append(PH("Gradeo"))
     table_data = [headers]
@@ -1496,24 +1468,6 @@ async def _build_cycle_update_elements(
         edstem_metrics.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
         els.append(edstem_metrics)
         els.append(Spacer(1, 6))
-
-    # ── Other units summary ──
-    other_groups = [g for g in group_order if g != best_group]
-    if other_groups:
-        els.append(Paragraph("Other Units Overview", styles["section"]))
-        oc_data = [[PH("Unit"), PH("Total"), PH("Completed"), PH("Completion %"), PH("Missing")]]
-        oc_cmds = list(_base_table_style())
-        for gname in other_groups:
-            g_asgns = groups[gname]
-            g_total = len(g_asgns)
-            g_done = sum(1 for a in g_asgns if a.workflow_state in ("submitted", "graded"))
-            g_miss = sum(1 for a in g_asgns if a.missing)
-            g_pct = f"{round(g_done / g_total * 100)}%" if g_total else "—"
-            oc_data.append([P(gname), P(str(g_total)), P(str(g_done)), P(g_pct), P(str(g_miss))])
-        oc_widths = [avail * 0.38, avail * 0.14, avail * 0.16, avail * 0.18, avail * 0.14]
-        ot = Table(oc_data, colWidths=oc_widths, repeatRows=1)
-        ot.setStyle(TableStyle(oc_cmds))
-        els.append(ot)
 
     # ── Missing Work (all past-due, unsubmitted/ungraded assignments across all groups) ──
     now_naive = now.replace(tzinfo=None)
