@@ -635,6 +635,7 @@ async def get_all_students_with_stats(db: AsyncSession) -> list[dict]:
             Enrollment.user_id,
             Enrollment.course_id,
             Course.name.label("course_name"),
+            Course.course_code.label("course_code"),
         )
         .join(Course, Course.id == Enrollment.course_id)
         .where(Enrollment.role == "StudentEnrollment")
@@ -645,7 +646,7 @@ async def get_all_students_with_stats(db: AsyncSession) -> list[dict]:
     course_map: dict[int, list[dict]] = {}
     for cr in course_rows.all():
         course_map.setdefault(cr.user_id, []).append(
-            {"id": cr.course_id, "name": cr.course_name}
+            {"id": cr.course_id, "name": cr.course_name, "course_code": cr.course_code}
         )
 
     results = []

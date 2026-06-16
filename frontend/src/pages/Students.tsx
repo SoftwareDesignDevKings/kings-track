@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import Header from '../components/Header'
 import { useStudents } from '../services/api'
 import { downloadCsv } from '../lib/downloadCsv'
+import { getCourseGroupCode } from '../utils/courseGrouping'
 import type { StudentListItem } from '../types'
 
 type SortKey = 'name' | 'course_count' | 'avg_completion_rate' | 'avg_on_time_rate' | 'avg_score' | 'attendance_rate'
@@ -66,11 +67,30 @@ export default function Students() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [downloading, setDownloading] = useState(false)
 
-  const courseOptions = useMemo(() => {
+  const courseGroups = useMemo(() => {
     if (!students) return []
-    const names = new Set<string>()
-    students.forEach(s => s.courses.forEach(c => names.add(c.name)))
-    return Array.from(names).sort()
+
+    // Collect unique courses with their codes
+    const courseMap = new Map<string, string | null>()
+    students.forEach(s => s.courses.forEach(c => {
+      if (!courseMap.has(c.name)) courseMap.set(c.name, c.course_code)
+    }))
+
+    // Group by derived group code
+    const groups = new Map<string, string[]>()
+    for (const [name, code] of courseMap.entries()) {
+      const groupCode = code ? getCourseGroupCode(code) : 'Other'
+      if (!groups.has(groupCode)) groups.set(groupCode, [])
+      groups.get(groupCode)!.push(name)
+    }
+
+    // Sort groups and courses within groups
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([groupCode, courses]) => ({
+        groupCode,
+        courses: courses.sort(),
+      }))
   }, [students])
 
   const filtered = useMemo(() => {
@@ -146,9 +166,19 @@ export default function Students() {
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
               <option value="all">All courses</option>
-              {courseOptions.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
+              {courseGroups.map(({ groupCode, courses }) =>
+                courseGroups.length === 1 ? (
+                  courses.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))
+                ) : (
+                  <optgroup key={groupCode} label={groupCode}>
+                    {courses.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </optgroup>
+                )
+              )}
             </select>
             <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
               <button

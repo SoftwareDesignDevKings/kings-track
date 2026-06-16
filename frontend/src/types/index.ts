@@ -19,6 +19,33 @@ export interface Course {
   avg_current_score: number | null
 }
 
+// ─── Course groups (3-tier hierarchy) ────────────────────────────────────────
+
+export interface CourseGroupClass {
+  id: number
+  name: string
+  course_code: string | null
+  student_count: number
+  avg_completion_rate: number | null
+  avg_on_time_rate: number | null
+  avg_current_score: number | null
+  is_archived: boolean
+  last_synced: string | null
+}
+
+export interface CourseGroup {
+  group_code: string
+  display_name: string
+  is_archived: boolean
+  class_count: number
+  total_students: number
+  avg_completion_rate: number | null
+  avg_on_time_rate: number | null
+  avg_current_score: number | null
+  last_synced: string | null
+  classes: CourseGroupClass[]
+}
+
 // ─── Activity matrix ─────────────────────────────────────────────────────────
 
 export interface MatrixAssignment {
@@ -384,7 +411,7 @@ export interface StudentListItem {
   email: string
   sis_id: string | null
   course_count: number
-  courses: Array<{ id: number; name: string }>
+  courses: Array<{ id: number; name: string; course_code: string | null }>
   avg_completion_rate: number | null
   avg_on_time_rate: number | null
   avg_score: number | null
