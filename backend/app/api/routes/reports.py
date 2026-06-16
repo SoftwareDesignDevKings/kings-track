@@ -1633,7 +1633,9 @@ async def _build_cycle_update_elements(
             avg_str = str(round(ge.class_average, 1)) if ge.class_average is not None else "—"
             topics = ge.topics or ""
             g_data.append([P(ge.exam_name), P(mark_str), P(avg_str), P(topics)])
-            if ge.status == "not_submitted" or ge.exam_mark is None:
+            if ge.status == "awaiting_marking":
+                pass  # white — no highlight
+            elif ge.status == "not_submitted" or ge.exam_mark is None:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
             elif ge.status == "scored" and ge.marks_available and ge.marks_available > 0 and ge.exam_mark / ge.marks_available < 0.5:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
@@ -2091,9 +2093,10 @@ async def _concern_tab_gradeo(db: AsyncSession, course_id: int, roster):
 
     for r in all_rows:
         is_flagged = (
-            r.exam_mark is None
-            or r.status == "not_submitted"
+            r.status == "not_submitted"
+            or (r.status != "awaiting_marking" and r.exam_mark is None)
             or (r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5)
+            or r.status == "awaiting_marking"
         )
         if not is_flagged:
             continue
@@ -2102,7 +2105,9 @@ async def _concern_tab_gradeo(db: AsyncSession, course_id: int, roster):
             continue
         mark = f"{r.exam_mark}/{r.marks_available}" if r.exam_mark is not None else "—"
         rows.append([u.name, r.exam_name, mark, r.status or "—", r.topics or ""])
-        if r.status == "not_submitted" or r.exam_mark is None:
+        if r.status == "awaiting_marking":
+            row_levels.append("none")
+        elif r.status == "not_submitted" or r.exam_mark is None:
             row_levels.append("high")
         else:
             row_levels.append("moderate")
@@ -2302,7 +2307,8 @@ async def export_missing_report_pdf(
     gradeo_flagged = [
         r for r in all_gradeo
         if r.status == "awaiting_marking"
-        or r.exam_mark is None
+        or r.status == "not_submitted"
+        or (r.status != "awaiting_marking" and r.exam_mark is None)
         or (r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5)
     ]
 
@@ -2425,7 +2431,9 @@ async def export_missing_report_pdf(
                 if r.exam_mark is not None else "—"
             )
             g_data.append([P(c_label), P(r.exam_name), P(mark), P(r.status or "—"), P(r.topics or "")])
-            if r.status == "not_submitted" or r.exam_mark is None:
+            if r.status == "awaiting_marking":
+                pass  # white — no highlight
+            elif r.status == "not_submitted" or r.exam_mark is None:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
             elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
@@ -2624,7 +2632,9 @@ async def export_student_report_pdf(
             mark = f"{r.exam_mark}/{r.marks_available}" if r.exam_mark is not None else "—"
             avg = f"{r.class_average}" if r.class_average is not None else "—"
             gr_data.append([P(r.exam_name), P(mark), P(avg), P(r.topics or ""), P(r.status or "—")])
-            if r.status == "not_submitted" or r.exam_mark is None:
+            if r.status == "awaiting_marking":
+                pass  # white — no highlight
+            elif r.status == "not_submitted" or r.exam_mark is None:
                 gr_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
             elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
                 gr_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
