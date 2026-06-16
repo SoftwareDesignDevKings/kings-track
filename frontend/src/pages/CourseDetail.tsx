@@ -16,6 +16,7 @@ import EngagementTable from '../components/EngagementTable'
 import EngagementTimelineChart from '../components/charts/EngagementTimelineChart'
 import { downloadCsv } from '../lib/downloadCsv'
 import AssignmentTrackingTab from '../components/AssignmentTrackingTab'
+import { getCourseGroupCode } from '../utils/courseGrouping'
 
 type TabId = 'activities' | 'engagement' | 'gradeo' | 'topic_bands' | 'edstem' | 'tracking'
 
@@ -182,11 +183,29 @@ export default function CourseDetail() {
       <main className="mx-auto flex min-h-0 w-full max-w-screen-2xl flex-1 flex-col px-4 py-6 sm:px-6">
         <nav className="mb-5 flex shrink-0 items-center gap-2 text-sm text-slate-400">
           <Link to="/" className="hover:text-brand-600 transition-colors">Courses</Link>
+          {(() => {
+            const groupCode = matrix?.course_code ? getCourseGroupCode(matrix.course_code) : null
+            const classCode = matrix?.course_code || matrix?.course_name || 'Class'
+            // Show group breadcrumb level if the group code differs from the class code
+            if (!isLoading && groupCode && groupCode !== classCode?.toUpperCase()) {
+              return (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  <Link to={`/courses/group/${groupCode}`} className="hover:text-brand-600 transition-colors">
+                    {groupCode}
+                  </Link>
+                </>
+              )
+            }
+            return null
+          })()}
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
           <span className="text-slate-600">
-            {isLoading ? '...' : (matrix?.course_code || matrix?.course_name || 'Course')}
+            {isLoading ? '...' : (matrix?.course_code || matrix?.course_name || 'Class')}
           </span>
         </nav>
 

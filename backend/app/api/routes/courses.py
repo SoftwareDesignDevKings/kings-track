@@ -17,6 +17,32 @@ def _natural_sort_key(s: str) -> list:
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', s)]
 
 
+def _get_course_group_code(course_code: str | None) -> str:
+    """Derive course group from code: '11SENX' → '11SEN', '11ENC1' → '11ENC'."""
+    if not course_code:
+        return course_code or ""
+    code = course_code.strip().upper()
+    m = re.match(r'^(\d{1,2}[A-Z]{2,})[A-Z\d]$', code)
+    return m.group(1) if m else code
+
+
+def _common_name_prefix(names: list[str]) -> str:
+    """Find the longest common prefix of a list of strings, trimmed to a word boundary."""
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    prefix = names[0]
+    for name in names[1:]:
+        while not name.startswith(prefix):
+            prefix = prefix[:-1]
+            if not prefix:
+                return ""
+    # Trim to last word boundary (avoid cutting mid-word)
+    prefix = prefix.rstrip()
+    return prefix
+
+
 def _to_iso(value):
     if value is None:
         return None
@@ -104,10 +130,11 @@ def _topic_confidence(available_marks: float, exam_count: int) -> str:
     return "low"
 
 
-@router.get("")
-async def list_courses(db: AsyncSession = Depends(get_db)):
-    """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
+async def _get_course_list(db: AsyncSession) -> list[dict]:
+    """Shared helper: fetch all whitelisted courses with summary stats."""
     whitelist = await get_effective_whitelist(db)
+    if not whitelist:
+        return []
     now = datetime.now(timezone.utc)
     due_now_cutoff = _start_of_tomorrow_utc(now)
     base_query = """
@@ -148,21 +175,12 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
               AND a.due_at IS NOT NULL
               AND a.due_at < :due_now_cutoff
         ) AS due_now_metrics ON true
+        WHERE c.id IN :ids
+        GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at, c.term_start_at, c.term_end_at
+        ORDER BY c.name
     """
-    if not whitelist:
-        return []
-
-    statement = text(
-        base_query
-        + """
-            WHERE c.id IN :ids
-            GROUP BY c.id, c.name, c.course_code, c.workflow_state, c.synced_at, c.term_start_at, c.term_end_at
-            ORDER BY c.name
-        """
-    ).bindparams(bindparam("ids", expanding=True))
+    statement = text(base_query).bindparams(bindparam("ids", expanding=True))
     result = await db.execute(statement, {"ids": whitelist, "due_now_cutoff": due_now_cutoff, "now": now})
-    rows = result.fetchall()
-
     return [
         {
             "id": row[0],
@@ -178,8 +196,79 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
             "avg_on_time_rate": float(row[10]) if row[10] is not None else None,
             "avg_current_score": float(row[11]) if row[11] is not None else None,
         }
-        for row in rows
+        for row in result.fetchall()
     ]
+
+
+@router.get("")
+async def list_courses(db: AsyncSession = Depends(get_db)):
+    """List synced courses with summary stats. Respects DB whitelist, falls back to env var."""
+    return await _get_course_list(db)
+
+
+@router.get("/groups")
+async def list_course_groups(db: AsyncSession = Depends(get_db)):
+    """List courses grouped by course group code with aggregate metrics."""
+    courses = await _get_course_list(db)
+
+    groups: dict[str, list[dict]] = {}
+    for c in courses:
+        group_code = _get_course_group_code(c["course_code"])
+        groups.setdefault(group_code, []).append(c)
+
+    result = []
+    for group_code, classes in sorted(groups.items(), key=lambda x: _natural_sort_key(x[0])):
+        total_students = sum(c["student_count"] for c in classes)
+
+        # Student-count-weighted averages
+        def _weighted_avg(key: str) -> float | None:
+            pairs = [(c[key], c["student_count"]) for c in classes if c[key] is not None]
+            if not pairs:
+                return None
+            total_weight = sum(w for _, w in pairs)
+            if total_weight == 0:
+                return None
+            return round(sum(v * w for v, w in pairs) / total_weight, 3)
+
+        # Display name: common prefix of all class names
+        names = [c["name"] for c in classes]
+        display_name = _common_name_prefix(names) if len(names) > 1 else names[0]
+        # Strip trailing punctuation/whitespace from common prefix
+        display_name = display_name.rstrip(" -–—:")
+
+        is_archived = all(c["is_archived"] for c in classes)
+        synced_dates = [c["last_synced"] for c in classes if c["last_synced"]]
+        last_synced = max(synced_dates) if synced_dates else None
+
+        sorted_classes = sorted(classes, key=lambda c: _natural_sort_key(c["course_code"] or ""))
+
+        result.append({
+            "group_code": group_code,
+            "display_name": display_name,
+            "is_archived": is_archived,
+            "class_count": len(classes),
+            "total_students": total_students,
+            "avg_completion_rate": _weighted_avg("avg_completion_rate"),
+            "avg_on_time_rate": _weighted_avg("avg_on_time_rate"),
+            "avg_current_score": _weighted_avg("avg_current_score"),
+            "last_synced": last_synced,
+            "classes": [
+                {
+                    "id": c["id"],
+                    "name": c["name"],
+                    "course_code": c["course_code"],
+                    "student_count": c["student_count"],
+                    "avg_completion_rate": c["avg_completion_rate"],
+                    "avg_on_time_rate": c["avg_on_time_rate"],
+                    "avg_current_score": c["avg_current_score"],
+                    "is_archived": c["is_archived"],
+                    "last_synced": c["last_synced"],
+                }
+                for c in sorted_classes
+            ],
+        })
+
+    return result
 
 
 @router.get("/{course_id}")
