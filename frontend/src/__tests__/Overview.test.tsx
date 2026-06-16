@@ -5,7 +5,7 @@ import Overview from '../pages/Overview'
 import { renderWithProviders } from './utils'
 
 vi.mock('../services/api', () => ({
-  useCourses: vi.fn(),
+  useCourseGroups: vi.fn(),
   useHealth: vi.fn(),
   useSyncStatus: vi.fn(() => ({ data: { is_running: false, logs: [] } })),
   useTriggerSync: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
@@ -13,21 +13,42 @@ vi.mock('../services/api', () => ({
   useCanvasHealth: vi.fn(() => ({ data: undefined })),
 }))
 
-import { useCourses, useHealth } from '../services/api'
+import { useCourseGroups, useHealth } from '../services/api'
 
-const mockCourse = {
-  id: 1,
-  name: 'Software Engineering 2026',
-  course_code: '11SENX',
-  workflow_state: 'available',
-  last_synced: '2026-03-25T10:00:00Z',
-  term_start_at: '2026-01-01T00:00:00Z',
-  term_end_at: '2026-12-31T23:59:59Z',
+const mockGroup = {
+  group_code: '11SEN',
+  display_name: 'Year 11 Software Design & Engineering',
   is_archived: false,
-  student_count: 25,
+  class_count: 2,
+  total_students: 30,
   avg_completion_rate: 0.8,
   avg_on_time_rate: 0.9,
   avg_current_score: 85,
+  last_synced: '2026-03-25T10:00:00Z',
+  classes: [
+    {
+      id: 1,
+      name: 'Year 11 Software Design & Engineering X',
+      course_code: '11SENX',
+      student_count: 15,
+      avg_completion_rate: 0.82,
+      avg_on_time_rate: 0.91,
+      avg_current_score: 86,
+      is_archived: false,
+      last_synced: '2026-03-25T10:00:00Z',
+    },
+    {
+      id: 2,
+      name: 'Year 11 Software Design & Engineering Y',
+      course_code: '11SENY',
+      student_count: 15,
+      avg_completion_rate: 0.78,
+      avg_on_time_rate: 0.89,
+      avg_current_score: 84,
+      is_archived: false,
+      last_synced: '2026-03-25T09:00:00Z',
+    },
+  ],
 }
 
 beforeEach(() => {
@@ -37,57 +58,59 @@ beforeEach(() => {
 describe('Overview', () => {
   it('shows SetupBanner when canvas_configured is false', () => {
     vi.mocked(useHealth).mockReturnValue({ data: { canvas_configured: false, status: 'ok', integrations: [] } } as any)
-    vi.mocked(useCourses).mockReturnValue({ data: [], isLoading: false, error: null } as any)
+    vi.mocked(useCourseGroups).mockReturnValue({ data: [], isLoading: false, error: null } as any)
     renderWithProviders(<Overview />)
     expect(screen.getByText(/Canvas API not configured/i)).toBeInTheDocument()
   })
 
   it('does not show SetupBanner when canvas_configured is true', () => {
     vi.mocked(useHealth).mockReturnValue({ data: { canvas_configured: true, status: 'ok', integrations: [] } } as any)
-    vi.mocked(useCourses).mockReturnValue({ data: [], isLoading: false, error: null } as any)
+    vi.mocked(useCourseGroups).mockReturnValue({ data: [], isLoading: false, error: null } as any)
     renderWithProviders(<Overview />)
     expect(screen.queryByText(/Canvas API not configured/i)).not.toBeInTheDocument()
   })
 
   it('renders loading skeletons when isLoading is true', () => {
     vi.mocked(useHealth).mockReturnValue({ data: undefined } as any)
-    vi.mocked(useCourses).mockReturnValue({ data: undefined, isLoading: true, error: null } as any)
+    vi.mocked(useCourseGroups).mockReturnValue({ data: undefined, isLoading: true, error: null } as any)
     const { container } = renderWithProviders(<Overview />)
     const skeletons = container.querySelectorAll('.animate-pulse')
     expect(skeletons.length).toBeGreaterThan(0)
   })
 
-  it('renders CourseCards when courses are loaded', () => {
+  it('renders CourseGroupCards when groups are loaded', () => {
     vi.mocked(useHealth).mockReturnValue({ data: { canvas_configured: true, status: 'ok', integrations: [] } } as any)
-    vi.mocked(useCourses).mockReturnValue({
-      data: [mockCourse, { ...mockCourse, id: 2, name: 'SE Year 12' }],
+    vi.mocked(useCourseGroups).mockReturnValue({
+      data: [
+        mockGroup,
+        { ...mockGroup, group_code: '11ENC', display_name: 'Year 11 Enterprise Computing', classes: [{ ...mockGroup.classes[0], id: 3 }], class_count: 1 },
+      ],
       isLoading: false,
       error: null,
     } as any)
     renderWithProviders(<Overview />)
-    expect(screen.getByText('Software Engineering 2026')).toBeInTheDocument()
-    expect(screen.getByText('SE Year 12')).toBeInTheDocument()
+    expect(screen.getByText('Year 11 Software Design & Engineering')).toBeInTheDocument()
+    expect(screen.getByText('Year 11 Enterprise Computing')).toBeInTheDocument()
   })
 
-  it('does not show Archived when no courses are archived', () => {
+  it('does not show Archived when no groups are archived', () => {
     vi.mocked(useHealth).mockReturnValue({ data: { canvas_configured: true, status: 'ok', integrations: [] } } as any)
-    vi.mocked(useCourses).mockReturnValue({
-      data: [mockCourse],
+    vi.mocked(useCourseGroups).mockReturnValue({
+      data: [mockGroup],
       isLoading: false,
       error: null,
     } as any)
     renderWithProviders(<Overview />)
     expect(screen.queryByRole('heading', { name: 'Archived' })).not.toBeInTheDocument()
-    expect(screen.getByText('1 course synced')).toBeInTheDocument()
   })
 
-  it('shows archived courses below current courses and expands the section', async () => {
+  it('shows archived groups below current groups and expands the section', async () => {
     const user = userEvent.setup()
     vi.mocked(useHealth).mockReturnValue({ data: { canvas_configured: true, status: 'ok', integrations: [] } } as any)
-    vi.mocked(useCourses).mockReturnValue({
+    vi.mocked(useCourseGroups).mockReturnValue({
       data: [
-        mockCourse,
-        { ...mockCourse, id: 2, name: 'Ancient History 2025', is_archived: true },
+        mockGroup,
+        { ...mockGroup, group_code: '10HIS', display_name: 'Ancient History 2025', is_archived: true, classes: [{ ...mockGroup.classes[0], id: 4, is_archived: true }], class_count: 1 },
       ],
       isLoading: false,
       error: null,
@@ -95,7 +118,7 @@ describe('Overview', () => {
 
     renderWithProviders(<Overview />)
 
-    expect(screen.getByText('Software Engineering 2026')).toBeInTheDocument()
+    expect(screen.getByText('Year 11 Software Design & Engineering')).toBeInTheDocument()
     expect(screen.getByText('1 current, 1 archived')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Archived' })).toBeInTheDocument()
     expect(screen.queryByText('Ancient History 2025')).not.toBeInTheDocument()
@@ -111,7 +134,7 @@ describe('Overview', () => {
 
   it('shows error message when API fails', () => {
     vi.mocked(useHealth).mockReturnValue({ data: undefined } as any)
-    vi.mocked(useCourses).mockReturnValue({
+    vi.mocked(useCourseGroups).mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error('Network error'),

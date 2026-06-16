@@ -77,7 +77,9 @@ describe('CourseDetail', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />)
     expect(screen.getByText('Software Engineering 2026')).toBeInTheDocument()
-    expect(screen.getAllByText('11SENX')).toHaveLength(1)
+    expect(screen.getByText('11SENX')).toBeInTheDocument()
+    // Group code should appear in breadcrumb
+    expect(screen.getByText('11SEN')).toBeInTheDocument()
   })
 
   it('shows student and assignment counts', () => {
