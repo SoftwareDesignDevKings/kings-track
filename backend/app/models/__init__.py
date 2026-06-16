@@ -37,6 +37,7 @@ from app.models.canvas_course_activity import CanvasCourseActivity
 from app.models.rubric_criterion import RubricCriterion
 from app.models.tracking_snapshot import TrackingSnapshot
 from app.models.tracking_score import TrackingScore
+from app.models.tracking_score_event import TrackingScoreEvent
 
 __all__ = [
     "Base",
@@ -78,4 +79,5 @@ __all__ = [
     "RubricCriterion",
     "TrackingSnapshot",
     "TrackingScore",
+    "TrackingScoreEvent",
 ]

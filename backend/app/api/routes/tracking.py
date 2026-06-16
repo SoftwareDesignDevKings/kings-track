@@ -119,6 +119,10 @@ class SaveScoresRequest(BaseModel):
     scores: list[ScoreEntry]
 
 
+def _normalize_comment(comment: str | None) -> str | None:
+    return comment.strip() if comment and comment.strip() else None
+
+
 @router.post("/{assignment_id}/scores")
 async def save_scores(
     course_id: int,
@@ -137,10 +141,10 @@ async def save_scores(
     )
     draft = draft_row.fetchone()
 
+    now = datetime.now(timezone.utc)
     if draft:
         snapshot_id = draft[0]
     else:
-        now = datetime.now(timezone.utc)
         result = await db.execute(
             text("""
                 INSERT INTO tracking_snapshots (assignment_id, created_by_email, created_at)
@@ -152,7 +156,63 @@ async def save_scores(
         snapshot_id = result.fetchone()[0]
 
     for entry in body.scores:
-        comment = entry.comment.strip() if entry.comment and entry.comment.strip() else None
+        comment = _normalize_comment(entry.comment)
+        existing_row = await db.execute(
+            text("""
+                SELECT score, comment
+                FROM tracking_scores
+                WHERE snapshot_id = :sid AND user_id = :uid AND rubric_criterion_id = :cid
+            """),
+            {"sid": snapshot_id, "uid": entry.user_id, "cid": entry.criterion_id},
+        )
+        existing = existing_row.fetchone()
+        previous_score = existing[0] if existing else None
+        previous_comment = existing[1] if existing else None
+
+        if previous_score == entry.score and previous_comment == comment:
+            continue
+
+        await db.execute(
+            text("""
+                INSERT INTO tracking_score_events (
+                    assignment_id,
+                    snapshot_id,
+                    user_id,
+                    rubric_criterion_id,
+                    previous_score,
+                    previous_comment,
+                    new_score,
+                    new_comment,
+                    changed_by_email,
+                    changed_at
+                )
+                VALUES (
+                    :assignment_id,
+                    :snapshot_id,
+                    :user_id,
+                    :rubric_criterion_id,
+                    :previous_score,
+                    :previous_comment,
+                    :new_score,
+                    :new_comment,
+                    :changed_by_email,
+                    :changed_at
+                )
+            """),
+            {
+                "assignment_id": assignment_id,
+                "snapshot_id": snapshot_id,
+                "user_id": entry.user_id,
+                "rubric_criterion_id": entry.criterion_id,
+                "previous_score": previous_score,
+                "previous_comment": previous_comment,
+                "new_score": entry.score,
+                "new_comment": comment,
+                "changed_by_email": user["email"],
+                "changed_at": now,
+            },
+        )
+
         # A cell with neither a score nor a comment is empty — remove the row entirely.
         if entry.score is None and comment is None:
             await db.execute(
