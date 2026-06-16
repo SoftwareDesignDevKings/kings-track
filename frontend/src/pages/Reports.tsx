@@ -97,6 +97,98 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
   )
 }
 
+const CONCERN_TABS = ['overall', 'canvas', 'gradeo'] as const
+type ConcernTab = typeof CONCERN_TABS[number]
+
+const TAB_DESCRIPTIONS: Record<ConcernTab, string> = {
+  overall: 'Students flagged as moderate or high concern based on attendance, completion rate, and missing assignment thresholds.',
+  canvas: 'Students with missing or not-submitted Canvas assignments due within the last 14 days.',
+  gradeo: 'Students with flagged Gradeo results (not submitted, awaiting marking, or low scores).',
+}
+
+function ConcernReportCard({ courseId, courseCode }: { courseId: number; courseCode: string }) {
+  const [tab, setTab] = useState<ConcernTab>('overall')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const tabs = [...CONCERN_TABS]
+
+  const path = `/reports/courses/${courseId}/concern-report?tab=${tab}`
+  const fallbackName = `${courseCode}-concern-${tab}`
+
+  async function handleDownload(fmt: 'csv' | 'pdf') {
+    setBusy(fmt)
+    setError(null)
+    try {
+      await downloadFile(`${path}&format=${fmt}`, `${fallbackName}.${fmt}`)
+    } catch (e) {
+      if (e instanceof Error) setError(extractApiDetail(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handlePreview() {
+    setBusy('preview')
+    setError(null)
+    try {
+      await previewPdf(path, `Students of Concern — ${tab.charAt(0).toUpperCase() + tab.slice(1)}`)
+    } catch (e) {
+      if (e instanceof Error) setError(extractApiDetail(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const btnClass = 'inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col">
+      <h3 className="text-sm font-semibold text-slate-800">Students of Concern</h3>
+      {/* Tab bar */}
+      <div className="mt-2 flex gap-1 flex-wrap">
+        {tabs.map(t => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => { setTab(t); setError(null) }}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+              tab === t
+                ? 'bg-indigo-100 text-indigo-700'
+                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+            }`}
+          >
+            {t.charAt(0).toUpperCase() + t.slice(1)}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-slate-500 mt-2 flex-1">{TAB_DESCRIPTIONS[tab]}</p>
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <button type="button" onClick={handlePreview} disabled={!!busy} className={btnClass}>
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          {busy === 'preview' ? 'Opening\u2026' : 'Preview'}
+        </button>
+        <button type="button" onClick={() => handleDownload('csv')} disabled={!!busy} className={btnClass}>
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+          </svg>
+          {busy === 'csv' ? 'Downloading\u2026' : 'CSV'}
+        </button>
+        <button type="button" onClick={() => handleDownload('pdf')} disabled={!!busy} className={btnClass}>
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+          </svg>
+          {busy === 'pdf' ? 'Downloading\u2026' : 'PDF'}
+        </button>
+        {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
+      </div>
+    </div>
+  )
+}
+
 export default function Reports() {
   const { data: courses } = useCourses()
   const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null)
@@ -121,10 +213,6 @@ export default function Reports() {
   const courseCode = selectedCourse
     ? (selectedCourse.course_code ?? '').replace(/\s+/g, '-') || String(selectedCourse.id)
     : ''
-  const isEncCourse = selectedCourse?.course_code
-    ? /ENC/i.test(selectedCourse.course_code)
-    : false
-
   function handlePdfCourseChange(id: number | null) {
     setPdfCourseId(id)
     setPdfStudentId(null)
@@ -224,21 +312,16 @@ export default function Reports() {
                 path={`/reports/courses/${selectedCourseId}/gradeo-report`}
                 fallbackName={`${courseCode}-gradeo-report`}
               />
-              {!isEncCourse && (
-                <ReportCard
-                  title="EdStem Progress"
-                  description="EdStem lesson completion for each student. One column per lesson showing status (completed, in_progress, not_started) with student name, email, and SIS ID."
-                  path={`/reports/courses/${selectedCourseId}/edstem-report`}
-                  fallbackName={`${courseCode}-edstem-report`}
-                  formats={['csv']}
-                />
-              )}
               <ReportCard
                 title="Whole-Class Cycle Update"
-                description="One PDF per student in this course, combined into a single document with page breaks. Each page shows the student's current cycle progress, scores, missing work, Gradeo results, and EdStem completion."
+                description="One PDF per student in this course, combined into a single document with page breaks. Each page shows the student's current cycle progress, scores, missing work, and Gradeo results."
                 path={`/reports/courses/${selectedCourseId}/class-cycle-pdf`}
                 fallbackName={`${courseCode}-class-cycle-update`}
                 formats={['pdf']}
+              />
+              <ConcernReportCard
+                courseId={selectedCourseId}
+                courseCode={courseCode}
               />
             </div>
           ) : (
@@ -316,7 +399,7 @@ export default function Reports() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <ReportCard
                 title={pdfCycleNum ? `Cycle ${pdfCycleNum} Update` : 'Current Cycle Update'}
-                description="PDF for the selected teaching cycle. Shows completion metrics (completed, missing, avg score), assignment table with due dates, scores, and late flags, Gradeo quiz results, EdStem lesson completion, and other units overview. Suitable for sharing with parents."
+                description="PDF for the selected teaching cycle. Shows completion metrics (completed, missing, avg score), assignment table with due dates, scores, and late flags, Gradeo quiz results, and other units overview. Suitable for sharing with parents."
                 path={`/reports/students/${pdfStudentId}/cycle-update-pdf?course_id=${pdfCourseId}${cyclePart}`}
                 fallbackName="cycle-update"
                 disabled={!pdfCourseId}
@@ -326,7 +409,7 @@ export default function Reports() {
               <ReportCard
                 title="Missing Work Report"
                 description={pdfCourseId
-                  ? "PDF listing outstanding work for this student in the selected course. Includes missing Canvas assignments, incomplete EdStem lessons, flagged Gradeo assessments, and assessment tracking."
+                  ? "PDF listing outstanding work for this student in the selected course. Includes missing Canvas assignments, flagged Gradeo assessments, and assessment tracking."
                   : "PDF listing all outstanding work for this student across every enrolled course. Select a course above to filter to a single course."
                 }
                 path={pdfCourseId
@@ -338,7 +421,7 @@ export default function Reports() {
               />
               <ReportCard
                 title="Complete Student Report"
-                description="Full progress report for this student in the selected course. Includes all assignment scores, assessment tracking, Gradeo results, EdStem progress, and attendance records."
+                description="Full progress report for this student in the selected course. Includes all assignment scores, assessment tracking, Gradeo results, and attendance records."
                 path={`/reports/students/${pdfStudentId}/student-report-pdf?course_id=${pdfCourseId}`}
                 fallbackName="student-report"
                 disabled={!pdfCourseId}

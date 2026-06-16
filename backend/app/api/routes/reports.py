@@ -1625,7 +1625,7 @@ async def _build_cycle_update_elements(
         els.append(Paragraph("Gradeo Quiz Results", styles["section"]))
         g_data = [[PH("Exam"), PH("Score"), PH("Class Avg"), PH("Topics")]]
         g_cmds = list(_base_table_style())
-        for ge in unmatched_gradeo:
+        for i, ge in enumerate(unmatched_gradeo, start=1):
             mark_str = (
                 f"{ge.exam_mark}/{ge.marks_available}"
                 if ge.exam_mark is not None else "—"
@@ -1633,6 +1633,12 @@ async def _build_cycle_update_elements(
             avg_str = str(round(ge.class_average, 1)) if ge.class_average is not None else "—"
             topics = ge.topics or ""
             g_data.append([P(ge.exam_name), P(mark_str), P(avg_str), P(topics)])
+            if ge.status == "not_submitted" or ge.exam_mark is None:
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+            elif ge.status == "scored" and ge.marks_available and ge.marks_available > 0 and ge.exam_mark / ge.marks_available < 0.5:
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+            elif ge.status == "scored":
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
         g_widths = [avail * 0.30, avail * 0.18, avail * 0.18, avail * 0.34]
         gt = Table(g_data, colWidths=g_widths, repeatRows=1)
         gt.setStyle(TableStyle(g_cmds))
@@ -1669,16 +1675,6 @@ async def _build_cycle_update_elements(
         edstem_pct = round(edstem_completed / edstem_total * 100) if edstem_total else 0
 
         els.append(Paragraph("EdStem Lessons", styles["section"]))
-        edstem_metrics = Table(
-            [[
-                _metric_box(f"{edstem_completed}/{edstem_total}", "Completed", styles),
-                _metric_box(f"{edstem_pct}%", "Completion", styles),
-            ]],
-            hAlign="LEFT",
-        )
-        edstem_metrics.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        els.append(edstem_metrics)
-        els.append(Spacer(1, 6))
 
     # ── Missing Work (all past-due, unsubmitted/ungraded assignments across all groups) ──
     now_naive = now.replace(tzinfo=None)
@@ -1816,6 +1812,367 @@ async def export_class_cycle_pdf(
 
 
 # ---------------------------------------------------------------------------
+# 10c. Students of Concern Report (course-level, tabbed)
+# ---------------------------------------------------------------------------
+
+@router.get("/courses/{course_id}/concern-report")
+async def export_concern_report(
+    course_id: int,
+    tab: str = Query("overall"),
+    format: str = Query("csv"),
+    preview: int = Query(0),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Course-level students-of-concern report with platform tabs.
+
+    Tabs:
+    - overall  – students flagged as concern (low attendance/completion/high missing)
+    - canvas   – students with missing Canvas assignments (last 14 days)
+    - edstem   – students with incomplete EdStem lessons (not available for ENC courses)
+    - gradeo   – students with flagged Gradeo results
+    """
+    if tab not in ("overall", "canvas", "edstem", "gradeo"):
+        raise HTTPException(422, f"Invalid tab: {tab}. Must be overall, canvas, edstem, or gradeo.")
+
+    # ── Validate course ──
+    course_result = await db.execute(
+        text("SELECT id, name, course_code FROM courses WHERE id = :id"),
+        {"id": course_id},
+    )
+    course = course_result.fetchone()
+    if not course:
+        raise HTTPException(404, "Course not found")
+
+    is_enc = "ENC" in (course.course_code or "").upper()
+    if tab == "edstem" and is_enc:
+        raise HTTPException(404, "EdStem reports are not available for ENC courses")
+
+    # ── Enrolled students ──
+    roster_result = await db.execute(
+        text("""
+            SELECT u.id, u.name, u.email, u.sis_id, u.sortable_name
+            FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = :cid AND e.role = 'StudentEnrollment'
+              AND e.enrollment_state = 'active'
+            ORDER BY u.sortable_name, u.name
+        """),
+        {"cid": course_id},
+    )
+    roster = roster_result.fetchall()
+    if not roster:
+        raise HTTPException(404, "No students enrolled in this course")
+
+    code = await _get_course_code(db, course_id)
+    tab_label = {"overall": "Overall", "canvas": "Canvas", "edstem": "EdStem", "gradeo": "Gradeo"}[tab]
+
+    # ── Tab: Overall ──
+    if tab == "overall":
+        headers, rows, row_levels = await _concern_tab_overall(db, course_id, roster)
+
+    # ── Tab: Canvas ──
+    elif tab == "canvas":
+        headers, rows, row_levels = await _concern_tab_canvas(db, course_id, roster)
+
+    # ── Tab: EdStem ──
+    elif tab == "edstem":
+        headers, rows, row_levels = await _concern_tab_edstem(db, course_id, roster)
+
+    # ── Tab: Gradeo ──
+    else:
+        headers, rows, row_levels = await _concern_tab_gradeo(db, course_id, roster)
+
+    title = f"Students of Concern — {tab_label}"
+    filename = f"{code}-concern-{tab}-{date.today().isoformat()}"
+
+    if format == "pdf" or preview:
+        return _build_concern_pdf(rows, headers, row_levels, title, f"{filename}.pdf", inline=bool(preview))
+    return _csv_response(rows, headers, f"{filename}.csv")
+
+
+async def _concern_tab_overall(db: AsyncSession, course_id: int, roster):
+    """Overall tab: students flagged as concern for this course."""
+    from app.attendance.service import _evaluate_concern
+
+    user_ids = [r.id for r in roster]
+    user_map = {r.id: r for r in roster}
+
+    # Student metrics for this course
+    sm_result = await db.execute(
+        text("""
+            SELECT user_id, completion_rate, on_time_rate, current_score
+            FROM student_metrics
+            WHERE course_id = :cid AND user_id = ANY(:uids)
+        """),
+        {"cid": course_id, "uids": user_ids},
+    )
+    metrics_map = {r.user_id: r for r in sm_result.fetchall()}
+
+    # Submission stats (total, missing) per student
+    sub_result = await db.execute(
+        text("""
+            SELECT e.user_id,
+                   COUNT(a.id) AS total,
+                   COUNT(a.id) FILTER (WHERE s.id IS NULL OR s.missing IS TRUE) AS missing
+            FROM enrollments e
+            CROSS JOIN assignments a
+            LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = e.user_id
+            WHERE e.course_id = :cid AND e.user_id = ANY(:uids)
+              AND a.course_id = :cid AND a.workflow_state = 'published'
+            GROUP BY e.user_id
+        """),
+        {"cid": course_id, "uids": user_ids},
+    )
+    sub_map = {r.user_id: {"total": r.total, "missing": r.missing} for r in sub_result.fetchall()}
+
+    # Attendance rate per student for this course
+    att_result = await db.execute(
+        text("""
+            SELECT ar.user_id,
+                   COUNT(*) FILTER (WHERE ar.status IN ('present', 'late')) AS attended,
+                   COUNT(*) AS total
+            FROM attendance_records ar
+            JOIN meetings m ON m.id = ar.meeting_id
+            WHERE m.course_id = :cid AND ar.user_id = ANY(:uids)
+            GROUP BY ar.user_id
+        """),
+        {"cid": course_id, "uids": user_ids},
+    )
+    att_map = {}
+    for r in att_result.fetchall():
+        att_map[r.user_id] = round(r.attended / r.total * 100, 1) if r.total else None
+
+    headers = ["Name", "Email", "SIS ID", "Concern Level", "Reasons",
+               "Completion %", "On-Time %", "Attendance %"]
+    rows = []
+    row_levels = []
+
+    for uid in user_ids:
+        u = user_map[uid]
+        m = metrics_map.get(uid)
+        completion = m.completion_rate if m else None
+        on_time = m.on_time_rate if m else None
+        att_rate = att_map.get(uid)
+        sub_stats = {course_id: sub_map.get(uid, {"total": 0, "missing": 0})}
+
+        concern = _evaluate_concern(
+            avg_completion=round(completion * 100, 1) if completion is not None else None,
+            avg_on_time=round(on_time * 100, 1) if on_time is not None else None,
+            attendance_rate=att_rate,
+            submission_stats=sub_stats,
+        )
+        if not concern["is_concern"]:
+            continue
+
+        rows.append([
+            u.name,
+            u.email or "",
+            u.sis_id or "",
+            concern["level"].title(),
+            "; ".join(concern["reasons"]),
+            _fmt_pct(completion),
+            _fmt_pct(on_time),
+            f"{att_rate}%" if att_rate is not None else "",
+        ])
+        row_levels.append("high" if concern["level"] == "high" else "moderate")
+
+    return headers, rows, row_levels
+
+
+async def _concern_tab_canvas(db: AsyncSession, course_id: int, roster):
+    """Canvas tab: students with missing/not-submitted assignments (last 14 days)."""
+    user_ids = [r.id for r in roster]
+    user_map = {r.id: r for r in roster}
+
+    result = await db.execute(
+        text("""
+            SELECT e.user_id, a.name AS assignment_name, a.due_at,
+                   s.workflow_state, s.missing
+            FROM enrollments e
+            CROSS JOIN assignments a
+            LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = e.user_id
+            WHERE e.course_id = :cid AND e.user_id = ANY(:uids)
+              AND a.course_id = :cid AND a.workflow_state = 'published'
+              AND a.due_at IS NOT NULL
+              AND a.due_at >= NOW() - INTERVAL '14 days'
+              AND a.due_at <= NOW() + INTERVAL '1 day'
+              AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
+            ORDER BY e.user_id, a.due_at
+        """),
+        {"cid": course_id, "uids": user_ids},
+    )
+    missing_rows = result.fetchall()
+
+    headers = ["Name", "Assignment", "Due Date", "Status"]
+    rows = []
+    row_levels = []
+
+    for r in missing_rows:
+        u = user_map.get(r.user_id)
+        if not u:
+            continue
+        due_str = r.due_at.strftime("%d %b %Y") if r.due_at else "—"
+        status = "Missing" if r.missing else "Not Submitted"
+        rows.append([u.name, r.assignment_name, due_str, status])
+        row_levels.append("high" if r.missing else "moderate")
+
+    return headers, rows, row_levels
+
+
+async def _concern_tab_edstem(db: AsyncSession, course_id: int, roster):
+    """EdStem tab: students with incomplete lessons."""
+    user_ids = [r.id for r in roster]
+    user_map = {r.id: r for r in roster}
+
+    result = await db.execute(
+        text("""
+            SELECT e.user_id,
+                   el.module_name, el.title AS lesson_title,
+                   COALESCE(elp.status, 'not_started') AS status
+            FROM enrollments e
+            CROSS JOIN edstem_course_mappings ecm
+            CROSS JOIN edstem_lessons el
+            LEFT JOIN edstem_lesson_progress elp
+                ON elp.edstem_lesson_id = el.id AND elp.user_id = e.user_id
+            WHERE e.course_id = :cid AND e.user_id = ANY(:uids)
+              AND ecm.canvas_course_id = :cid
+              AND el.edstem_course_id = ecm.edstem_course_id
+              AND (elp.status IS NULL OR elp.status != 'completed')
+            ORDER BY e.user_id, el.module_name, el.position
+        """),
+        {"cid": course_id, "uids": user_ids},
+    )
+    incomplete_rows = result.fetchall()
+
+    headers = ["Name", "Module", "Lesson", "Status"]
+    rows = []
+    row_levels = []
+
+    for r in incomplete_rows:
+        u = user_map.get(r.user_id)
+        if not u:
+            continue
+        rows.append([u.name, r.module_name or "—", r.lesson_title, _status_display(r.status)])
+        row_levels.append("high" if r.status == "not_started" else "moderate")
+
+    return headers, rows, row_levels
+
+
+async def _concern_tab_gradeo(db: AsyncSession, course_id: int, roster):
+    """Gradeo tab: students with flagged results (not submitted, awaiting, or low score)."""
+    user_ids = [r.id for r in roster]
+    user_map = {r.id: r for r in roster}
+
+    result = await db.execute(
+        text("""
+            SELECT DISTINCT ON (gar.user_id, gcea.exam_name)
+                   gar.user_id,
+                   gcea.exam_name, gcea.topics,
+                   gar.exam_mark, gar.marks_available, gar.status
+            FROM gradeo_assignment_results gar
+            JOIN gradeo_class_exam_assignments gcea
+                ON gcea.id = gar.gradeo_class_exam_assignment_id
+            JOIN gradeo_class_mappings gcm
+                ON gcm.gradeo_class_id = gcea.gradeo_class_id
+            WHERE gcm.canvas_course_id = :cid
+              AND gar.user_id = ANY(:uids)
+            ORDER BY gar.user_id, gcea.exam_name,
+                     CASE gar.status WHEN 'scored' THEN 2 WHEN 'awaiting_marking' THEN 1 ELSE 0 END DESC,
+                     gar.last_imported_at DESC NULLS LAST
+        """),
+        {"cid": course_id, "uids": user_ids},
+    )
+    all_rows = result.fetchall()
+
+    headers = ["Name", "Exam", "Score", "Status", "Topics"]
+    rows = []
+    row_levels = []
+
+    for r in all_rows:
+        is_flagged = (
+            r.exam_mark is None
+            or r.status == "not_submitted"
+            or (r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5)
+        )
+        if not is_flagged:
+            continue
+        u = user_map.get(r.user_id)
+        if not u:
+            continue
+        mark = f"{r.exam_mark}/{r.marks_available}" if r.exam_mark is not None else "—"
+        rows.append([u.name, r.exam_name, mark, r.status or "—", r.topics or ""])
+        if r.status == "not_submitted" or r.exam_mark is None:
+            row_levels.append("high")
+        else:
+            row_levels.append("moderate")
+
+    return headers, rows, row_levels
+
+
+def _build_concern_pdf(
+    rows: list[list[str]],
+    headers: list[str],
+    row_levels: list[str],
+    title: str,
+    filename: str,
+    inline: bool = False,
+) -> StreamingResponse:
+    """Render concern report as a styled PDF with color-coded rows."""
+    styles = _pdf_styles()
+    els: list = []
+
+    els.append(Paragraph(title, styles["title"]))
+    els.append(Paragraph(
+        f"{date.today().strftime('%d %B %Y')} &nbsp;|&nbsp; {len(rows)} records",
+        styles["subtitle"],
+    ))
+    els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
+
+    P = lambda t: _p(t, styles)
+    PH = lambda t: _p(t, styles, header=True)
+
+    table_data = [[PH(h) for h in headers]]
+    for row in rows:
+        table_data.append([P(str(cell)) for cell in row])
+
+    use_landscape = len(headers) > 5
+    page = landscape(A4) if use_landscape else A4
+    avail = page[0] - 30 * mm
+    col_widths = [avail / len(headers)] * len(headers)
+
+    cmds = list(_base_table_style())
+    for i, level in enumerate(row_levels, start=1):
+        if level == "high":
+            cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+        elif level == "moderate":
+            cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle(cmds))
+    els.append(t)
+
+    if not rows:
+        els.append(Spacer(1, 12))
+        els.append(Paragraph("No students of concern found for this tab.", styles["body_small"]))
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=page,
+        leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=15 * mm, bottomMargin=15 * mm,
+    )
+    doc.build(els)
+    buf.seek(0)
+    disposition = "inline" if inline else "attachment"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
 # 11. Overall Missing Report PDF
 # ---------------------------------------------------------------------------
 
@@ -1949,14 +2306,9 @@ async def export_missing_report_pdf(
         or (r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5)
     ]
 
-    # ── Assessment Tracking: rubric criteria with tracking scores ──
-    try:
-        tracking_rows = await _fetch_tracking_criteria_rows(db, user_id, enrolled_ids)
-    except Exception:
-        await db.rollback()
-        tracking_rows = []
-
-    tracking_count = sum(1 for r in tracking_rows if r.score is not None or r.comment)
+    # ── Assessment Tracking: disabled until data is fixed ──
+    tracking_rows = []
+    tracking_count = 0
 
     # ── Build PDF ──
     styles = _pdf_styles()
@@ -1977,24 +2329,6 @@ async def export_missing_report_pdf(
             styles["subtitle"],
         ))
     els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
-
-    # Summary metrics
-    metric_boxes = [
-        _metric_box(str(len(recent_canvas)), "Canvas Recent", styles),
-    ]
-    if edstem_enrolled:
-        metric_boxes.append(_metric_box(str(len(missing_edstem)), "EdStem Incomplete", styles))
-    metric_boxes.extend([
-        _metric_box(str(len(gradeo_flagged)), "Gradeo Flagged", styles),
-        _metric_box(str(tracking_count), "Tracking Items", styles),
-    ])
-    summary = Table(
-        [metric_boxes],
-        hAlign="LEFT",
-    )
-    summary.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    els.append(summary)
-    els.append(Spacer(1, 6))
 
     avail = A4[0] - 30 * mm
 
@@ -2083,7 +2417,6 @@ async def export_missing_report_pdf(
     if all_gradeo:
         g_data = [[PH("Course"), PH("Exam"), PH("Score"), PH("Status"), PH("Topics")]]
         g_cmds = list(_base_table_style())
-        flagged_set = set(id(r) for r in gradeo_flagged)
         for i, r in enumerate(all_gradeo, start=1):
             c_info = courses_map.get(r.course_id, {})
             c_label = c_info.get("code") or c_info.get("name") or str(r.course_id or 0)
@@ -2092,11 +2425,12 @@ async def export_missing_report_pdf(
                 if r.exam_mark is not None else "—"
             )
             g_data.append([P(c_label), P(r.exam_name), P(mark), P(r.status or "—"), P(r.topics or "")])
-            if id(r) in flagged_set:
-                if r.status == "not_submitted" or r.exam_mark is None:
-                    g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-                else:
-                    g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+            if r.status == "not_submitted" or r.exam_mark is None:
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+            elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+            elif r.status == "scored":
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
         g_widths = [avail * 0.14, avail * 0.25, avail * 0.14, avail * 0.18, avail * 0.29]
         gt = Table(g_data, colWidths=g_widths, repeatRows=1)
         gt.setStyle(TableStyle(g_cmds))
@@ -2107,46 +2441,7 @@ async def export_missing_report_pdf(
             styles["body_small"],
         ))
 
-    # ── Assessment Tracking — Current Tasks ──
-    els.append(Paragraph("Assessment Tracking — Current Tasks", styles["section"]))
-    if tracking_rows:
-        t_data = [[PH("Course"), PH("Assignment"), PH("Due Date"),
-                    PH("Criterion"), PH("Score"), PH("Comment")]]
-        t_cmds = list(_base_table_style())
-        for i, r in enumerate(tracking_rows, start=1):
-            c_info = courses_map.get(r.course_id, {})
-            c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
-            due_str = r.due_at.strftime("%d %b %Y") if r.due_at else "—"
-
-            if r.score is not None:
-                pts = int(r.criterion_points) if r.criterion_points and r.criterion_points == int(r.criterion_points) else r.criterion_points
-                score_str = f"{r.score}/{pts}" if pts else str(r.score)
-            else:
-                score_str = "—"
-
-            t_data.append([
-                P(c_label),
-                P(r.assignment_name),
-                P(due_str),
-                P(r.criterion_desc or "—"),
-                P(score_str),
-                P(r.comment or ""),
-            ])
-
-            if r.score is not None:
-                t_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            elif r.comment:
-                t_cmds.append(("BACKGROUND", (0, i), (-1, i), _BLUE_LIGHT))
-            else:
-                t_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-
-        t_widths = [avail * 0.10, avail * 0.22, avail * 0.11,
-                    avail * 0.25, avail * 0.08, avail * 0.24]
-        tt = Table(t_data, colWidths=t_widths, repeatRows=1)
-        tt.setStyle(TableStyle(t_cmds))
-        els.append(tt)
-    else:
-        els.append(Paragraph("No current assessment tracking items.", styles["body_small"]))
+    # ── Assessment Tracking — disabled until data is fixed ──
 
     # Build and return
     name_slug = re.sub(r"[^a-z0-9]+", "-", student.name.lower()).strip("-")
@@ -2251,19 +2546,6 @@ async def export_student_report_pdf(
     on_time = _fmt_pct(metrics_row.on_time_rate) if metrics_row else "—"
     score = _fmt_score(metrics_row.current_score) if metrics_row else "—"
 
-    overview = Table(
-        [[
-            _metric_box(completion, "Completion", styles),
-            _metric_box(on_time, "On-Time", styles),
-            _metric_box(score, "Score", styles),
-            _metric_box(f"{att_rate}%", "Attendance", styles),
-        ]],
-        hAlign="LEFT",
-    )
-    overview.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    els.append(overview)
-    els.append(Spacer(1, 8))
-
     # ── Section 3: Assignment Progress ──
     els.append(Paragraph("Assignment Progress", styles["section"]))
     asg_result = await db.execute(
@@ -2313,51 +2595,7 @@ async def export_student_report_pdf(
 
     els.append(Spacer(1, 8))
 
-    # ── Section 4: Assessment Tracking ──
-    els.append(Paragraph("Assessment Tracking", styles["section"]))
-    try:
-        tracking_rows = await _fetch_tracking_criteria_rows(db, user_id, [course_id])
-    except Exception:
-        await db.rollback()
-        tracking_rows = []
-
-    if tracking_rows:
-        tk_data = [[PH("Assignment"), PH("Due Date"), PH("Criterion"),
-                     PH("Score"), PH("Comment")]]
-        tk_cmds = list(_base_table_style())
-        for i, r in enumerate(tracking_rows, start=1):
-            due_str = r.due_at.strftime("%d %b %Y") if r.due_at else "—"
-
-            if r.score is not None:
-                pts = int(r.criterion_points) if r.criterion_points and r.criterion_points == int(r.criterion_points) else r.criterion_points
-                score_str = f"{r.score}/{pts}" if pts else str(r.score)
-            else:
-                score_str = "—"
-
-            tk_data.append([
-                P(r.assignment_name),
-                P(due_str),
-                P(r.criterion_desc or "—"),
-                P(score_str),
-                P(r.comment or ""),
-            ])
-
-            if r.score is not None:
-                tk_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            elif r.comment:
-                tk_cmds.append(("BACKGROUND", (0, i), (-1, i), _BLUE_LIGHT))
-            else:
-                tk_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-
-        tk_widths = [avail * 0.24, avail * 0.12, avail * 0.28,
-                     avail * 0.08, avail * 0.28]
-        tkt = Table(tk_data, colWidths=tk_widths, repeatRows=1)
-        tkt.setStyle(TableStyle(tk_cmds))
-        els.append(tkt)
-    else:
-        els.append(Paragraph("No current assessment tracking items.", styles["body_small"]))
-
-    els.append(Spacer(1, 8))
+    # ── Section 4: Assessment Tracking — disabled until data is fixed ──
 
     # ── Section 5: Gradeo Results (deduplicate by exam name, keep latest) ──
     els.append(Paragraph("Gradeo Results", styles["section"]))
@@ -2382,10 +2620,16 @@ async def export_student_report_pdf(
     if gradeo_rows:
         gr_data = [[PH("Exam"), PH("Mark"), PH("Class Avg"), PH("Topics"), PH("Status")]]
         gr_cmds = list(_base_table_style())
-        for r in gradeo_rows:
+        for i, r in enumerate(gradeo_rows, start=1):
             mark = f"{r.exam_mark}/{r.marks_available}" if r.exam_mark is not None else "—"
             avg = f"{r.class_average}" if r.class_average is not None else "—"
             gr_data.append([P(r.exam_name), P(mark), P(avg), P(r.topics or ""), P(r.status or "—")])
+            if r.status == "not_submitted" or r.exam_mark is None:
+                gr_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+            elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
+                gr_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+            elif r.status == "scored":
+                gr_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
         gr_widths = [avail * 0.25, avail * 0.12, avail * 0.12, avail * 0.33, avail * 0.18]
         grt = Table(gr_data, colWidths=gr_widths, repeatRows=1)
         grt.setStyle(TableStyle(gr_cmds))
@@ -2451,28 +2695,6 @@ async def export_student_report_pdf(
     att_rows = att_result.fetchall()
 
     if att_rows:
-        # Attendance summary counts
-        present = sum(1 for r in att_rows if r.status == "present")
-        late = sum(1 for r in att_rows if r.status == "late")
-        partial = sum(1 for r in att_rows if r.status == "partial")
-        absent = sum(1 for r in att_rows if r.status == "absent")
-        total = len(att_rows)
-        rate = round((present + late) / total * 100) if total else 0
-
-        att_summary = Table(
-            [[
-                _metric_box(str(present), "Present", styles),
-                _metric_box(str(late), "Late", styles),
-                _metric_box(str(partial), "Partial", styles),
-                _metric_box(str(absent), "Absent", styles),
-                _metric_box(f"{rate}%", "Rate", styles),
-            ]],
-            hAlign="LEFT",
-        )
-        att_summary.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        els.append(att_summary)
-        els.append(Spacer(1, 6))
-
         at_data = [[PH("Date"), PH("Meeting"), PH("Status")]]
         at_cmds = list(_base_table_style())
         for i, r in enumerate(att_rows, start=1):
