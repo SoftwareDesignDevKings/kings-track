@@ -18,29 +18,18 @@ def _natural_sort_key(s: str) -> list:
 
 
 def _get_course_group_code(course_code: str | None) -> str:
-    """Derive course group from code: '11SENX' → '11SEN', '11ENC1' → '11ENC'."""
+    """Derive course group from code: '11SENX_2026' → '11SEN', '11ENCD1_2026' → '11ENC'."""
     if not course_code:
         return course_code or ""
     code = course_code.strip().upper()
-    m = re.match(r'^(\d{1,2}[A-Z]{2,})[A-Z\d]$', code)
-    return m.group(1) if m else code
+    # Strip optional year suffix (e.g. _2026)
+    code = re.sub(r'_\d{4}$', '', code)
+    # Extract year prefix + 3-letter subject code, if there's a section suffix
+    m = re.match(r'^(\d{1,2}[A-Z]{3})', code)
+    if m and len(code) > len(m.group(1)):
+        return m.group(1)
+    return code
 
-
-def _common_name_prefix(names: list[str]) -> str:
-    """Find the longest common prefix of a list of strings, trimmed to a word boundary."""
-    if not names:
-        return ""
-    if len(names) == 1:
-        return names[0]
-    prefix = names[0]
-    for name in names[1:]:
-        while not name.startswith(prefix):
-            prefix = prefix[:-1]
-            if not prefix:
-                return ""
-    # Trim to last word boundary (avoid cutting mid-word)
-    prefix = prefix.rstrip()
-    return prefix
 
 
 def _to_iso(value):
@@ -230,11 +219,18 @@ async def list_course_groups(db: AsyncSession = Depends(get_db)):
                 return None
             return round(sum(v * w for v, w in pairs) / total_weight, 3)
 
-        # Display name: common prefix of all class names
-        names = [c["name"] for c in classes]
-        display_name = _common_name_prefix(names) if len(names) > 1 else names[0]
-        # Strip trailing punctuation/whitespace from common prefix
-        display_name = display_name.rstrip(" -–—:")
+        # Display name: strip course code prefix from each name and pick most common description
+        descriptions: list[str] = []
+        for c in classes:
+            parts = c["name"].split(None, 1)
+            descriptions.append(parts[1] if len(parts) > 1 else c["name"])
+        if len(descriptions) == 1:
+            display_name = descriptions[0]
+        else:
+            desc_freq: dict[str, int] = {}
+            for desc in descriptions:
+                desc_freq[desc] = desc_freq.get(desc, 0) + 1
+            display_name = max(desc_freq, key=lambda d: (desc_freq[d], len(d)))
 
         is_archived = all(c["is_archived"] for c in classes)
         synced_dates = [c["last_synced"] for c in classes if c["last_synced"]]
