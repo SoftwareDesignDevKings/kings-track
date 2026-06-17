@@ -1,4 +1,5 @@
 import type {
+  CourseGroupMatrix,
   CourseMatrix,
   EdStemMatrix,
   EdStemLessonStatus,
@@ -512,5 +513,19 @@ export function buildGradeoTopicBandsMatrixTableModel(topicBands: GradeoTopicBan
       { id: 'b2', label: 'B2 50+' },
       { id: 'b1', label: 'B1 <50' },
     ],
+  }
+}
+
+export function buildCourseGroupMatrixTableModel(matrix: CourseGroupMatrix): MatrixTableModel {
+  const base = buildCanvasMatrixTableModel(matrix)
+  const classCodeByStudentId = new Map<number, string | null>(
+    matrix.students.map(s => [s.id, s.class_code]),
+  )
+  return {
+    ...base,
+    rows: base.rows.map(row => ({
+      ...row,
+      subtitle: classCodeByStudentId.get(row.id as number)?.replace(/_\d{4}$/, '') ?? undefined,
+    })),
   }
 }

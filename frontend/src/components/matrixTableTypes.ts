@@ -59,6 +59,7 @@ export interface MatrixTableRow {
   id: string | number
   name: string
   sortableName: string | null
+  subtitle?: string
   summaryValue?: number | null
   summaryLabel?: string
   lateCount?: number
