@@ -187,6 +187,18 @@ export default function Overview() {
       : `${currentGroups.length} course${currentGroups.length !== 1 ? 's' : ''}, ${totalClasses} class${totalClasses !== 1 ? 'es' : ''} synced`
     : 'Loading\u2026'
 
+  // Group current courses by year level (e.g. "11SEN" → 11, "12ENC" → 12)
+  const yearSections = (() => {
+    const byYear = new Map<number, CourseGroup[]>()
+    for (const g of currentGroups) {
+      const m = g.group_code.match(/^(\d{1,2})/)
+      const year = m ? Number(m[1]) : 0
+      if (!byYear.has(year)) byYear.set(year, [])
+      byYear.get(year)!.push(g)
+    }
+    return Array.from(byYear.entries()).sort(([a], [b]) => a - b)
+  })()
+
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
@@ -238,10 +250,19 @@ export default function Overview() {
           </div>
         )}
 
-        {/* Course groups grid */}
+        {/* Course groups grid, sectioned by year level */}
         {!isLoading && groups && groups.length > 0 && (
           <>
-            {currentGroups.length > 0 && <CourseGroupGrid groups={currentGroups} />}
+            {yearSections.map(([year, yearGroups], idx) => (
+              <section key={year} className={idx > 0 ? 'mt-8' : ''}>
+                {yearSections.length > 1 && (
+                  <h3 className="text-base font-semibold text-slate-900 mb-3">
+                    {year > 0 ? `Year ${year}` : 'Other'}
+                  </h3>
+                )}
+                <CourseGroupGrid groups={yearGroups} />
+              </section>
+            ))}
 
             {hasArchived && (
               <section className={currentGroups.length > 0 ? 'mt-10' : ''}>
