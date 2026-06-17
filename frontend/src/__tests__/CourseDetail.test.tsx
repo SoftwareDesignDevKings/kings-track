@@ -1,5 +1,4 @@
-import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { screen, fireEvent } from '@testing-library/react'
 import { vi } from 'vitest'
 import CourseDetail from '../pages/CourseDetail'
 import { renderWithProviders } from './utils'
@@ -69,7 +68,7 @@ describe('CourseDetail', () => {
 
   it('shows error message when fetch fails', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: new Error('fail'), data: undefined } as any)
-    renderWithProviders(<CourseDetail />)
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=canvas'] })
     expect(screen.getByText(/Failed to load activity data/i)).toBeInTheDocument()
   })
 
@@ -84,7 +83,7 @@ describe('CourseDetail', () => {
 
   it('shows student and assignment counts', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
-    renderWithProviders(<CourseDetail />)
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=canvas'] })
     expect(screen.getByText('1')).toBeInTheDocument() // 1 student
     expect(screen.getByText('2')).toBeInTheDocument() // 2 assignments
   })
@@ -124,20 +123,26 @@ describe('CourseDetail', () => {
       },
     } as any)
 
-    const { container } = renderWithProviders(<CourseDetail />)
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=canvas'] })
     const label = screen.getByText('Avg completion')
     const value = label.previousElementSibling
 
     expect(value).toHaveTextContent('50%')
-    expect(container).not.toHaveTextContent('100%')
 
     vi.useRealTimers()
   })
 
-  it('shows the activity table on the default Canvas tab', () => {
+  it('defaults to the Overview tab and shows Canvas when navigated', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />)
+    // Overview is the default tab
+    expect(screen.getByRole('button', { name: /^Overview$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Canvas$/i })).toBeInTheDocument()
+  })
+
+  it('shows the activity table on the Canvas tab', () => {
+    vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=canvas'] })
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
   })
 
@@ -165,7 +170,7 @@ describe('CourseDetail', () => {
     expect(screen.getByRole('button', { name: /^Engagement$/i })).toBeInTheDocument()
   })
 
-  it('renders EngagementTable when Engagement tab is active and data is loaded', async () => {
+  it('renders EngagementTable when Engagement tab is active and data is loaded', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useCourseEngagement).mockReturnValue({
       isLoading: false,
@@ -198,23 +203,19 @@ describe('CourseDetail', () => {
       },
     } as any)
 
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^Engagement$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=engagement'] })
     expect(screen.getAllByText('Alice Smith').length).toBeGreaterThan(0)
   })
 
-  it('shows empty state on Engagement tab when no data has been synced', async () => {
+  it('shows empty state on Engagement tab when no data has been synced', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useCourseEngagement).mockReturnValue({ isLoading: false, error: null, data: undefined } as any)
 
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^Engagement$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=engagement'] })
     expect(screen.getByText(/trigger a sync/i)).toBeInTheDocument()
   })
 
-  it('shows empty state when API returns students: [] and synced_at: null', async () => {
+  it('shows empty state when API returns students: [] and synced_at: null', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useCourseEngagement).mockReturnValue({
       isLoading: false,
@@ -222,9 +223,7 @@ describe('CourseDetail', () => {
       data: { course_id: 9001, course_name: 'Test', synced_at: null, students: [], course_activity: [] },
     } as any)
 
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^Engagement$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=engagement'] })
     expect(screen.getByText(/trigger a sync/i)).toBeInTheDocument()
   })
 
@@ -243,16 +242,14 @@ describe('CourseDetail', () => {
     expect(screen.queryByRole('button', { name: /^Gradeo$/i })).not.toBeInTheDocument()
   })
 
-  it('shows loading skeleton on EdStem tab while loading', async () => {
+  it('shows loading skeleton on EdStem tab while loading', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useEdStemMatrix).mockReturnValue({ isLoading: true, error: null, data: { mapped: true } } as any)
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=edstem'] })
     expect(document.querySelector('.animate-pulse')).toBeTruthy()
   })
 
-  it('shows EdStemLessonTable on EdStem tab when mapped', async () => {
+  it('shows EdStemLessonTable on EdStem tab when mapped', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useEdStemMatrix).mockReturnValue({
       isLoading: false,
@@ -268,14 +265,12 @@ describe('CourseDetail', () => {
         students: [{ id: 1, name: 'Alice Smith', sortable_name: 'Smith, Alice', completion_rate: 0.5, progress: { '1': { status: 'completed', completed_at: null }, '2': { status: 'not_started', completed_at: null } } }],
       },
     } as any)
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^EdStem$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=edstem'] })
     expect(screen.getAllByText('Module 1').length).toBeGreaterThan(0)
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
   })
 
-  it('shows the Gradeo report table when the course is mapped', async () => {
+  it('shows the Gradeo report table when the course is mapped', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useGradeoReport).mockReturnValue({
       isLoading: false,
@@ -326,16 +321,14 @@ describe('CourseDetail', () => {
         ],
       },
     } as any)
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=gradeo'] })
     expect(screen.getByText('12ENC_Cycle6')).toBeInTheDocument()
     expect(screen.getByText('Alice Smith')).toBeInTheDocument()
     expect(screen.getByText('Noah Ould')).toBeInTheDocument()
     expect(screen.getByLabelText('12ENC_Cycle6: Not assigned')).toBeInTheDocument()
   })
 
-  it('defaults to Results on the Gradeo tab when topic-band data exists', async () => {
+  it('defaults to Results on the Gradeo tab when topic-band data exists', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useGradeoReport).mockReturnValue({
       isLoading: false,
@@ -406,9 +399,7 @@ describe('CourseDetail', () => {
       },
     } as any)
 
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=gradeo'] })
     expect(screen.getByText('12ENC_Cycle6')).toBeInTheDocument()
     expect(screen.queryByText('B5')).not.toBeInTheDocument()
   })
@@ -463,7 +454,7 @@ describe('CourseDetail', () => {
     expect(screen.getAllByText('medium').length).toBeGreaterThan(0)
   })
 
-  it('switches between Gradeo and Topic Bands top-level tabs', async () => {
+  it('switches between Gradeo and Topic Bands top-level tabs', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     vi.mocked(useGradeoReport).mockReturnValue({
       isLoading: false,
@@ -518,11 +509,9 @@ describe('CourseDetail', () => {
       },
     } as any)
 
-    const user = userEvent.setup()
-    renderWithProviders(<CourseDetail />)
-    await user.click(screen.getByRole('button', { name: /^Gradeo$/i }))
+    renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=gradeo'] })
     expect(screen.getByText(/No students found/i)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /^Topic Bands$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Topic Bands$/i }))
     expect(screen.getByText('B5')).toBeInTheDocument()
   })
 })

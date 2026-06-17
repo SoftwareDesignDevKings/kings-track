@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
-import { useParams, Link, Navigate, useSearchParams, useNavigate } from 'react-router-dom'
+import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
+import CourseOverviewTab from '../components/CourseOverviewTab'
 import MatrixTable from '../components/MatrixTable'
 import { buildCourseGroupMatrixTableModel } from '../components/matrixTableAdapters'
 import EngagementTable from '../components/EngagementTable'
@@ -18,9 +19,8 @@ import {
   useCourseGroupTopicBands,
   useCourseGroupTrackableAssignments,
 } from '../services/api'
-import type { CourseGroupClass } from '../types'
 
-type GroupTab = 'canvas' | 'engagement' | 'edstem' | 'gradeo' | 'topic_bands' | 'tracking' | 'classes'
+type GroupTab = 'overview' | 'canvas' | 'engagement' | 'edstem' | 'gradeo' | 'topic_bands' | 'tracking'
 
 interface Tab {
   id: GroupTab
@@ -28,127 +28,26 @@ interface Tab {
 }
 
 const ALL_TABS: Tab[] = [
+  { id: 'overview', label: 'Overview' },
   { id: 'canvas', label: 'Canvas' },
   { id: 'edstem', label: 'EdStem' },
   { id: 'gradeo', label: 'Gradeo' },
   { id: 'topic_bands', label: 'Topic Bands' },
   { id: 'engagement', label: 'Engagement' },
   { id: 'tracking', label: 'Tracking' },
-  { id: 'classes', label: 'Classes' },
 ]
 
 function getTabFromSearch(value: string | null): GroupTab {
-  if (value === 'engagement' || value === 'edstem' || value === 'gradeo' || value === 'tracking' || value === 'classes') return value
+  if (value === 'canvas') return 'canvas'
+  if (value === 'engagement' || value === 'edstem' || value === 'gradeo' || value === 'tracking') return value
   if (value === 'topic-bands' || value === 'topic_bands') return 'topic_bands'
-  return 'canvas'
+  return 'overview'
 }
 
 function getTabSearchValue(tab: GroupTab) {
-  if (tab === 'canvas') return null
+  if (tab === 'overview') return null
   if (tab === 'topic_bands') return 'topic-bands'
   return tab
-}
-
-// ── Class card components for the Classes tab ────────────────────────────────
-
-function CompletionRing({ value }: { value: number | null }) {
-  if (value === null)
-    return (
-      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-xs text-slate-400">
-        —
-      </div>
-    )
-  const pct = Math.round(value * 100)
-  const color = pct >= 80 ? 'text-emerald-500' : pct >= 50 ? 'text-amber-500' : 'text-red-500'
-  const strokeColor = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444'
-  const r = 18
-  const circ = 2 * Math.PI * r
-  const dash = (pct / 100) * circ
-
-  return (
-    <div className="relative w-12 h-12">
-      <svg className="w-12 h-12 -rotate-90" viewBox="0 0 48 48">
-        <circle cx="24" cy="24" r={r} fill="none" stroke="#e2e8f0" strokeWidth="4" />
-        <circle cx="24" cy="24" r={r} fill="none" stroke={strokeColor} strokeWidth="4"
-          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" />
-      </svg>
-      <span className={`absolute inset-0 flex items-center justify-center text-xs font-semibold ${color}`}>
-        {pct}%
-      </span>
-    </div>
-  )
-}
-
-function ragColor(rate: number | null): string {
-  if (rate === null) return 'bg-slate-200'
-  const pct = rate * 100
-  if (pct >= 80) return 'bg-emerald-400'
-  if (pct >= 50) return 'bg-amber-400'
-  return 'bg-red-400'
-}
-
-function formatSync(iso: string | null) {
-  if (!iso) return 'Not synced'
-  const d = new Date(iso)
-  const diffMins = Math.floor((Date.now() - d.getTime()) / 60000)
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  const diffH = Math.floor(diffMins / 60)
-  if (diffH < 24) return `${diffH}h ago`
-  return d.toLocaleDateString()
-}
-
-function ClassCard({ cls }: { cls: CourseGroupClass }) {
-  const navigate = useNavigate()
-
-  return (
-    <button
-      onClick={() => navigate(`/courses/${cls.id}`)}
-      className="
-        group text-left bg-white rounded-xl border border-slate-200
-        p-5 flex flex-col gap-4
-        hover:border-brand-500 hover:shadow-md
-        transition-all duration-150
-        focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2
-      "
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className={`shrink-0 w-2 h-2 rounded-full ${ragColor(cls.avg_completion_rate)}`} />
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide truncate">
-              {cls.course_code?.replace(/_\d{4}$/, '') || 'Class'}
-            </span>
-          </div>
-          <h2 className="text-sm font-semibold text-slate-900 leading-snug line-clamp-2 group-hover:text-brand-600">
-            {cls.name}
-          </h2>
-        </div>
-        <CompletionRing value={cls.avg_completion_rate} />
-      </div>
-
-      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100">
-        <div>
-          <p className="text-xs text-slate-400 mb-0.5">Students</p>
-          <p className="text-sm font-semibold text-slate-800">{cls.student_count}</p>
-        </div>
-        <div>
-          <p className="text-xs text-slate-400 mb-0.5">On-time</p>
-          <p className="text-sm font-semibold text-slate-800">
-            {cls.avg_on_time_rate !== null ? `${Math.round(cls.avg_on_time_rate * 100)}%` : '—'}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-slate-400 mb-0.5">Avg score</p>
-          <p className="text-sm font-semibold text-slate-800">
-            {cls.avg_current_score !== null ? `${cls.avg_current_score}%` : '—'}
-          </p>
-        </div>
-      </div>
-
-      <p className="text-xs text-slate-400">Synced {formatSync(cls.last_synced)}</p>
-    </button>
-  )
 }
 
 // ── Loading skeleton ─────────────────────────────────────────────────────────
@@ -204,6 +103,39 @@ export default function CourseGroupDetail() {
     useCourseGroupTopicBands(enableGroupHooks)
   const { data: trackableAssignments, isLoading: trackingLoading } =
     useCourseGroupTrackableAssignments(enableGroupHooks)
+
+  // ── Overview metrics (derived from group matrix) ─────────────────────────
+  const overviewMetrics = useMemo(() => {
+    if (!groupMatrix) return null
+    const students = groupMatrix.students
+    const n = students.length
+    if (n === 0) return { avgCompletionRate: null, avgOnTimeRate: null, avgScore: null, studentCompletionRates: [] as (number | null)[], submissionCounts: { completed: 0, in_progress: 0, not_started: 0, excused: 0 }, totalAssignments: 0 }
+
+    const completionRates = students.map(s => s.metrics.completion_rate)
+    const onTimeRates = students.map(s => s.metrics.on_time_rate).filter((v): v is number => v !== null)
+    const scores = students.map(s => s.metrics.current_score).filter((v): v is number => v !== null)
+
+    const validCompletionRates = completionRates.filter((v): v is number => v !== null)
+    const avgCompletionRate = validCompletionRates.length > 0
+      ? validCompletionRates.reduce((a, b) => a + b, 0) / validCompletionRates.length
+      : null
+    const avgOnTimeRate = onTimeRates.length > 0 ? onTimeRates.reduce((a, b) => a + b, 0) / onTimeRates.length : null
+    const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null
+
+    const totalAssignments = groupMatrix.assignment_groups.reduce((sum, g) => sum + g.assignments.length, 0)
+
+    const counts = { completed: 0, in_progress: 0, not_started: 0, excused: 0 }
+    for (const student of students) {
+      for (const sub of Object.values(student.submissions)) {
+        if (sub.status === 'completed') counts.completed++
+        else if (sub.status === 'in_progress') counts.in_progress++
+        else if (sub.status === 'not_started') counts.not_started++
+        else if (sub.status === 'excused') counts.excused++
+      }
+    }
+
+    return { avgCompletionRate, avgOnTimeRate, avgScore, studentCompletionRates: completionRates, submissionCounts: counts, totalAssignments }
+  }, [groupMatrix])
 
   // ── Tab filtering ────────────────────────────────────────────────────────
   const gradeoMapped = Boolean(gradeoReport?.mapped || gradeoTopicBands?.mapped)
@@ -320,6 +252,23 @@ export default function CourseGroupDetail() {
             {/* Tab content */}
             <section className="min-h-0 min-w-0 flex-1 flex flex-col">
 
+              {/* Overview tab */}
+              {activeTab === 'overview' && (
+                <div className="flex h-full min-h-0 min-w-0 flex-col">
+                  <CourseOverviewTab
+                    totalStudents={group.total_students}
+                    totalAssignments={overviewMetrics?.totalAssignments ?? 0}
+                    avgCompletionRate={overviewMetrics?.avgCompletionRate ?? null}
+                    avgOnTimeRate={overviewMetrics?.avgOnTimeRate ?? null}
+                    avgScore={overviewMetrics?.avgScore ?? null}
+                    studentCompletionRates={overviewMetrics?.studentCompletionRates ?? []}
+                    submissionCounts={overviewMetrics?.submissionCounts ?? { completed: 0, in_progress: 0, not_started: 0, excused: 0 }}
+                    courseActivity={engagement?.course_activity}
+                    isLoading={matrixLoading}
+                  />
+                </div>
+              )}
+
               {/* Canvas tab */}
               {activeTab === 'canvas' && (
                 <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -400,15 +349,6 @@ export default function CourseGroupDetail() {
               {activeTab === 'tracking' && firstCourseId > 0 && (
                 <div className="flex h-full min-h-0 min-w-0 flex-col">
                   <AssignmentTrackingTab courseId={firstCourseId} />
-                </div>
-              )}
-
-              {/* Classes tab */}
-              {activeTab === 'classes' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {group.classes.map(cls => (
-                    <ClassCard key={cls.id} cls={cls} />
-                  ))}
                 </div>
               )}
 
