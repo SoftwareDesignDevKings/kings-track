@@ -112,6 +112,42 @@ export default function CourseDetail() {
     return { avgCompletionRate, avgOnTimeRate, avgScore, studentCompletionRates: completionRates, submissionCounts: counts }
   }, [matrix])
 
+  // ── Canvas summary stats ────────────────────────────────────────────────
+  const canvasStats = useMemo(() => {
+    if (!matrix) return null
+    const scores = matrix.students
+      .map(s => s.metrics.current_score)
+      .filter((v): v is number => v !== null)
+    const avg = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null
+    let sd: number | null = null
+    if (scores.length >= 2 && avg !== null) {
+      const variance = scores.reduce((sum, s) => sum + (s - avg) ** 2, 0) / (scores.length - 1)
+      sd = Math.sqrt(variance)
+    }
+    return { total: totalAssignments, avg, sd }
+  }, [matrix, totalAssignments])
+
+  // ── Gradeo summary stats ───────────────────────────────────────────────
+  const gradeoStats = useMemo(() => {
+    if (!gradeoReport?.mapped || !gradeoReport.exams || !gradeoReport.students) return null
+    const totalExams = gradeoReport.exams.length
+    const scores: number[] = []
+    for (const student of gradeoReport.students) {
+      for (const result of Object.values(student.results)) {
+        if (result && result.exam_mark !== null && result.marks_available && result.marks_available > 0) {
+          scores.push((result.exam_mark / result.marks_available) * 100)
+        }
+      }
+    }
+    const avg = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null
+    let sd: number | null = null
+    if (scores.length >= 2 && avg !== null) {
+      const variance = scores.reduce((sum, s) => sum + (s - avg) ** 2, 0) / (scores.length - 1)
+      sd = Math.sqrt(variance)
+    }
+    return { total: totalExams, avg, sd }
+  }, [gradeoReport])
+
   const gradeoMapped = Boolean(gradeoReport?.mapped || gradeoTopicBands?.mapped)
   const tabs = useMemo(() => TABS.filter(tab => {
     if (tab.id === 'gradeo') return gradeoMapped
@@ -342,7 +378,16 @@ export default function CourseDetail() {
                 </div>
               )}
               {matrix && (
-                <ActivityTable matrix={matrix} onExport={handleExportClassReport} exportLoading={downloadingClass} />
+                <>
+                  <ActivityTable matrix={matrix} onExport={handleExportClassReport} exportLoading={downloadingClass} />
+                  {canvasStats && (
+                    <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-slate-500 px-1">
+                      <span>Total: {canvasStats.total} assignments</span>
+                      <span>Avg Score: {canvasStats.avg !== null ? `${Math.round(canvasStats.avg)}%` : 'N/A'}</span>
+                      <span>Std Dev: {canvasStats.sd !== null ? `${canvasStats.sd.toFixed(1)}%` : 'N/A'}</span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -418,7 +463,16 @@ export default function CourseDetail() {
                 </div>
               )}
               {!gradeoLoading && gradeoReport?.mapped && (
-                <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
+                <>
+                  <GradeoReportTable report={gradeoReport} hiddenStudents={gradeoReport.hidden_students ?? []} />
+                  {gradeoStats && (
+                    <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-slate-500 px-1">
+                      <span>Total: {gradeoStats.total} exams</span>
+                      <span>Avg Score: {gradeoStats.avg !== null ? `${Math.round(gradeoStats.avg)}%` : 'N/A'}</span>
+                      <span>Std Dev: {gradeoStats.sd !== null ? `${gradeoStats.sd.toFixed(1)}%` : 'N/A'}</span>
+                    </div>
+                  )}
+                </>
               )}
               {!gradeoLoading && !gradeoError && !gradeoReport?.mapped && (
                 <div className="text-center py-16 text-slate-400 text-sm">
