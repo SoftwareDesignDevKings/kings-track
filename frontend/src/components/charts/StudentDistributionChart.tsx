@@ -51,7 +51,7 @@ export default function StudentDistributionChart({ completionRates }: Props) {
           allowDecimals={false}
         />
         <Tooltip
-          formatter={(value: number) => [`${value} student${value !== 1 ? 's' : ''}`, 'Count']}
+          formatter={(value) => [`${value} student${value !== 1 ? 's' : ''}`, 'Count']}
           contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
         />
         <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={48}>

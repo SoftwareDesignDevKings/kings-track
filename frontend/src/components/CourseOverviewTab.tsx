@@ -61,7 +61,6 @@ function formatScore(value: number | null): string {
 
 export default function CourseOverviewTab({
   totalStudents,
-  totalAssignments,
   avgCompletionRate,
   avgOnTimeRate,
   avgScore,

@@ -51,8 +51,8 @@ export default function SubmissionStatusChart({ completed, inProgress, notStarte
           tick={{ fontSize: 11, fill: '#64748b' }}
         />
         <Tooltip
-          formatter={(value: number, _name: string, props: { payload: { pct: number } }) => [
-            `${value} (${props.payload.pct}%)`,
+          formatter={(value, _name, props) => [
+            `${value} (${(props as { payload: { pct: number } }).payload.pct}%)`,
             'Submissions',
           ]}
           contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
