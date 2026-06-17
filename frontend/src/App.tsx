@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Overview from './pages/Overview'
+import Classes from './pages/Classes'
 import CourseGroupDetail from './pages/CourseGroupDetail'
 import CourseDetail from './pages/CourseDetail'
 import Students from './pages/Students'
@@ -16,6 +17,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
+        <Route path="/classes" element={<ProtectedRoute><Classes /></ProtectedRoute>} />
         <Route path="/courses/group/:groupCode" element={<ProtectedRoute><CourseGroupDetail /></ProtectedRoute>} />
         <Route path="/courses/:courseId" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
         <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />

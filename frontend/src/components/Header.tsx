@@ -35,6 +35,12 @@ export default function Header() {
                 Courses
               </Link>
               <Link
+                to="/classes"
+                className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+              >
+                Classes
+              </Link>
+              <Link
                 to="/students"
                 className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
               >
