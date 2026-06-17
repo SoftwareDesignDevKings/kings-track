@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+import statistics as _stats
 from datetime import date, datetime, timedelta
 
 import httpx
@@ -2178,24 +2179,40 @@ def _build_concern_pdf(
 
 
 # ---------------------------------------------------------------------------
-# 11. Overall Missing Report PDF
+# 11. Missing / Snapshot Report Helpers
 # ---------------------------------------------------------------------------
 
-@router.get("/students/{user_id}/missing-report-pdf")
-async def export_missing_report_pdf(
+
+def _section_summary(
+    scores: list[float],
+    total_count: int,
+    item_label: str,
+    styles: dict,
+) -> Paragraph:
+    """Build a summary line: Total: X items | Avg Score: Y% | Std Dev: Z%"""
+    parts = [f"Total: {total_count} {item_label}"]
+    if scores:
+        avg = sum(scores) / len(scores)
+        parts.append(f"Avg Score: {avg:.1f}%")
+        if len(scores) >= 2:
+            sd = _stats.stdev(scores)
+            parts.append(f"Std Dev: {sd:.1f}%")
+        else:
+            parts.append("Std Dev: N/A")
+    else:
+        parts.append("Avg Score: N/A")
+        parts.append("Std Dev: N/A")
+    return Paragraph(" &nbsp;|&nbsp; ".join(parts), styles["body_small"])
+
+
+async def _fetch_report_data(
+    db: AsyncSession,
     user_id: int,
-    course_id: int | None = Query(None, description="Optional: filter to a single course"),
-    preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    PDF report listing all missing / incomplete work for a student
-    across Canvas assignments, EdStem lessons, and Gradeo exams.
-    When course_id is provided, only that course is included.
-    """
+    course_id: int | None,
+) -> dict:
+    """Fetch student, enrolled courses, whitelist — shared by missing & snapshot reports."""
     from app.whitelist import get_effective_whitelist
 
-    # ── Fetch student ──
     stu_result = await db.execute(
         text("SELECT id, name, email, sis_id FROM users WHERE id = :id"),
         {"id": user_id},
@@ -2206,7 +2223,6 @@ async def export_missing_report_pdf(
 
     whitelist = await get_effective_whitelist(db)
 
-    # ── Enrolled courses ──
     enrolled_result = await db.execute(
         text("""
             SELECT e.course_id, c.name, c.course_code
@@ -2225,13 +2241,380 @@ async def export_missing_report_pdf(
     if not courses_map:
         raise HTTPException(404, "Student has no active enrolments")
 
-    # If course_id is specified, filter to just that course
     if course_id is not None:
         if course_id not in courses_map:
             raise HTTPException(404, "Student is not enrolled in this course")
         courses_map = {course_id: courses_map[course_id]}
 
     enrolled_ids = list(courses_map.keys())
+
+    return {"student": student, "courses_map": courses_map, "enrolled_ids": enrolled_ids}
+
+
+async def _fetch_edstem_incomplete(
+    db: AsyncSession,
+    user_id: int,
+    data: dict,
+) -> tuple[list, bool]:
+    """Fetch incomplete EdStem lessons, excluding ENC courses.
+    Returns (rows, has_edstem_enrolled)."""
+    courses_map = data["courses_map"]
+    enrolled_ids = data["enrolled_ids"]
+    enc_ids = [cid for cid, info in courses_map.items()
+               if "ENC" in (info.get("code") or "").upper()]
+    edstem_enrolled = [cid for cid in enrolled_ids if cid not in enc_ids]
+
+    if not edstem_enrolled:
+        return [], False
+
+    result = await db.execute(
+        text("""
+            SELECT ecm.canvas_course_id AS course_id,
+                   el.module_name, el.title AS lesson_title,
+                   COALESCE(elp.status, 'not_started') AS status
+            FROM edstem_course_mappings ecm
+            JOIN edstem_lessons el ON el.edstem_course_id = ecm.edstem_course_id
+            LEFT JOIN edstem_lesson_progress elp
+                ON elp.edstem_lesson_id = el.id AND elp.user_id = :uid
+            WHERE ecm.canvas_course_id = ANY(:enrolled)
+              AND (elp.status IS NULL OR elp.status != 'completed')
+            ORDER BY ecm.canvas_course_id, el.module_name, el.position
+        """),
+        {"uid": user_id, "enrolled": edstem_enrolled},
+    )
+    return result.fetchall(), True
+
+
+def _build_report_header(
+    title: str,
+    student,
+    courses_map: dict,
+    course_id: int | None,
+    styles: dict,
+) -> list:
+    """Build report title, subtitle, and horizontal rule."""
+    els: list = []
+    els.append(Paragraph(title, styles["title"]))
+    if course_id is not None:
+        c_info = courses_map[course_id]
+        c_label = c_info.get("code") or c_info.get("name") or str(course_id)
+        els.append(Paragraph(
+            f"{student.name} &nbsp;|&nbsp; {c_label} &nbsp;|&nbsp; {date.today().strftime('%d %B %Y')}",
+            styles["subtitle"],
+        ))
+    else:
+        els.append(Paragraph(
+            f"{student.name} &nbsp;|&nbsp; {date.today().strftime('%d %B %Y')}",
+            styles["subtitle"],
+        ))
+    els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
+    return els
+
+
+def _build_canvas_section(
+    rows: list,
+    courses_map: dict,
+    styles: dict,
+    avail: float,
+    *,
+    all_statuses: bool = True,
+    show_summary: bool = True,
+    section_title: str = "Canvas — Recent Assignments (Last 14 Days)",
+    empty_msg: str = "No Canvas assignments found.",
+) -> list:
+    """Build the Canvas section of a report PDF."""
+    P = lambda t: _p(t, styles)
+    PH = lambda t: _p(t, styles, header=True)
+    els: list = []
+
+    els.append(Paragraph(section_title, styles["section"]))
+    if rows:
+        c_data = [[PH("Course"), PH("Assignment"), PH("Due Date"), PH("Score"), PH("Status")]]
+        c_cmds = list(_base_table_style())
+        scores: list[float] = []
+
+        for i, r in enumerate(rows, start=1):
+            c_info = courses_map.get(r.course_id, {})
+            c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
+            due_str = r.due_at.strftime("%d %b %Y") if r.due_at else "—"
+
+            ws = r.workflow_state or ""
+            if all_statuses:
+                if ws == "graded":
+                    status = "Graded"
+                    if r.score is not None and r.points_possible:
+                        pp = int(r.points_possible) if r.points_possible == int(r.points_possible) else round(r.points_possible, 1)
+                        score_str = f"{round(r.score, 1)}/{pp}"
+                    elif r.score is not None:
+                        score_str = str(round(r.score, 1))
+                    else:
+                        score_str = "—"
+                    c_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
+                elif ws == "submitted":
+                    status = "Submitted"
+                    score_str = "—"
+                    c_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+                elif r.missing:
+                    status = "Missing"
+                    score_str = "—"
+                    c_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+                else:
+                    status = "Not Submitted"
+                    score_str = "—"
+                    c_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+                if r.late and ws in ("graded", "submitted"):
+                    status += " (Late)"
+            else:
+                # Missing-only mode: all rows are missing/not submitted
+                if r.missing:
+                    status = "Missing"
+                else:
+                    status = "Not Submitted"
+                score_str = "—"
+                if r.score is not None and r.points_possible:
+                    pp = int(r.points_possible) if r.points_possible == int(r.points_possible) else round(r.points_possible, 1)
+                    score_str = f"{round(r.score, 1)}/{pp}"
+                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+
+            # Collect scores for summary
+            if r.score is not None and r.points_possible and r.points_possible > 0:
+                scores.append((r.score / r.points_possible) * 100)
+
+            c_data.append([P(c_label), P(r.assignment_name), P(due_str), P(score_str), P(status)])
+
+        c_widths = [avail * 0.12, avail * 0.38, avail * 0.16, avail * 0.16, avail * 0.18]
+        ct = Table(c_data, colWidths=c_widths, repeatRows=1)
+        ct.setStyle(TableStyle(c_cmds))
+        els.append(ct)
+
+        if show_summary:
+            els.append(Spacer(1, 4))
+            els.append(_section_summary(scores, len(rows), "assignments", styles))
+    else:
+        els.append(Paragraph(empty_msg, styles["body_small"]))
+
+    return els
+
+
+def _build_edstem_section(
+    rows: list,
+    courses_map: dict,
+    styles: dict,
+    avail: float,
+    has_edstem_enrolled: bool,
+) -> list:
+    """Build the EdStem section of a report PDF."""
+    if not has_edstem_enrolled:
+        return []
+
+    P = lambda t: _p(t, styles)
+    PH = lambda t: _p(t, styles, header=True)
+    els: list = []
+
+    els.append(Paragraph("EdStem — Incomplete Lessons", styles["section"]))
+    if rows:
+        e_data = [[PH("Course"), PH("Module"), PH("Lesson"), PH("Status")]]
+        e_cmds = list(_base_table_style())
+        for i, r in enumerate(rows, start=1):
+            c_info = courses_map.get(r.course_id, {})
+            c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
+            e_data.append([
+                P(c_label),
+                P(r.module_name or "—"),
+                P(r.lesson_title),
+                P(_status_display(r.status)),
+            ])
+            if r.status == "not_started":
+                e_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+            elif r.status == "viewed":
+                e_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+        e_widths = [avail * 0.12, avail * 0.34, avail * 0.40, avail * 0.14]
+        et = Table(e_data, colWidths=e_widths, repeatRows=1)
+        et.setStyle(TableStyle(e_cmds))
+        els.append(et)
+    else:
+        els.append(Paragraph("All EdStem lessons completed.", styles["body_small"]))
+
+    return els
+
+
+def _build_gradeo_section(
+    rows: list,
+    courses_map: dict,
+    styles: dict,
+    avail: float,
+    *,
+    show_summary: bool = True,
+    section_title: str = "Gradeo — All Results",
+    empty_msg: str = "No Gradeo results.",
+) -> list:
+    """Build the Gradeo section of a report PDF."""
+    P = lambda t: _p(t, styles)
+    PH = lambda t: _p(t, styles, header=True)
+    els: list = []
+
+    els.append(Paragraph(section_title, styles["section"]))
+    if rows:
+        g_data = [[PH("Course"), PH("Exam"), PH("Score"), PH("Status"), PH("Topics")]]
+        g_cmds = list(_base_table_style())
+        scores: list[float] = []
+
+        for i, r in enumerate(rows, start=1):
+            c_info = courses_map.get(r.course_id, {})
+            c_label = c_info.get("code") or c_info.get("name") or str(r.course_id or 0)
+            mark = (
+                f"{r.exam_mark}/{r.marks_available}"
+                if r.exam_mark is not None else "—"
+            )
+            g_data.append([P(c_label), P(r.exam_name), P(mark), P(r.status or "—"), P(r.topics or "")])
+
+            if r.status == "awaiting_marking":
+                pass  # white — no highlight
+            elif r.status == "not_submitted" or r.exam_mark is None:
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+            elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+            elif r.status == "scored":
+                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
+
+            # Collect scores for summary
+            if r.exam_mark is not None and r.marks_available and r.marks_available > 0:
+                scores.append((r.exam_mark / r.marks_available) * 100)
+
+        g_widths = [avail * 0.14, avail * 0.25, avail * 0.14, avail * 0.18, avail * 0.29]
+        gt = Table(g_data, colWidths=g_widths, repeatRows=1)
+        gt.setStyle(TableStyle(g_cmds))
+        els.append(gt)
+
+        if show_summary:
+            els.append(Spacer(1, 4))
+            els.append(_section_summary(scores, len(rows), "exams", styles))
+    else:
+        els.append(Paragraph(empty_msg, styles["body_small"]))
+
+    return els
+
+
+# ---------------------------------------------------------------------------
+# 11a. Missing Work Report PDF (compounding — all-time missing only)
+# ---------------------------------------------------------------------------
+
+@router.get("/students/{user_id}/missing-report-pdf")
+async def export_missing_report_pdf(
+    user_id: int,
+    course_id: int | None = Query(None, description="Optional: filter to a single course"),
+    preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    PDF report listing all missing / incomplete work for a student
+    across Canvas assignments, EdStem lessons, and Gradeo exams.
+    Compounding (all-time) — not limited to a time window.
+    When course_id is provided, only that course is included.
+    """
+    data = await _fetch_report_data(db, user_id, course_id)
+    student = data["student"]
+    courses_map = data["courses_map"]
+    enrolled_ids = data["enrolled_ids"]
+
+    # ── Canvas: ALL-TIME missing / not-submitted only ──
+    canvas_result = await db.execute(
+        text("""
+            SELECT a.course_id, a.assignment_group_name, a.name AS assignment_name,
+                   a.points_possible, a.due_at,
+                   s.workflow_state, s.missing, s.late, s.score
+            FROM assignments a
+            LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
+            WHERE a.course_id = ANY(:enrolled)
+              AND a.workflow_state = 'published'
+              AND a.due_at IS NOT NULL
+              AND a.due_at <= NOW()
+              AND (
+                  s.workflow_state NOT IN ('submitted', 'graded')
+                  OR s.workflow_state IS NULL
+              )
+            ORDER BY a.course_id, a.assignment_group_name, a.due_at
+        """),
+        {"uid": user_id, "enrolled": enrolled_ids},
+    )
+    missing_canvas = canvas_result.fetchall()
+
+    # ── EdStem: incomplete lessons ──
+    missing_edstem, has_edstem = await _fetch_edstem_incomplete(db, user_id, data)
+
+    # ── Gradeo: deduplicated by exam name, then filter to flagged only ──
+    gradeo_result = await db.execute(
+        text("""
+            SELECT DISTINCT ON (gcea.exam_name)
+                   gcm.canvas_course_id AS course_id,
+                   gcea.exam_name, gcea.topics,
+                   gar.exam_mark, gar.marks_available, gar.status
+            FROM gradeo_assignment_results gar
+            JOIN gradeo_class_exam_assignments gcea
+                ON gcea.id = gar.gradeo_class_exam_assignment_id
+            JOIN gradeo_class_mappings gcm
+                ON gcm.gradeo_class_id = gcea.gradeo_class_id
+            WHERE gar.user_id = :uid
+              AND gcm.canvas_course_id = ANY(:enrolled)
+            ORDER BY gcea.exam_name,
+                     CASE gar.status WHEN 'scored' THEN 2 WHEN 'awaiting_marking' THEN 1 ELSE 0 END DESC,
+                     gar.last_imported_at DESC NULLS LAST
+        """),
+        {"uid": user_id, "enrolled": enrolled_ids},
+    )
+    all_gradeo = gradeo_result.fetchall()
+    flagged_gradeo = [
+        r for r in all_gradeo
+        if r.status in ("awaiting_marking", "not_submitted")
+        or r.exam_mark is None
+        or (r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5)
+    ]
+
+    # ── Build PDF ──
+    styles = _pdf_styles()
+    els = _build_report_header("Missing Work Report", student, courses_map, course_id, styles)
+    avail = A4[0] - 30 * mm
+
+    els += _build_canvas_section(
+        missing_canvas, courses_map, styles, avail,
+        all_statuses=False,
+        show_summary=True,
+        section_title="Canvas — Missing Assignments",
+        empty_msg="No missing Canvas assignments.",
+    )
+    els += _build_edstem_section(missing_edstem, courses_map, styles, avail, has_edstem)
+    els += _build_gradeo_section(
+        flagged_gradeo, courses_map, styles, avail,
+        show_summary=True,
+        section_title="Gradeo — Missing/Incomplete Results",
+        empty_msg="No missing or incomplete Gradeo results.",
+    )
+
+    name_slug = re.sub(r"[^a-z0-9]+", "-", student.name.lower()).strip("-")
+    filename = f"{name_slug}-missing-report-{date.today().isoformat()}.pdf"
+    return _build_pdf(els, filename, inline=(preview == 1))
+
+
+# ---------------------------------------------------------------------------
+# 11b. 2-Week Snapshot Report PDF
+# ---------------------------------------------------------------------------
+
+@router.get("/students/{user_id}/snapshot-report-pdf")
+async def export_snapshot_report_pdf(
+    user_id: int,
+    course_id: int | None = Query(None, description="Optional: filter to a single course"),
+    preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    PDF snapshot of recent activity: Canvas assignments from the last 14 days
+    (all statuses), EdStem incomplete lessons, and all Gradeo results.
+    When course_id is provided, only that course is included.
+    """
+    data = await _fetch_report_data(db, user_id, course_id)
+    student = data["student"]
+    courses_map = data["courses_map"]
+    enrolled_ids = data["enrolled_ids"]
 
     # ── Canvas: recent assignments (last 14 days, all statuses) ──
     canvas_result = await db.execute(
@@ -2251,42 +2634,14 @@ async def export_missing_report_pdf(
         {"uid": user_id, "enrolled": enrolled_ids},
     )
     recent_canvas = canvas_result.fetchall()
-    missing_canvas_count = sum(
-        1 for r in recent_canvas
-        if r.workflow_state not in ('submitted', 'graded') or r.workflow_state is None
-    )
 
-    # ── EdStem: incomplete lessons (exclude ENC courses) ──
-    enc_ids = [cid for cid, info in courses_map.items()
-               if "ENC" in (info.get("code") or "").upper()]
-    edstem_enrolled = [cid for cid in enrolled_ids if cid not in enc_ids]
+    # ── EdStem: incomplete lessons ──
+    missing_edstem, has_edstem = await _fetch_edstem_incomplete(db, user_id, data)
 
-    if edstem_enrolled:
-        edstem_result = await db.execute(
-            text("""
-                SELECT ecm.canvas_course_id AS course_id,
-                       el.module_name, el.title AS lesson_title,
-                       COALESCE(elp.status, 'not_started') AS status
-                FROM edstem_course_mappings ecm
-                JOIN edstem_lessons el ON el.edstem_course_id = ecm.edstem_course_id
-                LEFT JOIN edstem_lesson_progress elp
-                    ON elp.edstem_lesson_id = el.id AND elp.user_id = :uid
-                WHERE ecm.canvas_course_id = ANY(:enrolled)
-                  AND (elp.status IS NULL OR elp.status != 'completed')
-                ORDER BY ecm.canvas_course_id, el.module_name, el.position
-            """),
-            {"uid": user_id, "enrolled": edstem_enrolled},
-        )
-        missing_edstem = edstem_result.fetchall()
-    else:
-        missing_edstem = []
-
-    # ── Gradeo: all results deduplicated by exam name per course ──
-    # Show all Gradeo results (not just flagged) so the report gives a complete picture.
-    # Deduplication prefers scored > awaiting > not_submitted.
+    # ── Gradeo: all results, deduplicated by exam name ──
     gradeo_result = await db.execute(
         text("""
-            SELECT DISTINCT ON (gcm.canvas_course_id, gcea.exam_name)
+            SELECT DISTINCT ON (gcea.exam_name)
                    gcm.canvas_course_id AS course_id,
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status
@@ -2297,163 +2652,36 @@ async def export_missing_report_pdf(
                 ON gcm.gradeo_class_id = gcea.gradeo_class_id
             WHERE gar.user_id = :uid
               AND gcm.canvas_course_id = ANY(:enrolled)
-            ORDER BY gcm.canvas_course_id, gcea.exam_name,
+            ORDER BY gcea.exam_name,
                      CASE gar.status WHEN 'scored' THEN 2 WHEN 'awaiting_marking' THEN 1 ELSE 0 END DESC,
                      gar.last_imported_at DESC NULLS LAST
         """),
         {"uid": user_id, "enrolled": enrolled_ids},
     )
     all_gradeo = gradeo_result.fetchall()
-    gradeo_flagged = [
-        r for r in all_gradeo
-        if r.status == "awaiting_marking"
-        or r.status == "not_submitted"
-        or (r.status != "awaiting_marking" and r.exam_mark is None)
-        or (r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5)
-    ]
-
-    # ── Assessment Tracking: disabled until data is fixed ──
-    tracking_rows = []
-    tracking_count = 0
 
     # ── Build PDF ──
     styles = _pdf_styles()
-    els: list = []
-
-    # Header
-    els.append(Paragraph("Missing Work Report", styles["title"]))
-    if course_id is not None:
-        c_info = courses_map[course_id]
-        c_label = c_info.get("code") or c_info.get("name") or str(course_id)
-        els.append(Paragraph(
-            f"{student.name} &nbsp;|&nbsp; {c_label} &nbsp;|&nbsp; {date.today().strftime('%d %B %Y')}",
-            styles["subtitle"],
-        ))
-    else:
-        els.append(Paragraph(
-            f"{student.name} &nbsp;|&nbsp; {date.today().strftime('%d %B %Y')}",
-            styles["subtitle"],
-        ))
-    els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
-
+    els = _build_report_header("2-Week Snapshot", student, courses_map, course_id, styles)
     avail = A4[0] - 30 * mm
 
-    P = lambda t: _p(t, styles)
-    PH = lambda t: _p(t, styles, header=True)
+    els += _build_canvas_section(
+        recent_canvas, courses_map, styles, avail,
+        all_statuses=True,
+        show_summary=True,
+        section_title="Canvas — Recent Assignments (Last 14 Days)",
+        empty_msg="No Canvas assignments due in the last 14 days.",
+    )
+    els += _build_edstem_section(missing_edstem, courses_map, styles, avail, has_edstem)
+    els += _build_gradeo_section(
+        all_gradeo, courses_map, styles, avail,
+        show_summary=True,
+        section_title="Gradeo — All Results",
+        empty_msg="No Gradeo results.",
+    )
 
-    # ── Canvas — Recent Assignments (last 14 days) ──
-    els.append(Paragraph("Canvas — Recent Assignments (Last 14 Days)", styles["section"]))
-    if recent_canvas:
-        c_data = [[PH("Course"), PH("Assignment"), PH("Due Date"), PH("Score"), PH("Status")]]
-        c_cmds = list(_base_table_style())
-        for i, r in enumerate(recent_canvas, start=1):
-            c_info = courses_map.get(r.course_id, {})
-            c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
-            due_str = r.due_at.strftime("%d %b %Y") if r.due_at else "—"
-
-            ws = r.workflow_state or ""
-            if ws == "graded":
-                status = "Graded"
-                if r.score is not None and r.points_possible:
-                    pp = int(r.points_possible) if r.points_possible == int(r.points_possible) else round(r.points_possible, 1)
-                    score_str = f"{round(r.score, 1)}/{pp}"
-                elif r.score is not None:
-                    score_str = str(round(r.score, 1))
-                else:
-                    score_str = "—"
-                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
-            elif ws == "submitted":
-                status = "Submitted"
-                score_str = "—"
-                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            elif r.missing:
-                status = "Missing"
-                score_str = "—"
-                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-            else:
-                status = "Not Submitted"
-                score_str = "—"
-                c_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-
-            if r.late and ws in ("graded", "submitted"):
-                status += " (Late)"
-
-            c_data.append([
-                P(c_label),
-                P(r.assignment_name),
-                P(due_str),
-                P(score_str),
-                P(status),
-            ])
-        c_widths = [avail * 0.12, avail * 0.38, avail * 0.16, avail * 0.16, avail * 0.18]
-        ct = Table(c_data, colWidths=c_widths, repeatRows=1)
-        ct.setStyle(TableStyle(c_cmds))
-        els.append(ct)
-    else:
-        els.append(Paragraph("No Canvas assignments due in the last 14 days.", styles["body_small"]))
-
-    # ── EdStem Incomplete Lessons (skip entirely for ENC-only reports) ──
-    if edstem_enrolled:
-        els.append(Paragraph("EdStem — Incomplete Lessons", styles["section"]))
-        if missing_edstem:
-            e_data = [[PH("Course"), PH("Module"), PH("Lesson"), PH("Status")]]
-            e_cmds = list(_base_table_style())
-            for i, r in enumerate(missing_edstem, start=1):
-                c_info = courses_map.get(r.course_id, {})
-                c_label = c_info.get("code") or c_info.get("name") or str(r.course_id)
-                e_data.append([
-                    P(c_label),
-                    P(r.module_name or "—"),
-                    P(r.lesson_title),
-                    P(_status_display(r.status)),
-                ])
-                if r.status == "not_started":
-                    e_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-                elif r.status == "viewed":
-                    e_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            e_widths = [avail * 0.12, avail * 0.34, avail * 0.40, avail * 0.14]
-            et = Table(e_data, colWidths=e_widths, repeatRows=1)
-            et.setStyle(TableStyle(e_cmds))
-            els.append(et)
-        else:
-            els.append(Paragraph("All EdStem lessons completed.", styles["body_small"]))
-
-    # ── Gradeo Results (all exams, flagged items highlighted) ──
-    els.append(Paragraph("Gradeo — All Results", styles["section"]))
-    if all_gradeo:
-        g_data = [[PH("Course"), PH("Exam"), PH("Score"), PH("Status"), PH("Topics")]]
-        g_cmds = list(_base_table_style())
-        for i, r in enumerate(all_gradeo, start=1):
-            c_info = courses_map.get(r.course_id, {})
-            c_label = c_info.get("code") or c_info.get("name") or str(r.course_id or 0)
-            mark = (
-                f"{r.exam_mark}/{r.marks_available}"
-                if r.exam_mark is not None else "—"
-            )
-            g_data.append([P(c_label), P(r.exam_name), P(mark), P(r.status or "—"), P(r.topics or "")])
-            if r.status == "awaiting_marking":
-                pass  # white — no highlight
-            elif r.status == "not_submitted" or r.exam_mark is None:
-                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-            elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
-                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            elif r.status == "scored":
-                g_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
-        g_widths = [avail * 0.14, avail * 0.25, avail * 0.14, avail * 0.18, avail * 0.29]
-        gt = Table(g_data, colWidths=g_widths, repeatRows=1)
-        gt.setStyle(TableStyle(g_cmds))
-        els.append(gt)
-    else:
-        els.append(Paragraph(
-            "No Gradeo results.",
-            styles["body_small"],
-        ))
-
-    # ── Assessment Tracking — disabled until data is fixed ──
-
-    # Build and return
     name_slug = re.sub(r"[^a-z0-9]+", "-", student.name.lower()).strip("-")
-    filename = f"{name_slug}-missing-report-{date.today().isoformat()}.pdf"
+    filename = f"{name_slug}-snapshot-{date.today().isoformat()}.pdf"
     return _build_pdf(els, filename, inline=(preview == 1))
 
 

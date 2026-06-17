@@ -60,7 +60,7 @@ async def get_tracking_grid(
             SELECT u.id, u.name, u.sortable_name
             FROM users u
             JOIN enrollments e ON e.user_id = u.id
-            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment' AND e.enrollment_state = 'active'
+            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
             ORDER BY u.sortable_name, u.name
         """),
         {"course_id": course_id},
