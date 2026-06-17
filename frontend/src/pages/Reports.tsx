@@ -409,14 +409,27 @@ export default function Reports() {
               <ReportCard
                 title="Missing Work Report"
                 description={pdfCourseId
-                  ? "PDF listing outstanding work for this student in the selected course. Includes missing Canvas assignments, flagged Gradeo assessments, and assessment tracking."
-                  : "PDF listing all outstanding work for this student across every enrolled course. Select a course above to filter to a single course."
+                  ? "All-time missing/incomplete work for this student in the selected course. Includes missing Canvas assignments, flagged Gradeo assessments, and incomplete EdStem lessons."
+                  : "All-time missing/incomplete work for this student across every enrolled course. Select a course above to filter."
                 }
                 path={pdfCourseId
                   ? `/reports/students/${pdfStudentId}/missing-report-pdf?course_id=${pdfCourseId}`
                   : `/reports/students/${pdfStudentId}/missing-report-pdf`
                 }
                 fallbackName="missing-report"
+                formats={['pdf']}
+              />
+              <ReportCard
+                title="2-Week Snapshot"
+                description={pdfCourseId
+                  ? "Overview of all Canvas assignment statuses from the last 14 days for the selected course, plus Gradeo results and incomplete EdStem lessons."
+                  : "Overview of all Canvas assignment statuses from the last 14 days across every enrolled course, plus Gradeo results and incomplete EdStem lessons."
+                }
+                path={pdfCourseId
+                  ? `/reports/students/${pdfStudentId}/snapshot-report-pdf?course_id=${pdfCourseId}`
+                  : `/reports/students/${pdfStudentId}/snapshot-report-pdf`
+                }
+                fallbackName="snapshot-report"
                 formats={['pdf']}
               />
               <ReportCard
