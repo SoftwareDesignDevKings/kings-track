@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
+import CourseOverviewTab from '../components/CourseOverviewTab'
 import ActivityTable from '../components/ActivityTable'
 import EdStemLessonTable from '../components/EdStemLessonTable'
 import GradeoReportTable from '../components/GradeoReportTable'
@@ -18,7 +19,7 @@ import { downloadCsv } from '../lib/downloadCsv'
 import AssignmentTrackingTab from '../components/AssignmentTrackingTab'
 import { getCourseGroupCode } from '../utils/courseGrouping'
 
-type TabId = 'activities' | 'engagement' | 'gradeo' | 'topic_bands' | 'edstem' | 'tracking'
+type TabId = 'overview' | 'activities' | 'engagement' | 'gradeo' | 'topic_bands' | 'edstem' | 'tracking'
 
 interface Tab {
   id: TabId
@@ -26,6 +27,7 @@ interface Tab {
 }
 
 const TABS: Tab[] = [
+  { id: 'overview', label: 'Overview' },
   { id: 'activities', label: 'Canvas' },
   { id: 'edstem', label: 'EdStem' },
   { id: 'gradeo', label: 'Gradeo' },
@@ -35,12 +37,14 @@ const TABS: Tab[] = [
 ]
 
 function getTabFromSearch(value: string | null): TabId {
+  if (value === 'canvas' || value === 'activities') return 'activities'
   if (value === 'gradeo' || value === 'edstem' || value === 'engagement' || value === 'tracking') return value
   if (value === 'topic-bands' || value === 'topic_bands') return 'topic_bands'
-  return 'activities'
+  return 'overview'
 }
 
 function getTabSearchValue(tab: TabId) {
+  if (tab === 'overview') return null
   if (tab === 'activities') return 'canvas'
   if (tab === 'topic_bands') return 'topic-bands'
   return tab
@@ -78,6 +82,36 @@ export default function CourseDetail() {
       0,
     ) / totalStudents
     : null
+  // ── Overview metrics (derived from matrix) ──────────────────────────────
+  const overviewMetrics = useMemo(() => {
+    if (!matrix) return null
+    const students = matrix.students
+    const n = students.length
+    if (n === 0) return { avgCompletionRate: null, avgOnTimeRate: null, avgScore: null, studentCompletionRates: [] as (number | null)[], submissionCounts: { completed: 0, in_progress: 0, not_started: 0, excused: 0 } }
+
+    const completionRates = students.map(s => s.metrics.completion_rate)
+    const onTimeRates = students.map(s => s.metrics.on_time_rate).filter((v): v is number => v !== null)
+    const scores = students.map(s => s.metrics.current_score).filter((v): v is number => v !== null)
+
+    const avgCompletionRate = completionRates.filter((v): v is number => v !== null).length > 0
+      ? completionRates.filter((v): v is number => v !== null).reduce((a, b) => a + b, 0) / completionRates.filter(v => v !== null).length
+      : null
+    const avgOnTimeRate = onTimeRates.length > 0 ? onTimeRates.reduce((a, b) => a + b, 0) / onTimeRates.length : null
+    const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null
+
+    const counts = { completed: 0, in_progress: 0, not_started: 0, excused: 0 }
+    for (const student of students) {
+      for (const sub of Object.values(student.submissions)) {
+        if (sub.status === 'completed') counts.completed++
+        else if (sub.status === 'in_progress') counts.in_progress++
+        else if (sub.status === 'not_started') counts.not_started++
+        else if (sub.status === 'excused') counts.excused++
+      }
+    }
+
+    return { avgCompletionRate, avgOnTimeRate, avgScore, studentCompletionRates: completionRates, submissionCounts: counts }
+  }, [matrix])
+
   const gradeoMapped = Boolean(gradeoReport?.mapped || gradeoTopicBands?.mapped)
   const tabs = useMemo(() => TABS.filter(tab => {
     if (tab.id === 'gradeo') return gradeoMapped
@@ -143,12 +177,12 @@ export default function CourseDetail() {
       const next = new URLSearchParams(prev)
       next.delete('gradeo')
 
-      if (tab === 'activities') {
+      const value = getTabSearchValue(tab)
+      if (value === null) {
         next.delete('tab')
-        return next
+      } else {
+        next.set('tab', value)
       }
-
-      next.set('tab', getTabSearchValue(tab))
       return next
     }, { replace: true })
   }
@@ -276,6 +310,22 @@ export default function CourseDetail() {
         </div>
 
         <section className="min-h-0 min-w-0 flex-1">
+          {activeTab === 'overview' && (
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              <CourseOverviewTab
+                totalStudents={totalStudents}
+                totalAssignments={totalAssignments}
+                avgCompletionRate={overviewMetrics?.avgCompletionRate ?? null}
+                avgOnTimeRate={overviewMetrics?.avgOnTimeRate ?? null}
+                avgScore={overviewMetrics?.avgScore ?? null}
+                studentCompletionRates={overviewMetrics?.studentCompletionRates ?? []}
+                submissionCounts={overviewMetrics?.submissionCounts ?? { completed: 0, in_progress: 0, not_started: 0, excused: 0 }}
+                courseActivity={engagement?.course_activity}
+                isLoading={isLoading}
+              />
+            </div>
+          )}
+
           {activeTab === 'activities' && (
             <div className="flex h-full min-h-0 min-w-0 flex-col">
               {isLoading && (

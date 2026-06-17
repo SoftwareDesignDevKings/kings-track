@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useParams, Link, Navigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
+import CourseOverviewTab from '../components/CourseOverviewTab'
 import MatrixTable from '../components/MatrixTable'
 import { buildCourseGroupMatrixTableModel } from '../components/matrixTableAdapters'
 import EngagementTable from '../components/EngagementTable'
@@ -19,7 +20,7 @@ import {
   useCourseGroupTrackableAssignments,
 } from '../services/api'
 
-type GroupTab = 'canvas' | 'engagement' | 'edstem' | 'gradeo' | 'topic_bands' | 'tracking'
+type GroupTab = 'overview' | 'canvas' | 'engagement' | 'edstem' | 'gradeo' | 'topic_bands' | 'tracking'
 
 interface Tab {
   id: GroupTab
@@ -27,6 +28,7 @@ interface Tab {
 }
 
 const ALL_TABS: Tab[] = [
+  { id: 'overview', label: 'Overview' },
   { id: 'canvas', label: 'Canvas' },
   { id: 'edstem', label: 'EdStem' },
   { id: 'gradeo', label: 'Gradeo' },
@@ -36,13 +38,14 @@ const ALL_TABS: Tab[] = [
 ]
 
 function getTabFromSearch(value: string | null): GroupTab {
+  if (value === 'canvas') return 'canvas'
   if (value === 'engagement' || value === 'edstem' || value === 'gradeo' || value === 'tracking') return value
   if (value === 'topic-bands' || value === 'topic_bands') return 'topic_bands'
-  return 'canvas'
+  return 'overview'
 }
 
 function getTabSearchValue(tab: GroupTab) {
-  if (tab === 'canvas') return null
+  if (tab === 'overview') return null
   if (tab === 'topic_bands') return 'topic-bands'
   return tab
 }
@@ -100,6 +103,39 @@ export default function CourseGroupDetail() {
     useCourseGroupTopicBands(enableGroupHooks)
   const { data: trackableAssignments, isLoading: trackingLoading } =
     useCourseGroupTrackableAssignments(enableGroupHooks)
+
+  // ── Overview metrics (derived from group matrix) ─────────────────────────
+  const overviewMetrics = useMemo(() => {
+    if (!groupMatrix) return null
+    const students = groupMatrix.students
+    const n = students.length
+    if (n === 0) return { avgCompletionRate: null, avgOnTimeRate: null, avgScore: null, studentCompletionRates: [] as (number | null)[], submissionCounts: { completed: 0, in_progress: 0, not_started: 0, excused: 0 }, totalAssignments: 0 }
+
+    const completionRates = students.map(s => s.metrics.completion_rate)
+    const onTimeRates = students.map(s => s.metrics.on_time_rate).filter((v): v is number => v !== null)
+    const scores = students.map(s => s.metrics.current_score).filter((v): v is number => v !== null)
+
+    const validCompletionRates = completionRates.filter((v): v is number => v !== null)
+    const avgCompletionRate = validCompletionRates.length > 0
+      ? validCompletionRates.reduce((a, b) => a + b, 0) / validCompletionRates.length
+      : null
+    const avgOnTimeRate = onTimeRates.length > 0 ? onTimeRates.reduce((a, b) => a + b, 0) / onTimeRates.length : null
+    const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null
+
+    const totalAssignments = groupMatrix.assignment_groups.reduce((sum, g) => sum + g.assignments.length, 0)
+
+    const counts = { completed: 0, in_progress: 0, not_started: 0, excused: 0 }
+    for (const student of students) {
+      for (const sub of Object.values(student.submissions)) {
+        if (sub.status === 'completed') counts.completed++
+        else if (sub.status === 'in_progress') counts.in_progress++
+        else if (sub.status === 'not_started') counts.not_started++
+        else if (sub.status === 'excused') counts.excused++
+      }
+    }
+
+    return { avgCompletionRate, avgOnTimeRate, avgScore, studentCompletionRates: completionRates, submissionCounts: counts, totalAssignments }
+  }, [groupMatrix])
 
   // ── Tab filtering ────────────────────────────────────────────────────────
   const gradeoMapped = Boolean(gradeoReport?.mapped || gradeoTopicBands?.mapped)
@@ -215,6 +251,23 @@ export default function CourseGroupDetail() {
 
             {/* Tab content */}
             <section className="min-h-0 min-w-0 flex-1 flex flex-col">
+
+              {/* Overview tab */}
+              {activeTab === 'overview' && (
+                <div className="flex h-full min-h-0 min-w-0 flex-col">
+                  <CourseOverviewTab
+                    totalStudents={group.total_students}
+                    totalAssignments={overviewMetrics?.totalAssignments ?? 0}
+                    avgCompletionRate={overviewMetrics?.avgCompletionRate ?? null}
+                    avgOnTimeRate={overviewMetrics?.avgOnTimeRate ?? null}
+                    avgScore={overviewMetrics?.avgScore ?? null}
+                    studentCompletionRates={overviewMetrics?.studentCompletionRates ?? []}
+                    submissionCounts={overviewMetrics?.submissionCounts ?? { completed: 0, in_progress: 0, not_started: 0, excused: 0 }}
+                    courseActivity={engagement?.course_activity}
+                    isLoading={matrixLoading}
+                  />
+                </div>
+              )}
 
               {/* Canvas tab */}
               {activeTab === 'canvas' && (
