@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import type {
-  Course, CourseGroup, CourseMatrix, CourseEngagement, SyncStatus, HealthResponse, CanvasHealthResponse, AppUser,
+  Course, CourseGroup, CourseGroupMatrix, CourseMatrix, CourseEngagement, SyncStatus, HealthResponse, CanvasHealthResponse, AppUser,
   WhitelistedCourse, AvailableCourse,
   EdStemMatrix, EdStemCourseMapping, EdStemAvailableCourse,
   GradeoStudentDirectoryStatus, GradeoDiscoveredClass, GradeoClassMapping,
@@ -80,6 +80,15 @@ export function useCourseGroups() {
     queryKey: ['course-groups'],
     queryFn: () => fetchJSON<CourseGroup[]>('/courses/groups'),
     staleTime: 60_000,
+  })
+}
+
+export function useCourseGroupMatrix(groupCode: string | undefined) {
+  return useQuery<CourseGroupMatrix>({
+    queryKey: ['group-matrix', groupCode],
+    queryFn: () => fetchJSON<CourseGroupMatrix>(`/courses/group/${groupCode}/matrix`),
+    staleTime: 60_000,
+    enabled: !!groupCode,
   })
 }
 

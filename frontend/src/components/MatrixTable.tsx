@@ -717,7 +717,7 @@ export default function MatrixTable({ model }: Props) {
       const query = String(filterValue).trim().toLowerCase()
       if (!query) return true
       const original = row.original
-      return [original.name, original.sortableName].filter(Boolean).some(value =>
+      return [original.name, original.sortableName, original.subtitle].filter(Boolean).some(value =>
         String(value).toLowerCase().includes(query),
       )
     },
@@ -1185,7 +1185,12 @@ export default function MatrixTable({ model }: Props) {
                 return (
                   <tr key={original.id} className={`${rowBg} transition-colors hover:bg-brand-50/40`}>
                     <td className={`sticky-col-1 border-r border-slate-200 px-4 py-2.5 ${rowBg}`}>
-                      <span className="text-sm font-medium text-slate-800">{original.name}</span>
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium text-slate-800">{original.name}</span>
+                        {original.subtitle && (
+                          <span className="block text-xs text-slate-400 truncate">{original.subtitle}</span>
+                        )}
+                      </div>
                     </td>
                     {!model.hideCompletionColumn && (
                       <td className={`sticky-col-2 border-r border-slate-200 px-3 py-2.5 ${rowBg}`}>

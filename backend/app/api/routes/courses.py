@@ -267,6 +267,174 @@ async def list_course_groups(db: AsyncSession = Depends(get_db)):
     return result
 
 
+@router.get("/group/{group_code}/matrix")
+async def get_course_group_matrix(group_code: str, db: AsyncSession = Depends(get_db)):
+    """Return a combined activity matrix for all classes in a course group."""
+    courses = await _get_course_list(db)
+    group_courses = [
+        c for c in courses
+        if _get_course_group_code(c["course_code"]) == group_code.upper()
+    ]
+    if not group_courses:
+        raise HTTPException(status_code=404, detail="Course group not found")
+
+    course_ids = [c["id"] for c in group_courses]
+
+    # Display name (same logic as /groups)
+    descriptions: list[str] = []
+    for c in group_courses:
+        parts = c["name"].split(None, 1)
+        descriptions.append(parts[1] if len(parts) > 1 else c["name"])
+    if len(descriptions) == 1:
+        display_name = descriptions[0]
+    else:
+        desc_freq: dict[str, int] = {}
+        for desc in descriptions:
+            desc_freq[desc] = desc_freq.get(desc, 0) + 1
+        display_name = max(desc_freq, key=lambda d: (desc_freq[d], len(d)))
+
+    # ── Assignments from ALL courses ──────────────────────────────────────
+    assignment_result = await db.execute(
+        text("""
+            SELECT a.id, a.name, a.assignment_group_name, a.assignment_group_id,
+                   a.assignment_group_position, a.points_possible, a.due_at, a.position,
+                   a.course_id
+            FROM assignments a
+            WHERE a.course_id IN :course_ids AND a.workflow_state = 'published'
+            ORDER BY a.assignment_group_position IS NULL,
+                     a.assignment_group_position,
+                     a.assignment_group_id IS NULL,
+                     a.assignment_group_id,
+                     a.position IS NULL,
+                     a.position,
+                     a.id
+        """).bindparams(bindparam("course_ids", expanding=True)),
+        {"course_ids": course_ids},
+    )
+    assignments_raw = assignment_result.fetchall()
+
+    # Deduplicate assignments by (group_name, name) across classes.
+    # Sections of the same course share assignment names but have different IDs.
+    canonical_key_to_id: dict[tuple[str, str], int] = {}
+    original_to_canonical: dict[int, int] = {}
+    canonical_assignments: dict[int, dict] = {}
+
+    group_order: list[str] = []
+    seen_groups: set[str] = set()
+    group_assignments: dict[str, list[int]] = {}
+
+    for a_row in assignments_raw:
+        a_id, a_name, ag_name, ag_id, ag_pos, points, due_at, pos, cid = a_row
+        group_key = ag_name or "Uncategorised"
+        canon_key = (group_key, a_name)
+
+        if canon_key not in canonical_key_to_id:
+            canonical_key_to_id[canon_key] = a_id
+            canonical_assignments[a_id] = {
+                "id": a_id,
+                "name": a_name,
+                "points_possible": points,
+                "due_at": _to_iso(due_at),
+            }
+            if group_key not in seen_groups:
+                group_order.append(group_key)
+                seen_groups.add(group_key)
+                group_assignments[group_key] = []
+            group_assignments[group_key].append(a_id)
+
+        original_to_canonical[a_id] = canonical_key_to_id[canon_key]
+
+    assignment_groups = [
+        {"name": g, "assignments": [canonical_assignments[aid] for aid in group_assignments[g]]}
+        for g in group_order
+    ]
+    all_canonical_ids = [aid for g in group_order for aid in group_assignments[g]]
+
+    # ── Students from ALL courses ─────────────────────────────────────────
+    students_result = await db.execute(
+        text("""
+            SELECT u.id, u.name, u.sortable_name,
+                   sm.completion_rate, sm.on_time_rate, sm.current_score,
+                   e.course_id, c.course_code
+            FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            JOIN courses c ON c.id = e.course_id
+            LEFT JOIN student_metrics sm ON sm.user_id = e.user_id AND sm.course_id = e.course_id
+            WHERE e.course_id IN :course_ids AND e.role = 'StudentEnrollment'
+            ORDER BY u.sortable_name IS NULL, u.sortable_name
+        """).bindparams(bindparam("course_ids", expanding=True)),
+        {"course_ids": course_ids},
+    )
+    students_raw = students_result.fetchall()
+
+    # ── Submissions from ALL courses, remapped to canonical assignment IDs ─
+    submissions_result = await db.execute(
+        text("""
+            SELECT user_id, assignment_id, workflow_state, score, late, missing, excused
+            FROM submissions
+            WHERE course_id IN :course_ids
+        """).bindparams(bindparam("course_ids", expanding=True)),
+        {"course_ids": course_ids},
+    )
+
+    sub_lookup: dict[int, dict[int, dict]] = {}
+    for s_row in submissions_result.fetchall():
+        uid, aid, ws, score, late, missing, excused = s_row
+        canonical_aid = original_to_canonical.get(aid)
+        if canonical_aid is None:
+            continue
+        sub_lookup.setdefault(uid, {})[canonical_aid] = {
+            "status": _submission_status(ws, score, excused),
+            "score": score,
+            "late": bool(late),
+            "missing": bool(missing),
+        }
+
+    # ── Build student rows ────────────────────────────────────────────────
+    seen_students: set[int] = set()
+    students = []
+    for s_row in students_raw:
+        uid, name, sortable_name, completion_rate, on_time_rate, current_score, cid, ccode = s_row
+        if uid in seen_students:
+            continue
+        seen_students.add(uid)
+
+        user_subs = sub_lookup.get(uid, {})
+        submissions = {}
+        for aid in all_canonical_ids:
+            if aid in user_subs:
+                submissions[str(aid)] = user_subs[aid]
+            else:
+                submissions[str(aid)] = {
+                    "status": "not_started",
+                    "score": None,
+                    "late": False,
+                    "missing": False,
+                }
+
+        students.append({
+            "id": uid,
+            "name": name,
+            "sortable_name": sortable_name,
+            "class_code": ccode,
+            "class_id": cid,
+            "submissions": submissions,
+            "metrics": {
+                "completion_rate": float(completion_rate) if completion_rate is not None else None,
+                "on_time_rate": float(on_time_rate) if on_time_rate is not None else None,
+                "current_score": float(current_score) if current_score is not None else None,
+            },
+        })
+
+    return {
+        "course_id": 0,
+        "course_name": display_name,
+        "course_code": group_code.upper(),
+        "assignment_groups": assignment_groups,
+        "students": students,
+    }
+
+
 @router.get("/{course_id}")
 async def get_course(course_id: int, db: AsyncSession = Depends(get_db)):
     """Get a single course with student and assignment counts."""

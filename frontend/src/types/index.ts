@@ -89,6 +89,15 @@ export interface CourseMatrix {
   students: StudentRow[]
 }
 
+export interface GroupStudentRow extends StudentRow {
+  class_code: string | null
+  class_id: number
+}
+
+export interface CourseGroupMatrix extends CourseMatrix {
+  students: GroupStudentRow[]
+}
+
 // ─── Engagement ──────────────────────────────────────────────────────────────
 
 export interface CourseEngagementStudent {
