@@ -92,6 +92,53 @@ export function useCourseGroupMatrix(groupCode: string | undefined) {
   })
 }
 
+export function useCourseGroupEngagement(groupCode: string | undefined) {
+  return useQuery<CourseEngagement>({
+    queryKey: ['group-engagement', groupCode],
+    queryFn: () => fetchJSON<CourseEngagement>(`/courses/group/${groupCode}/engagement`),
+    staleTime: 60_000,
+    enabled: !!groupCode,
+  })
+}
+
+export function useCourseGroupEdStem(groupCode: string | undefined) {
+  return useQuery<EdStemMatrix>({
+    queryKey: ['group-edstem', groupCode],
+    queryFn: () => fetchJSON<EdStemMatrix>(`/courses/group/${groupCode}/edstem-matrix`),
+    staleTime: 60_000,
+    enabled: !!groupCode,
+  })
+}
+
+export function useCourseGroupGradeo(groupCode: string | undefined) {
+  return useQuery<GradeoCourseReport>({
+    queryKey: ['group-gradeo', groupCode],
+    queryFn: () => fetchJSON<GradeoCourseReport>(`/courses/group/${groupCode}/gradeo`, { cache: 'no-store' }),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    enabled: !!groupCode,
+  })
+}
+
+export function useCourseGroupTopicBands(groupCode: string | undefined) {
+  return useQuery<GradeoTopicBands>({
+    queryKey: ['group-topic-bands', groupCode],
+    queryFn: () => fetchJSON<GradeoTopicBands>(`/courses/group/${groupCode}/gradeo/topic-bands`, { cache: 'no-store' }),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    enabled: !!groupCode,
+  })
+}
+
+export function useCourseGroupTrackableAssignments(groupCode: string | undefined) {
+  return useQuery<(TrackableAssignment & { course_id: number })[]>({
+    queryKey: ['group-tracking-assignments', groupCode],
+    queryFn: () => fetchJSON<(TrackableAssignment & { course_id: number })[]>(`/courses/group/${groupCode}/tracking/assignments`),
+    staleTime: 60_000,
+    enabled: !!groupCode,
+  })
+}
+
 export function useCourseMatrix(courseId: number) {
   return useQuery<CourseMatrix>({
     queryKey: ['matrix', courseId],
