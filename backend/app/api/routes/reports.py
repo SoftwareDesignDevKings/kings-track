@@ -1327,15 +1327,15 @@ async def list_course_cycles(
 # 10b. Current Cycle Update PDF
 # ---------------------------------------------------------------------------
 
-async def _build_cycle_update_elements(
+async def _build_full_report_elements(
     db: AsyncSession,
     user_id: int,
     course_id: int,
-    cycle_num: int | None,
 ) -> list:
-    """Build the ReportLab elements for a single student's cycle update.
+    """Build ReportLab elements for a single student's full report.
 
-    Returns the flowable elements list.  Raises ``HTTPException`` on errors.
+    Shows all assignments due before today with their statuses, plus
+    Gradeo results and EdStem completion.  Raises ``HTTPException`` on errors.
     """
     # ── Fetch student ──
     stu_result = await db.execute(
@@ -1355,7 +1355,8 @@ async def _build_cycle_update_elements(
     if not course:
         raise HTTPException(404, "Course not found")
 
-    # ── Fetch assignments grouped by assignment_group ──
+    # ── Fetch all published assignments due before now ──
+    now = datetime.utcnow()
     asg_result = await db.execute(
         text("""
             SELECT a.id, a.name, a.assignment_group_name, a.assignment_group_position,
@@ -1363,112 +1364,16 @@ async def _build_cycle_update_elements(
                    s.score, s.workflow_state, s.late, s.missing
             FROM assignments a
             LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = :uid
-            WHERE a.course_id = :cid AND a.workflow_state = 'published'
-            ORDER BY a.assignment_group_position NULLS LAST,
-                     a.assignment_group_id NULLS LAST,
-                     a.position NULLS LAST, a.due_at NULLS LAST
+            WHERE a.course_id = :cid
+              AND a.workflow_state = 'published'
+              AND a.due_at IS NOT NULL
+              AND a.due_at <= NOW()
+            ORDER BY a.due_at, a.assignment_group_position NULLS LAST,
+                     a.position NULLS LAST
         """),
         {"uid": user_id, "cid": course_id},
     )
-    rows = asg_result.fetchall()
-
-    all_groups: dict[str, list] = {}
-    all_group_order: list[str] = []
-    for r in rows:
-        gname = r.assignment_group_name or "Ungrouped"
-        if gname not in all_groups:
-            all_groups[gname] = []
-            all_group_order.append(gname)
-        all_groups[gname].append(r)
-
-    groups: dict[str, list] = {}
-    group_order: list[str] = []
-    for gname in all_group_order:
-        if gname.lower().startswith("unit "):
-            groups[gname] = all_groups[gname]
-            group_order.append(gname)
-
-    # Fallback: if no Unit-prefixed groups, use all groups (e.g. ENC courses)
-    if not groups:
-        groups = dict(all_groups)
-        group_order = list(all_group_order)
-
-    if not groups:
-        raise HTTPException(404, "No assignment groups found for this course")
-
-    # ── Detect current unit ──
-    now = datetime.utcnow()
-    cycle_label: str | None = None
-
-    if cycle_num is not None:
-        modules = await _fetch_canvas_modules(course_id)
-        target_topic: str | None = None
-        target_term: int | None = None
-        target_sw: int | None = None
-        target_ew: int | None = None
-        if modules:
-            for mod in modules:
-                parsed = _parse_module_schedule(mod["name"])
-                if parsed and parsed[0] == cycle_num:
-                    target_topic = parsed[4]
-                    target_term = parsed[1]
-                    target_sw = parsed[2]
-                    target_ew = parsed[3]
-                    break
-
-        best_group = group_order[-1]
-        if target_topic:
-            for gname in group_order:
-                # Try "Unit N: Topic" pattern first
-                um = re.match(r"Unit\s+\d+[:\s\-]+(.+)", gname)
-                if um:
-                    topic_part = um.group(1)
-                else:
-                    # Fallback: strip any leading number/prefix and use the
-                    # full name for matching (handles non-Unit group names)
-                    stripped = re.sub(r"^\d+[\.\)\s:\-]+\s*", "", gname).strip()
-                    topic_part = stripped if stripped else gname
-                utopics = [
-                    t.strip()
-                    for t in re.split(r"\s*[–\-,&]\s*", topic_part)
-                    if t.strip()
-                ]
-                if any(
-                    ut.lower() in target_topic.lower()
-                    or target_topic.lower() in ut.lower()
-                    for ut in utopics
-                ):
-                    best_group = gname
-                    break
-
-        if target_sw and target_ew:
-            cycle_label = (
-                f"Cycle {cycle_num} — Term {target_term}: "
-                f"Weeks {target_sw}-{target_ew}"
-            )
-        else:
-            cycle_label = f"Cycle {cycle_num}"
-    else:
-        best_group = group_order[-1]
-        for gname in group_order:
-            done = sum(
-                1 for r in groups[gname]
-                if r.workflow_state in ("submitted", "graded")
-            )
-            if done < len(groups[gname]):
-                best_group = gname
-                break
-
-    # Use ALL assignments across every group (so quizzes in separate groups appear)
-    all_unit_assignments = sorted(rows, key=_assignment_sort_key)
-
-    two_weeks_ago = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=14)
-    end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-    current_assignments = [
-        a for a in all_unit_assignments
-        if a.due_at is not None
-        and two_weeks_ago <= (a.due_at.replace(tzinfo=None) if a.due_at.tzinfo else a.due_at) <= end_of_today
-    ]
+    assignments = asg_result.fetchall()
 
     # ── Look up Gradeo class mapping for this course ──
     gcm_result = await db.execute(
@@ -1478,8 +1383,6 @@ async def _build_cycle_update_elements(
     gradeo_class_ids = [r[0] for r in gcm_result.fetchall()]
 
     # ── Fetch Gradeo results (deduplicate by exam name) ──
-    # Filter by gradeo_class_id (not canvas_course_id) to match the course page
-    # query and avoid picking stale rows. Prefer scored > awaiting > not_submitted.
     gradeo_result = await db.execute(
         text("""
             SELECT DISTINCT ON (gcea.exam_name)
@@ -1498,21 +1401,15 @@ async def _build_cycle_update_elements(
     )
     gradeo_exams = gradeo_result.fetchall()
 
-    gradeo_by_cycle: dict[int, object] = {}
-    for ge in gradeo_exams:
-        m = re.search(r"Cycle\s*(\d+)", ge.exam_name, re.IGNORECASE)
-        if m:
-            gradeo_by_cycle[int(m.group(1))] = ge
-    matched_gradeo_cycles: set[int] = set()
-
     # ── Build elements ──
     styles = _pdf_styles()
     els: list = []
+    avail = A4[0] - 30 * mm
+    P = lambda t: _p(t, styles)
+    PH = lambda t: _p(t, styles, header=True)
 
-    if cycle_label:
-        els.append(Paragraph(f"{cycle_label} Update", styles["title"]))
-    else:
-        els.append(Paragraph("Current Cycle Update", styles["title"]))
+    # Title / subtitle
+    els.append(Paragraph("Full Report", styles["title"]))
     course_label = f"{course.course_code} — {course.name}" if course.course_code else course.name
     subtitle_parts = [
         student.name,
@@ -1525,208 +1422,176 @@ async def _build_cycle_update_elements(
     ))
     els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
 
-    P = lambda t: _p(t, styles)
-    PH = lambda t: _p(t, styles, header=True)
-    has_gradeo = bool(gradeo_by_cycle)
-    headers = [PH("Assignment"), PH("Due Date"), PH("Status"), PH("Score"), PH("Late")]
-    if has_gradeo:
-        headers.append(PH("Gradeo"))
-    table_data = [headers]
-    style_cmds = list(_base_table_style())
+    # ── Canvas assignments table ──
+    els.append(Paragraph("Canvas — All Assignments Due to Date", styles["section"]))
 
-    divider_row: int | None = None
-    start_of_tomorrow = now.replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ) + timedelta(days=1)
-    has_due_dates = any(a.due_at for a in current_assignments)
-    if has_due_dates:
-        for i, a in enumerate(current_assignments):
-            if a.due_at:
-                naive = (
-                    a.due_at.replace(tzinfo=None)
-                    if a.due_at.tzinfo
-                    else a.due_at
-                )
-                if naive < start_of_tomorrow:
-                    divider_row = i + 1
-    else:
-        for i, a in enumerate(current_assignments):
-                if a.workflow_state in ("submitted", "graded"):
-                    divider_row = i + 1
+    if assignments:
+        headers = [PH("Assignment"), PH("Group"), PH("Due Date"), PH("Status"), PH("Score"), PH("Late")]
+        table_data = [headers]
+        style_cmds = list(_base_table_style())
 
-    for i, a in enumerate(current_assignments, start=1):
-        ws = a.workflow_state or ""
-        if ws == "graded":
-            status = "Graded"
-        elif ws == "submitted":
-            status = "Submitted"
-        elif a.missing:
-            status = "Missing"
-        elif a.due_at and a.due_at.replace(tzinfo=None) <= now:
-            status = "Not Submitted"
-        else:
-            status = "Upcoming"
-
-        due_str = a.due_at.strftime("%d %b %Y") if a.due_at else "—"
-        if a.score is not None:
-            s = round(a.score, 1)
-            pp = int(a.points_possible) if a.points_possible == int(a.points_possible) else round(a.points_possible, 1)
-            score_str = f"{s}/{pp}"
-        else:
-            score_str = "—"
-        late_str = "Yes" if a.late else ""
-
-        row = [P(a.name), P(due_str), P(status), P(score_str), P(late_str)]
-
-        if has_gradeo:
-            cycle_m = re.match(r"Cycle\s*(\d+)", a.name, re.IGNORECASE)
-            if cycle_m:
-                cn = int(cycle_m.group(1))
-                ge = gradeo_by_cycle.get(cn)
-                if ge and ge.exam_mark is not None:
-                    matched_gradeo_cycles.add(cn)
-                    row.append(P(f"{ge.exam_mark}/{ge.marks_available}"))
-                else:
-                    row.append(P("—"))
+        for i, a in enumerate(assignments, start=1):
+            ws = a.workflow_state or ""
+            if ws == "graded":
+                status = "Graded"
+            elif ws == "submitted":
+                status = "Submitted"
+            elif a.missing:
+                status = "Missing"
             else:
-                row.append(P(""))
+                status = "Not Submitted"
 
-        table_data.append(row)
+            due_str = a.due_at.strftime("%d %b %Y") if a.due_at else "—"
+            if a.score is not None:
+                s = round(a.score, 1)
+                pp = int(a.points_possible) if a.points_possible == int(a.points_possible) else round(a.points_possible, 1)
+                score_str = f"{s}/{pp}"
+            else:
+                score_str = "—"
+            late_str = "Yes" if a.late else ""
 
-        if status == "Missing":
-            style_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-        elif a.late:
-            style_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-        elif status == "Graded":
-            style_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
+            row = [
+                P(a.name),
+                P(a.assignment_group_name or "—"),
+                P(due_str),
+                P(status),
+                P(score_str),
+                P(late_str),
+            ]
+            table_data.append(row)
 
-    if (divider_row is not None
-            and 0 < divider_row < len(table_data) - 1):
-        style_cmds.append(
-            ("LINEBELOW", (0, divider_row), (-1, divider_row), 2.5, _RED)
+            if status in ("Missing", "Not Submitted"):
+                style_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+            elif a.late:
+                style_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
+            elif status == "Graded":
+                style_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
+
+        col_widths = [avail * 0.28, avail * 0.18, avail * 0.14, avail * 0.14, avail * 0.14, avail * 0.12]
+        t = Table(table_data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(TableStyle(style_cmds))
+        els.append(t)
+
+        # Summary stats
+        graded_scores = []
+        for a in assignments:
+            if a.workflow_state == "graded" and a.score is not None and a.points_possible:
+                graded_scores.append((a.score / a.points_possible) * 100)
+        total = len(assignments)
+        graded_count = len(graded_scores)
+        not_submitted = sum(
+            1 for a in assignments
+            if (a.workflow_state or "") not in ("submitted", "graded")
         )
-
-    avail = A4[0] - 30 * mm
-    if has_gradeo:
-        col_widths = [avail * 0.32, avail * 0.15, avail * 0.15, avail * 0.13, avail * 0.10, avail * 0.15]
+        avg_str = f"{sum(graded_scores) / len(graded_scores):.1f}%" if graded_scores else "N/A"
+        std_str = f"{_stats.stdev(graded_scores):.1f}%" if len(graded_scores) >= 2 else "N/A"
+        els.append(Paragraph(
+            f"Total: {total} assignments &nbsp;|&nbsp; "
+            f"Graded: {graded_count} &nbsp;|&nbsp; "
+            f"Not Submitted: {not_submitted} &nbsp;|&nbsp; "
+            f"Avg Score: {avg_str} &nbsp;|&nbsp; Std Dev: {std_str}",
+            styles["body"],
+        ))
     else:
-        col_widths = [avail * 0.38, avail * 0.18, avail * 0.18, avail * 0.15, avail * 0.11]
-    t = Table(table_data, colWidths=col_widths, repeatRows=1)
-    t.setStyle(TableStyle(style_cmds))
-    els.append(t)
+        els.append(Paragraph("No assignments due to date.", styles["body"]))
 
-    # ── Gradeo section (only unmatched exams) ──
-    unmatched_gradeo = []
-    for ge in gradeo_exams:
-        cm = re.search(r"Cycle\s*(\d+)", ge.exam_name, re.IGNORECASE)
-        if cm and int(cm.group(1)) in matched_gradeo_cycles:
-            continue
-        unmatched_gradeo.append(ge)
-    if unmatched_gradeo:
-        els.append(Paragraph("Gradeo Quiz Results", styles["section"]))
-        g_data = [[PH("Exam"), PH("Score"), PH("Class Avg"), PH("Topics")]]
+    # ── Gradeo section ──
+    if gradeo_exams:
+        els.append(Paragraph("Gradeo — All Results", styles["section"]))
+        g_data = [[PH("Exam"), PH("Score"), PH("Class Avg"), PH("Status"), PH("Topics")]]
         g_cmds = list(_base_table_style())
-        for i, ge in enumerate(unmatched_gradeo, start=1):
+        for i, ge in enumerate(gradeo_exams, start=1):
             mark_str = (
                 f"{ge.exam_mark}/{ge.marks_available}"
                 if ge.exam_mark is not None else "—"
             )
             avg_str = str(round(ge.class_average, 1)) if ge.class_average is not None else "—"
+            status_str = (ge.status or "").replace("_", " ").title()
             topics = ge.topics or ""
-            g_data.append([P(ge.exam_name), P(mark_str), P(avg_str), P(topics)])
+            g_data.append([P(ge.exam_name), P(mark_str), P(avg_str), P(status_str), P(topics)])
             if ge.status == "awaiting_marking":
-                pass  # white — no highlight
+                pass
             elif ge.status == "not_submitted" or ge.exam_mark is None:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
             elif ge.status == "scored" and ge.marks_available and ge.marks_available > 0 and ge.exam_mark / ge.marks_available < 0.5:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
             elif ge.status == "scored":
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
-        g_widths = [avail * 0.30, avail * 0.18, avail * 0.18, avail * 0.34]
+        g_widths = [avail * 0.26, avail * 0.14, avail * 0.14, avail * 0.16, avail * 0.30]
         gt = Table(g_data, colWidths=g_widths, repeatRows=1)
         gt.setStyle(TableStyle(g_cmds))
         els.append(gt)
 
+        # Summary stats
+        gradeo_scores = []
+        for ge in gradeo_exams:
+            if ge.status == "scored" and ge.exam_mark is not None and ge.marks_available:
+                gradeo_scores.append((ge.exam_mark / ge.marks_available) * 100)
+        avg_str = f"{sum(gradeo_scores) / len(gradeo_scores):.1f}%" if gradeo_scores else "N/A"
+        std_str = f"{_stats.stdev(gradeo_scores):.1f}%" if len(gradeo_scores) >= 2 else "N/A"
+        els.append(Paragraph(
+            f"Total: {len(gradeo_exams)} exams &nbsp;|&nbsp; "
+            f"Avg Score: {avg_str} &nbsp;|&nbsp; Std Dev: {std_str}",
+            styles["body"],
+        ))
+
     # ── EdStem lesson completion (skip for ENC courses) ──
     is_enc = "ENC" in (course.course_code or "").upper()
     if not is_enc:
-        edstem_total_result = await db.execute(
+        edstem_result = await db.execute(
             text("""
-                SELECT COUNT(*) FROM edstem_lessons el
+                SELECT el.id, el.title,
+                       CASE WHEN elp.status = 'completed' THEN true ELSE false END AS completed
+                FROM edstem_lessons el
                 JOIN edstem_course_mappings ecm ON ecm.edstem_course_id = el.edstem_course_id
+                LEFT JOIN edstem_lesson_progress elp
+                    ON elp.edstem_lesson_id = el.id AND elp.user_id = :uid
                 WHERE ecm.canvas_course_id = :cid
-            """),
-            {"cid": course_id},
-        )
-        edstem_total = edstem_total_result.scalar() or 0
-    else:
-        edstem_total = 0
-
-    if edstem_total > 0:
-        edstem_completed_result = await db.execute(
-            text("""
-                SELECT COUNT(*) FROM edstem_lesson_progress elp
-                JOIN edstem_lessons el ON el.id = elp.edstem_lesson_id
-                JOIN edstem_course_mappings ecm ON ecm.edstem_course_id = el.edstem_course_id
-                WHERE ecm.canvas_course_id = :cid
-                  AND elp.user_id = :uid
-                  AND elp.status = 'completed'
+                ORDER BY el.index NULLS LAST, el.title
             """),
             {"cid": course_id, "uid": user_id},
         )
-        edstem_completed = edstem_completed_result.scalar() or 0
-        edstem_pct = round(edstem_completed / edstem_total * 100) if edstem_total else 0
+        edstem_rows = edstem_result.fetchall()
 
-        els.append(Paragraph("EdStem Lessons", styles["section"]))
+        if edstem_rows:
+            completed_count = sum(1 for r in edstem_rows if r.completed)
+            total_count = len(edstem_rows)
+            pct = round(completed_count / total_count * 100) if total_count else 0
+            els.append(Paragraph("EdStem Lessons", styles["section"]))
+            els.append(Paragraph(
+                f"Completed: {completed_count}/{total_count} ({pct}%)",
+                styles["body"],
+            ))
 
-    # ── Missing Work (all past-due, unsubmitted/ungraded assignments across all groups) ──
-    now_naive = now.replace(tzinfo=None)
-    missing_assignments = [
-        r for r in rows
-        if r.due_at is not None
-        and (r.due_at.replace(tzinfo=None) if r.due_at.tzinfo else r.due_at) <= now_naive
-        and r.workflow_state not in ("submitted", "graded")
-    ]
-    if missing_assignments:
-        els.append(Paragraph("Missing Work", styles["section"]))
-        mw_data = [[PH("Assignment"), PH("Group"), PH("Due Date"), PH("Points"), PH("Status")]]
-        mw_cmds = list(_base_table_style())
-        for i, a in enumerate(missing_assignments, start=1):
-            due_str = a.due_at.strftime("%d %b %Y") if a.due_at else "—"
-            if a.points_possible:
-                pts = str(int(a.points_possible) if a.points_possible == int(a.points_possible) else round(a.points_possible, 1))
-            else:
-                pts = "—"
-            status = "Missing" if a.missing else "Not Submitted"
-            mw_data.append([
-                P(a.name),
-                P(a.assignment_group_name or "—"),
-                P(due_str),
-                P(pts),
-                P(status),
-            ])
-            mw_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-        mw_widths = [avail * 0.36, avail * 0.22, avail * 0.16, avail * 0.10, avail * 0.16]
-        mwt = Table(mw_data, colWidths=mw_widths, repeatRows=1)
-        mwt.setStyle(TableStyle(mw_cmds))
-        els.append(mwt)
+            # Show incomplete lessons
+            incomplete = [r for r in edstem_rows if not r.completed]
+            if incomplete:
+                e_data = [[PH("Lesson"), PH("Status")]]
+                e_cmds = list(_base_table_style())
+                for i, r in enumerate(incomplete, start=1):
+                    e_data.append([P(r.title), P("Incomplete")])
+                    e_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
+                e_widths = [avail * 0.75, avail * 0.25]
+                et = Table(e_data, colWidths=e_widths, repeatRows=1)
+                et.setStyle(TableStyle(e_cmds))
+                els.append(et)
 
     return els
 
 
 @router.get("/students/{user_id}/cycle-update-pdf")
-async def export_cycle_update_pdf(
+async def export_student_full_report_pdf(
     user_id: int,
     course_id: int = Query(..., description="Canvas course ID"),
-    cycle_num: int | None = Query(None, description="Specific cycle number (omit for auto-detect)"),
     preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    PDF report showing a student's progress in the current assignment-group
-    cycle for a given course, plus any matched Gradeo quiz results.
+    PDF full report for a single student in a course.  Shows all assignments
+    due before today with their statuses, plus Gradeo results and EdStem
+    completion.
     """
-    els = await _build_cycle_update_elements(db, user_id, course_id, cycle_num)
+    els = await _build_full_report_elements(db, user_id, course_id)
 
     # Build filename
     stu_result = await db.execute(
@@ -1741,25 +1606,24 @@ async def export_cycle_update_pdf(
     crs_row = crs_result.fetchone()
     code = ((crs_row.course_code if crs_row else None) or "").replace(" ", "-") or str(course_id)
 
-    cycle_part = f"-cycle-{cycle_num}" if cycle_num is not None else ""
-    filename = f"{name_slug}{cycle_part}-update-{code}-{date.today().isoformat()}.pdf"
+    filename = f"{name_slug}-full-report-{code}-{date.today().isoformat()}.pdf"
     return _build_pdf(els, filename, inline=(preview == 1))
 
 
 # ---------------------------------------------------------------------------
-# 10c. Whole-Class Cycle Update PDF
+# 10c. Whole-Class Full Report PDF
 # ---------------------------------------------------------------------------
 
 @router.get("/courses/{course_id}/class-cycle-pdf")
-async def export_class_cycle_pdf(
+async def export_class_full_report_pdf(
     course_id: int,
-    cycle_num: int | None = Query(None, description="Specific cycle number (omit for auto-detect)"),
     preview: int = Query(0, description="Set to 1 to return inline PDF for browser preview"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Combined PDF with one cycle-update report per enrolled student,
-    separated by page breaks.
+    Combined PDF with one full report per enrolled student,
+    separated by page breaks.  Shows all assignments due before today
+    with their statuses, plus Gradeo results and EdStem completion.
     """
     # Fetch enrolled students
     students_result = await db.execute(
@@ -1785,32 +1649,30 @@ async def export_class_cycle_pdf(
         {"course_id": course_id},
     )
     if not (unit_check.scalar() or 0):
-        raise HTTPException(404, "This course has no published assignments for cycle reports")
+        raise HTTPException(404, "This course has no published assignments")
 
     all_elements: list = []
     styles = _pdf_styles()
 
     for idx, stu in enumerate(students):
         try:
-            student_els = await _build_cycle_update_elements(
-                db, stu.id, course_id, cycle_num,
+            student_els = await _build_full_report_elements(
+                db, stu.id, course_id,
             )
             if idx > 0:
                 all_elements.append(PageBreak())
             all_elements.extend(student_els)
         except HTTPException:
-            # Insert a placeholder page for students with no data
             if idx > 0:
                 all_elements.append(PageBreak())
-            all_elements.append(Paragraph("Cycle Update", styles["title"]))
+            all_elements.append(Paragraph("Full Report", styles["title"]))
             all_elements.append(Paragraph(
-                f"{stu.name} — No cycle data available for this course.",
+                f"{stu.name} — No data available for this course.",
                 styles["body"],
             ))
 
     code = await _get_course_code(db, course_id)
-    cycle_part = f"-cycle-{cycle_num}" if cycle_num is not None else ""
-    filename = f"class{cycle_part}-cycle-update-{code}-{date.today().isoformat()}.pdf"
+    filename = f"class-full-report-{code}-{date.today().isoformat()}.pdf"
     return _build_pdf(all_elements, filename, inline=(preview == 1))
 
 
