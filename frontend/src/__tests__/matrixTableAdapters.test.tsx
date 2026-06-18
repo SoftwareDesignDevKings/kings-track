@@ -143,7 +143,7 @@ describe('matrix table adapters', () => {
 
   it('sorts rendered rows by sortable_name by default', () => {
     render(<MatrixTable model={buildCanvasMatrixTableModel(makeCanvasMatrix())} />)
-    const studentCells = Array.from(document.querySelectorAll('tbody td.sticky-col-1'))
+    const studentCells = Array.from(document.querySelectorAll('tbody tr:not([class*="font-medium"]) td.sticky-col-1'))
 
     expect(studentCells.map(cell => cell.textContent)).toEqual(['Bob Jones', 'Alice Smith'])
   })

@@ -84,8 +84,12 @@ describe('CourseDetail', () => {
   it('shows student and assignment counts', () => {
     vi.mocked(useCourseMatrix).mockReturnValue({ isLoading: false, error: null, data: mockMatrix } as any)
     renderWithProviders(<CourseDetail />, { initialEntries: ['/courses/9001?tab=canvas'] })
-    expect(screen.getByText('1')).toBeInTheDocument() // 1 student
-    expect(screen.getByText('2')).toBeInTheDocument() // 2 assignments
+    // "Students" appears in both the nav header and stats — just verify presence
+    expect(screen.getAllByText('Students').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Activities')).toBeInTheDocument()
+    // Counts may appear in both the header stats and table summary rows
+    expect(screen.getAllByText('1').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1)
   })
 
   it('bases the header average completion on due-now activities only', () => {

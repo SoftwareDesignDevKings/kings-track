@@ -89,12 +89,6 @@ function mean(values: number[]): number | null {
   return sum / values.length
 }
 
-function median(values: number[]): number | null {
-  if (values.length === 0) return null
-  const sorted = [...values].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
-}
 
 function stdev(values: number[]): number | null {
   if (values.length < 2) return null
@@ -737,7 +731,7 @@ export default function MatrixTable({ model }: Props) {
   const visibleRows = table.getRowModel().rows
 
   const columnSummaries = useMemo(() => {
-    const perColumn: Record<string, { mean: number | null; median: number | null; stdev: number | null }> = {}
+    const perColumn: Record<string, { total: number; mean: number | null; stdev: number | null }> = {}
     let anyValue = false
     for (const column of flattenedColumns) {
       const values: number[] = []
@@ -746,7 +740,7 @@ export default function MatrixTable({ model }: Props) {
         if (v != null) values.push(v)
       }
       if (values.length > 0) anyValue = true
-      perColumn[column.id] = { mean: mean(values), median: median(values), stdev: stdev(values) }
+      perColumn[column.id] = { total: values.length, mean: mean(values), stdev: stdev(values) }
     }
     const summaryValues: number[] = []
     for (const row of visibleRows) {
@@ -754,14 +748,14 @@ export default function MatrixTable({ model }: Props) {
       if (typeof v === 'number' && Number.isFinite(v)) summaryValues.push(v)
     }
     const completion = {
+      total: summaryValues.length,
       mean: mean(summaryValues),
-      median: median(summaryValues),
       stdev: stdev(summaryValues),
     }
     return { perColumn, completion, hasValues: anyValue }
   }, [visibleRows, flattenedColumns])
 
-  const showColumnSummaries = displayMode === 'marks' && visibleRows.length > 0 && columnSummaries.hasValues
+  const showColumnSummaries = model.supportsMarks === true && visibleRows.length > 0 && columnSummaries.hasValues
 
   const columnDenominators = useMemo(() => {
     const out: Record<string, number | null> = {}
@@ -1214,8 +1208,8 @@ export default function MatrixTable({ model }: Props) {
                   </tr>
                 )
               })}
-              {showColumnSummaries && (['mean', 'median', 'stdev'] as const).map((stat, statIndex) => {
-                const label = stat === 'mean' ? 'Average' : stat === 'median' ? 'Median' : 'Std Dev'
+              {showColumnSummaries && (['total', 'mean', 'stdev'] as const).map((stat, statIndex) => {
+                const label = stat === 'total' ? 'Total' : stat === 'mean' ? 'Average' : 'Std Dev'
                 const rowBg = 'bg-slate-50'
                 const topBorder = statIndex === 0 ? 'border-t-2 border-slate-300' : ''
                 return (
@@ -1225,7 +1219,9 @@ export default function MatrixTable({ model }: Props) {
                     </td>
                     {!model.hideCompletionColumn && (
                       <td className={`sticky-col-2 border-r border-slate-200 px-3 py-2 text-sm ${rowBg} ${topBorder}`}>
-                        {formatPercent(columnSummaries.completion[stat])}
+                        {stat === 'total'
+                          ? String(columnSummaries.completion[stat])
+                          : formatPercent(columnSummaries.completion[stat])}
                       </td>
                     )}
                     {flattenedColumns.map(column => (
@@ -1233,7 +1229,9 @@ export default function MatrixTable({ model }: Props) {
                         key={column.id}
                         className={`border-r border-slate-100 px-2 py-2 text-center text-sm last:border-r-0 ${column.dividerClassName ?? ''}`}
                       >
-                        {formatNumber(columnSummaries.perColumn[column.id]?.[stat] ?? null)}
+                        {stat === 'total'
+                          ? String(columnSummaries.perColumn[column.id]?.total ?? 0)
+                          : formatNumber(columnSummaries.perColumn[column.id]?.[stat] ?? null)}
                       </td>
                     ))}
                   </tr>
