@@ -1830,8 +1830,8 @@ async def export_concern_report(
     Course-level students-of-concern report with platform tabs.
 
     Tabs:
-    - overall  – students flagged as concern (low attendance/completion/high missing)
-    - canvas   – students with missing Canvas assignments (last 14 days)
+    - overall  – all students with any missing content (compounding) plus concern flags
+    - canvas   – students with not-submitted Canvas assignments (all-time, compounding)
     - edstem   – students with incomplete EdStem lessons (not available for ENC courses)
     - gradeo   – students with flagged Gradeo results
     """
@@ -1895,7 +1895,7 @@ async def export_concern_report(
 
 
 async def _concern_tab_overall(db: AsyncSession, course_id: int, roster):
-    """Overall tab: students flagged as concern for this course."""
+    """Overall tab: all students with any missing content (compounding)."""
     from app.attendance.service import _evaluate_concern
 
     user_ids = [r.id for r in roster]
@@ -1912,17 +1912,21 @@ async def _concern_tab_overall(db: AsyncSession, course_id: int, roster):
     )
     metrics_map = {r.user_id: r for r in sm_result.fetchall()}
 
-    # Submission stats (total, missing) per student
+    # Submission stats: total and not-submitted (all-time, compounding)
     sub_result = await db.execute(
         text("""
             SELECT e.user_id,
                    COUNT(a.id) AS total,
-                   COUNT(a.id) FILTER (WHERE s.id IS NULL OR s.missing IS TRUE) AS missing
+                   COUNT(a.id) FILTER (
+                       WHERE a.due_at <= NOW()
+                         AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
+                   ) AS missing
             FROM enrollments e
             CROSS JOIN assignments a
             LEFT JOIN submissions s ON s.assignment_id = a.id AND s.user_id = e.user_id
             WHERE e.course_id = :cid AND e.user_id = ANY(:uids)
               AND a.course_id = :cid AND a.workflow_state = 'published'
+              AND a.due_at IS NOT NULL
             GROUP BY e.user_id
         """),
         {"cid": course_id, "uids": user_ids},
@@ -1947,7 +1951,7 @@ async def _concern_tab_overall(db: AsyncSession, course_id: int, roster):
         att_map[r.user_id] = round(r.attended / r.total * 100, 1) if r.total else None
 
     headers = ["Name", "Email", "SIS ID", "Concern Level", "Reasons",
-               "Completion %", "On-Time %", "Attendance %"]
+               "Missing", "Completion %", "On-Time %", "Attendance %"]
     rows = []
     row_levels = []
 
@@ -1957,7 +1961,8 @@ async def _concern_tab_overall(db: AsyncSession, course_id: int, roster):
         completion = m.completion_rate if m else None
         on_time = m.on_time_rate if m else None
         att_rate = att_map.get(uid)
-        sub_stats = {course_id: sub_map.get(uid, {"total": 0, "missing": 0})}
+        sub = sub_map.get(uid, {"total": 0, "missing": 0})
+        sub_stats = {course_id: sub}
 
         concern = _evaluate_concern(
             avg_completion=round(completion * 100, 1) if completion is not None else None,
@@ -1965,26 +1970,38 @@ async def _concern_tab_overall(db: AsyncSession, course_id: int, roster):
             attendance_rate=att_rate,
             submission_stats=sub_stats,
         )
-        if not concern["is_concern"]:
+
+        # Include any student with missing work, not just those meeting concern thresholds
+        missing_count = sub["missing"]
+        if missing_count == 0 and not concern["is_concern"]:
             continue
+
+        level = concern["level"].title() if concern["is_concern"] else "—"
+        reasons = "; ".join(concern["reasons"]) if concern["is_concern"] else ""
 
         rows.append([
             u.name,
             u.email or "",
             u.sis_id or "",
-            concern["level"].title(),
-            "; ".join(concern["reasons"]),
+            level,
+            reasons,
+            str(missing_count),
             _fmt_pct(completion),
             _fmt_pct(on_time),
             f"{att_rate}%" if att_rate is not None else "",
         ])
-        row_levels.append("high" if concern["level"] == "high" else "moderate")
+        if concern["is_concern"] and concern["level"] == "high":
+            row_levels.append("high")
+        elif concern["is_concern"]:
+            row_levels.append("moderate")
+        else:
+            row_levels.append("none")
 
     return headers, rows, row_levels
 
 
 async def _concern_tab_canvas(db: AsyncSession, course_id: int, roster):
-    """Canvas tab: students with missing/not-submitted assignments (last 14 days)."""
+    """Canvas tab: students with not-submitted assignments (all-time, compounding)."""
     user_ids = [r.id for r in roster]
     user_map = {r.id: r for r in roster}
 
@@ -1998,8 +2015,7 @@ async def _concern_tab_canvas(db: AsyncSession, course_id: int, roster):
             WHERE e.course_id = :cid AND e.user_id = ANY(:uids)
               AND a.course_id = :cid AND a.workflow_state = 'published'
               AND a.due_at IS NOT NULL
-              AND a.due_at >= NOW() - INTERVAL '14 days'
-              AND a.due_at <= NOW() + INTERVAL '1 day'
+              AND a.due_at <= NOW()
               AND (s.id IS NULL OR s.workflow_state NOT IN ('submitted', 'graded'))
             ORDER BY e.user_id, a.due_at
         """),
