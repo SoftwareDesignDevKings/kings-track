@@ -101,8 +101,8 @@ const CONCERN_TABS = ['overall', 'canvas', 'gradeo'] as const
 type ConcernTab = typeof CONCERN_TABS[number]
 
 const TAB_DESCRIPTIONS: Record<ConcernTab, string> = {
-  overall: 'Students flagged as moderate or high concern based on attendance, completion rate, and missing assignment thresholds.',
-  canvas: 'Students with missing or not-submitted Canvas assignments due within the last 14 days.',
+  overall: 'All students with any missing work compounding to today, plus concern flags based on attendance, completion, and missing thresholds.',
+  canvas: 'All missing or not-submitted Canvas assignments due before today (compounding, all-time).',
   gradeo: 'Students with flagged Gradeo results (not submitted, awaiting marking, or low scores).',
 }
 
