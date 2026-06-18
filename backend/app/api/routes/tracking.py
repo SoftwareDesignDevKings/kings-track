@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,7 @@ async def list_trackable_assignments(course_id: int, db: AsyncSession = Depends(
 async def get_tracking_grid(
     course_id: int,
     assignment_id: int,
+    extra_course_ids: str | None = Query(None, description="Comma-separated additional course IDs to include students from (for course groups)"),
     db: AsyncSession = Depends(get_db),
 ):
     assignment_row = await db.execute(
@@ -55,15 +56,25 @@ async def get_tracking_grid(
         for r in criteria_rows.fetchall()
     ]
 
+    # Build list of course IDs to pull students from (supports course groups)
+    all_course_ids = [course_id]
+    if extra_course_ids:
+        for cid in extra_course_ids.split(","):
+            cid = cid.strip()
+            if cid.isdigit():
+                v = int(cid)
+                if v not in all_course_ids:
+                    all_course_ids.append(v)
+
     student_rows = await db.execute(
         text("""
-            SELECT u.id, u.name, u.sortable_name
+            SELECT DISTINCT u.id, u.name, u.sortable_name
             FROM users u
             JOIN enrollments e ON e.user_id = u.id
-            WHERE e.course_id = :course_id AND e.role = 'StudentEnrollment'
+            WHERE e.course_id = ANY(:course_ids) AND e.role = 'StudentEnrollment'
             ORDER BY u.sortable_name, u.name
         """),
-        {"course_id": course_id},
+        {"course_ids": all_course_ids},
     )
     students = [{"id": r[0], "name": r[1], "sortable_name": r[2]} for r in student_rows.fetchall()]
 

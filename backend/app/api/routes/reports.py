@@ -1720,7 +1720,6 @@ async def export_concern_report(
             FROM enrollments e
             JOIN users u ON u.id = e.user_id
             WHERE e.course_id = :cid AND e.role = 'StudentEnrollment'
-              AND e.enrollment_state = 'active'
             ORDER BY u.sortable_name, u.name
         """),
         {"cid": course_id},

@@ -177,8 +177,9 @@ export default function CourseGroupDetail() {
   // Build group matrix table model with class code subtitles
   const groupMatrixModel = groupMatrix ? buildCourseGroupMatrixTableModel(groupMatrix) : null
 
-  // First course ID for tracking tab (tracking works per-course)
+  // Course IDs for tracking tab (use first course for assignments, include all for students)
   const firstCourseId = group?.classes[0]?.id ?? 0
+  const extraCourseIds = group?.classes.slice(1).map(c => c.id) ?? []
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
@@ -348,7 +349,7 @@ export default function CourseGroupDetail() {
               {/* Tracking tab */}
               {activeTab === 'tracking' && firstCourseId > 0 && (
                 <div className="flex h-full min-h-0 min-w-0 flex-col">
-                  <AssignmentTrackingTab courseId={firstCourseId} />
+                  <AssignmentTrackingTab courseId={firstCourseId} extraCourseIds={extraCourseIds} />
                 </div>
               )}
 

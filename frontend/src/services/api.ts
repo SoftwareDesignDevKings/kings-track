@@ -560,10 +560,11 @@ export function useTrackableAssignments(courseId: number) {
   })
 }
 
-export function useTrackingGrid(courseId: number, assignmentId: number | null) {
+export function useTrackingGrid(courseId: number, assignmentId: number | null, extraCourseIds?: number[]) {
+  const extraParam = extraCourseIds?.length ? `?extra_course_ids=${extraCourseIds.join(',')}` : ''
   return useQuery<TrackingGrid>({
-    queryKey: ['tracking-grid', courseId, assignmentId],
-    queryFn: () => fetchJSON<TrackingGrid>(`/courses/${courseId}/tracking/${assignmentId}`),
+    queryKey: ['tracking-grid', courseId, assignmentId, extraCourseIds],
+    queryFn: () => fetchJSON<TrackingGrid>(`/courses/${courseId}/tracking/${assignmentId}${extraParam}`),
     staleTime: 0,
     enabled: !isNaN(courseId) && assignmentId !== null,
   })
