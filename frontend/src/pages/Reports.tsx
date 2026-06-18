@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Header from '../components/Header'
-import { useCourses, useStudents, useCourseCycles } from '../services/api'
+import { useCourses, useStudents } from '../services/api'
 import { downloadFile, previewPdf } from '../lib/downloadCsv'
 
 interface ReportCardProps {
@@ -197,9 +197,7 @@ export default function Reports() {
   const { data: students } = useStudents()
   const [pdfCourseId, setPdfCourseId] = useState<number | null>(null)
   const [pdfStudentId, setPdfStudentId] = useState<number | null>(null)
-  const [pdfCycleNum, setPdfCycleNum] = useState<number | null>(null)
   const [studentSearch, setStudentSearch] = useState('')
-  const { data: cycles, isLoading: cyclesLoading } = useCourseCycles(pdfCourseId)
 
   // Filter students by selected course enrollment, then by search text
   const courseStudents = pdfCourseId
@@ -216,11 +214,8 @@ export default function Reports() {
   function handlePdfCourseChange(id: number | null) {
     setPdfCourseId(id)
     setPdfStudentId(null)
-    setPdfCycleNum(null)
     setStudentSearch('')
   }
-
-  const cyclePart = pdfCycleNum ? `&cycle_num=${pdfCycleNum}` : ''
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -313,10 +308,10 @@ export default function Reports() {
                 fallbackName={`${courseCode}-gradeo-report`}
               />
               <ReportCard
-                title="Whole-Class Cycle Update"
-                description="One PDF per student in this course, combined into a single document with page breaks. Each page shows the student's current cycle progress, scores, missing work, and Gradeo results."
+                title="Whole-Class Full Report"
+                description="One page per student showing all assignments due to date with statuses and scores, Gradeo results, and EdStem completion."
                 path={`/reports/courses/${selectedCourseId}/class-cycle-pdf`}
-                fallbackName={`${courseCode}-class-cycle-update`}
+                fallbackName={`${courseCode}-class-full-report`}
                 formats={['pdf']}
               />
               <ConcernReportCard
@@ -376,32 +371,15 @@ export default function Reports() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Cycle (optional)</label>
-              <select
-                value={pdfCycleNum ?? ''}
-                onChange={e => setPdfCycleNum(e.target.value ? Number(e.target.value) : null)}
-                disabled={!pdfCourseId || cyclesLoading}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-full max-w-xs disabled:opacity-50"
-              >
-                <option value="">Auto-detect (current)</option>
-                {cycles?.map(c => (
-                  <option key={c.cycle_num} value={c.cycle_num}>
-                    Cycle {c.cycle_num} — {c.topic}
-                    {c.start_week && c.end_week ? ` (T${c.term}: W${c.start_week}-${c.end_week})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {pdfStudentId ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <ReportCard
-                title={pdfCycleNum ? `Cycle ${pdfCycleNum} Update` : 'Current Cycle Update'}
-                description="PDF for the selected teaching cycle. Shows completion metrics (completed, missing, avg score), assignment table with due dates, scores, and late flags, Gradeo quiz results, and other units overview. Suitable for sharing with parents."
-                path={`/reports/students/${pdfStudentId}/cycle-update-pdf?course_id=${pdfCourseId}${cyclePart}`}
-                fallbackName="cycle-update"
+                title="Full Report"
+                description="All assignments due to date with statuses and scores, Gradeo results, and EdStem completion. Suitable for sharing with parents."
+                path={`/reports/students/${pdfStudentId}/cycle-update-pdf?course_id=${pdfCourseId}`}
+                fallbackName="full-report"
                 disabled={!pdfCourseId}
                 disabledReason="Select a course above"
                 formats={['pdf']}
