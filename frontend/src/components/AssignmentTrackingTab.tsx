@@ -5,6 +5,7 @@ import AssignmentTrackingTable from './AssignmentTrackingTable'
 
 interface Props {
   courseId: number
+  extraCourseIds?: number[]
 }
 
 const AUTO_SAVE_DELAY_MS = 800
@@ -214,7 +215,7 @@ function SnapshotPicker({ snapshots, viewingId, onChange }: SnapshotPickerProps)
   )
 }
 
-export default function AssignmentTrackingTab({ courseId }: Props) {
+export default function AssignmentTrackingTab({ courseId, extraCourseIds }: Props) {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<number | null>(null)
   const [dirtyScores, setDirtyScores] = useState<TrackingScores>({})
   const [commitLabel, setCommitLabel] = useState('')
@@ -222,7 +223,7 @@ export default function AssignmentTrackingTab({ courseId }: Props) {
   const [viewingSnapshotId, setViewingSnapshotId] = useState<number | null>(null)
 
   const { data: assignments, isLoading: assignmentsLoading } = useTrackableAssignments(courseId)
-  const { data: grid, isLoading: gridLoading } = useTrackingGrid(courseId, selectedAssignmentId)
+  const { data: grid, isLoading: gridLoading } = useTrackingGrid(courseId, selectedAssignmentId, extraCourseIds)
   const { data: viewingSnapshot } = useSnapshot(courseId, selectedAssignmentId, viewingSnapshotId)
   const saveMutation = useSaveTrackingScores(courseId, selectedAssignmentId)
   const commitMutation = useCommitSnapshot(courseId, selectedAssignmentId)
