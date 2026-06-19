@@ -176,13 +176,14 @@ def _dedup_exams_by_name(
         if class_to_course is not None:
             (gradeo_class_id, assignment_id, gradeo_marking_session_id, exam_name,
              class_average, syllabus_title, syllabus_grade, bands, outcomes,
-             topics, updated_at) = row
+             topics, updated_at, *_extra) = row
             course_id = class_to_course.get(gradeo_class_id)
             normalized_name = _strip_class_prefix(exam_name, class_names)
             key: str | tuple = (course_id, normalized_name)
         else:
             (assignment_id, gradeo_marking_session_id, exam_name, class_average,
-             syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at) = row
+             syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at,
+             *_extra) = row
             normalized_name = _strip_class_prefix(exam_name, class_names)
             key = normalized_name
         marking_sessions_by_key.setdefault(key, set()).add(gradeo_marking_session_id)
@@ -845,7 +846,8 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
     exams_result = await db.execute(
         text("""
             SELECT gradeo_class_id, id, gradeo_marking_session_id, exam_name, class_average,
-                   syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at
+                   syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at,
+                   class_name
             FROM gradeo_class_exam_assignments
             WHERE gradeo_class_id IN :gradeo_class_ids
             ORDER BY exam_name, gradeo_marking_session_id, id
@@ -854,6 +856,7 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
     )
     exams_raw = exams_result.fetchall()
     class_name_set = {gc["gradeo_class_name"] for gc in gradeo_classes if gc.get("gradeo_class_name")}
+    class_name_set |= {row[-1] for row in exams_raw if row[-1]}
     exams, exams_by_key, marking_sessions_by_key = _dedup_exams_by_name(
         exams_raw, class_to_course=class_to_course or None,
         class_names=class_name_set,
@@ -1777,7 +1780,8 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
                 bands,
                 outcomes,
                 topics,
-                updated_at
+                updated_at,
+                class_name
             FROM gradeo_class_exam_assignments
             WHERE gradeo_class_id IN :gradeo_class_ids
             ORDER BY exam_name, gradeo_marking_session_id, id
@@ -1787,6 +1791,7 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
     )
     exams_raw = exams_result.fetchall()
     class_name_set = {gc["gradeo_class_name"] for gc in gradeo_classes if gc.get("gradeo_class_name")}
+    class_name_set |= {row[-1] for row in exams_raw if row[-1]}
     exams, exams_by_name, marking_sessions_by_exam = _dedup_exams_by_name(
         exams_raw, class_names=class_name_set,
     )
