@@ -117,10 +117,53 @@ async def add_to_whitelist(
     )
     await db.commit()
 
+    # Immediately seed the courses table so the course appears without
+    # waiting for a full sync.  Best-effort: don't fail the whitelist add.
+    canvas_course_code: str | None = body.course_code
+    if settings.canvas_configured:
+        try:
+            async with CanvasClient(settings.canvas_api_url, settings.canvas_api_token) as canvas:
+                course_data = await canvas.get_course(body.course_id)
+            term = course_data.get("term") or {}
+            canvas_course_code = course_data.get("course_code") or body.course_code
+            await db.execute(
+                text("""
+                    INSERT INTO courses (
+                        id, name, course_code, workflow_state, account_id, term_id,
+                        term_start_at, term_end_at, total_students, synced_at
+                    )
+                    VALUES (
+                        :id, :name, :course_code, :workflow_state, :account_id, :term_id,
+                        :term_start_at, :term_end_at, :total_students, :synced_at
+                    )
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        course_code = EXCLUDED.course_code,
+                        workflow_state = EXCLUDED.workflow_state,
+                        total_students = EXCLUDED.total_students,
+                        synced_at = EXCLUDED.synced_at
+                """),
+                {
+                    "id": course_data["id"],
+                    "name": course_data.get("name", body.name),
+                    "course_code": canvas_course_code,
+                    "workflow_state": course_data.get("workflow_state", "available"),
+                    "account_id": course_data.get("account_id"),
+                    "term_id": term.get("id"),
+                    "term_start_at": term.get("start_at"),
+                    "term_end_at": term.get("end_at"),
+                    "total_students": course_data.get("total_students", 0),
+                    "synced_at": datetime.now(timezone.utc),
+                },
+            )
+            await db.commit()
+        except Exception:
+            pass
+
     # Auto-match to EdStem course by course_code if EdStem is configured and
     # no mapping already exists for this canvas course.
     edstem_matched: dict | None = None
-    if settings.edstem_configured and body.course_code:
+    if settings.edstem_configured and canvas_course_code:
         existing = await db.execute(
             text("SELECT edstem_course_id FROM edstem_course_mappings WHERE canvas_course_id = :cid"),
             {"cid": body.course_id},
@@ -131,7 +174,7 @@ async def add_to_whitelist(
                     ed_courses = await edstem.get_user_courses()
                 match = next(
                     (item["course"] for item in ed_courses if item.get("course")
-                     and item["course"].get("code", "").strip() == body.course_code.strip()),
+                     and item["course"].get("code", "").strip() == canvas_course_code.strip()),
                     None,
                 )
                 if match:
