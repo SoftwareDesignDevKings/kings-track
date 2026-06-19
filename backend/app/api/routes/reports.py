@@ -1861,7 +1861,9 @@ async def export_concern_report(
                 mark = f"{r['exam_mark']}/{r['marks_available']}" if r.get("exam_mark") is not None else "—"
                 status_str = (r.get("status") or "").replace("_", " ").title()
                 g_data.append([P(r["exam_name"]), P(mark), P(status_str), P(r.get("topics") or "")])
-                if r.get("status") == "not_submitted" or r.get("exam_mark") is None:
+                if r.get("status") == "awaiting_marking":
+                    pass  # white — no highlight
+                elif r.get("status") == "not_submitted" or r.get("exam_mark") is None:
                     g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
                 elif r.get("status") == "scored" and r.get("marks_available") and r["marks_available"] > 0 and r["exam_mark"] / r["marks_available"] < 0.5:
                     g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
