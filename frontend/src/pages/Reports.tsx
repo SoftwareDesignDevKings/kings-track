@@ -97,97 +97,6 @@ function ReportCard({ title, description, path, fallbackName, disabled, disabled
   )
 }
 
-const CONCERN_TABS = ['overall', 'canvas', 'gradeo'] as const
-type ConcernTab = typeof CONCERN_TABS[number]
-
-const TAB_DESCRIPTIONS: Record<ConcernTab, string> = {
-  overall: 'All students with any missing work compounding to today, plus concern flags based on attendance, completion, and missing thresholds.',
-  canvas: 'All missing or not-submitted Canvas assignments due before today (compounding, all-time).',
-  gradeo: 'Students with flagged Gradeo results (not submitted, awaiting marking, or low scores).',
-}
-
-function ConcernReportCard({ courseId, courseCode }: { courseId: number; courseCode: string }) {
-  const [tab, setTab] = useState<ConcernTab>('overall')
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const tabs = [...CONCERN_TABS]
-
-  const path = `/reports/courses/${courseId}/concern-report?tab=${tab}`
-  const fallbackName = `${courseCode}-concern-${tab}`
-
-  async function handleDownload(fmt: 'csv' | 'pdf') {
-    setBusy(fmt)
-    setError(null)
-    try {
-      await downloadFile(`${path}&format=${fmt}`, `${fallbackName}.${fmt}`)
-    } catch (e) {
-      if (e instanceof Error) setError(extractApiDetail(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function handlePreview() {
-    setBusy('preview')
-    setError(null)
-    try {
-      await previewPdf(path, `Students of Concern — ${tab.charAt(0).toUpperCase() + tab.slice(1)}`)
-    } catch (e) {
-      if (e instanceof Error) setError(extractApiDetail(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const btnClass = 'inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col">
-      <h3 className="text-sm font-semibold text-slate-800">Students of Concern</h3>
-      {/* Tab bar */}
-      <div className="mt-2 flex gap-1 flex-wrap">
-        {tabs.map(t => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => { setTab(t); setError(null) }}
-            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-              tab === t
-                ? 'bg-indigo-100 text-indigo-700'
-                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
-            }`}
-          >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </div>
-      <p className="text-xs text-slate-500 mt-2 flex-1">{TAB_DESCRIPTIONS[tab]}</p>
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
-        <button type="button" onClick={handlePreview} disabled={!!busy} className={btnClass}>
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-          </svg>
-          {busy === 'preview' ? 'Opening\u2026' : 'Preview'}
-        </button>
-        <button type="button" onClick={() => handleDownload('csv')} disabled={!!busy} className={btnClass}>
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
-          </svg>
-          {busy === 'csv' ? 'Downloading\u2026' : 'CSV'}
-        </button>
-        <button type="button" onClick={() => handleDownload('pdf')} disabled={!!busy} className={btnClass}>
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
-          </svg>
-          {busy === 'pdf' ? 'Downloading\u2026' : 'PDF'}
-        </button>
-        {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
-      </div>
-    </div>
-  )
-}
 
 export default function Reports() {
   const { data: courses } = useCourses()
@@ -314,9 +223,12 @@ export default function Reports() {
                 fallbackName={`${courseCode}-class-full-report`}
                 formats={['pdf']}
               />
-              <ConcernReportCard
-                courseId={selectedCourseId}
-                courseCode={courseCode}
+              <ReportCard
+                title="Missing Content Report"
+                description="Per-student breakdown of all missing Canvas assignments, flagged Gradeo results, and incomplete EdStem lessons due before today."
+                path={`/reports/courses/${selectedCourseId}/concern-report`}
+                fallbackName={`${courseCode}-missing-content`}
+                formats={['pdf']}
               />
             </div>
           ) : (
