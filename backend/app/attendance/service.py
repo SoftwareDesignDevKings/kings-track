@@ -38,6 +38,7 @@ def _dedup_gradeo_overview_rows(rows: list[dict]) -> list[dict]:
     from app.api.routes.courses import _strip_class_prefix
 
     class_names = {r["class_name"] for r in rows if r.get("class_name")}
+    class_names |= {r["gradeo_class_name"] for r in rows if r.get("gradeo_class_name")}
     best_by_key: dict = {}
     best_tiebreakers: dict = {}
 
@@ -841,10 +842,12 @@ async def get_student_learning_overview(db: AsyncSession, user_id: int) -> dict:
                COALESCE(c.course_code, '') AS course_code,
                gcea.exam_name, gcea.syllabus_title, gcea.topics,
                gar.status, gar.exam_mark, gar.marks_available, gar.class_average,
-               gcea.class_name, gar.last_imported_at
+               gcea.class_name, gar.last_imported_at,
+               gcm.gradeo_class_name
         FROM gradeo_assignment_results gar
         JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
         LEFT JOIN courses c ON c.id = gar.canvas_course_id
+        LEFT JOIN gradeo_class_mappings gcm ON gcm.gradeo_class_id = gcea.gradeo_class_id
         WHERE gar.user_id = :user_id
           AND (gar.canvas_course_id = ANY(:enrolled) OR gar.canvas_course_id IS NULL)
         ORDER BY COALESCE(gar.canvas_course_id, 0), gcea.exam_name
@@ -1093,10 +1096,12 @@ async def get_student_academic_breakdown(db: AsyncSession, user_id: int) -> dict
         SELECT COALESCE(gar.canvas_course_id, 0) AS course_id,
                gcea.exam_name, gcea.syllabus_title, gcea.topics,
                gar.status, gar.exam_mark, gar.marks_available, gar.class_average,
-               gcea.class_name, gar.last_imported_at
+               gcea.class_name, gar.last_imported_at,
+               gcm.gradeo_class_name
         FROM gradeo_assignment_results gar
         JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
         LEFT JOIN courses c ON c.id = gar.canvas_course_id
+        LEFT JOIN gradeo_class_mappings gcm ON gcm.gradeo_class_id = gcea.gradeo_class_id
         WHERE gar.user_id = :user_id
           AND (gar.canvas_course_id = ANY(:enrolled) OR gar.canvas_course_id IS NULL)
         ORDER BY COALESCE(gar.canvas_course_id, 0), gcea.exam_name

@@ -1377,10 +1377,12 @@ async def _build_full_report_elements(
 
     # ── Look up Gradeo class mapping for this course ──
     gcm_result = await db.execute(
-        text("SELECT gradeo_class_id FROM gradeo_class_mappings WHERE canvas_course_id = :cid"),
+        text("SELECT gradeo_class_id, gradeo_class_name FROM gradeo_class_mappings WHERE canvas_course_id = :cid"),
         {"cid": course_id},
     )
-    gradeo_class_ids = [r[0] for r in gcm_result.fetchall()]
+    gcm_rows = gcm_result.fetchall()
+    gradeo_class_ids = [r[0] for r in gcm_rows]
+    gradeo_mapping_names = {r[1] for r in gcm_rows if r[1]}
 
     # ── Fetch Gradeo results (deduplicate by normalised exam name) ──
     gradeo_result = await db.execute(
@@ -1401,7 +1403,7 @@ async def _build_full_report_elements(
         {"uid": user_id, "gcids": gradeo_class_ids or ["-1"]},
     )
     gradeo_exams = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
-    gradeo_exams = _dedup_gradeo_report_rows(gradeo_exams)
+    gradeo_exams = _dedup_gradeo_report_rows(gradeo_exams, extra_class_names=gradeo_mapping_names)
 
     # ── Build elements ──
     styles = _pdf_styles()
@@ -1751,7 +1753,8 @@ async def export_concern_report(
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status,
                    gcea.id AS assignment_id, gar.gradeo_student_id,
-                   gcea.class_name, gar.last_imported_at
+                   gcea.class_name, gar.last_imported_at,
+                   gcm.gradeo_class_name
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -1993,6 +1996,7 @@ def _dedup_gradeo_report_rows(
     *,
     per_user: bool = False,
     per_course: bool = False,
+    extra_class_names: set[str] | None = None,
 ) -> list[dict]:
     """Deduplicate Gradeo report rows by normalised exam name.
 
@@ -2003,6 +2007,8 @@ def _dedup_gradeo_report_rows(
 
     Set *per_user* when the result set spans multiple students (batch queries).
     Set *per_course* when the result set spans multiple courses.
+    Pass *extra_class_names* to supply additional class names for prefix
+    stripping (e.g. from ``gradeo_class_mappings.gradeo_class_name``).
     """
     if not rows:
         return rows
@@ -2010,6 +2016,9 @@ def _dedup_gradeo_report_rows(
     from app.api.routes.courses import _strip_class_prefix
 
     class_names = {r["class_name"] for r in rows if r.get("class_name")}
+    class_names |= {r["gradeo_class_name"] for r in rows if r.get("gradeo_class_name")}
+    if extra_class_names:
+        class_names |= extra_class_names
     status_priority = {"not_submitted": 0, "awaiting_marking": 1, "scored": 2}
     best_by_key: dict = {}
     best_tiebreakers: dict = {}
@@ -2415,7 +2424,8 @@ async def export_missing_report_pdf(
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status,
                    gcea.id AS assignment_id, gar.gradeo_student_id,
-                   gcea.class_name, gar.last_imported_at
+                   gcea.class_name, gar.last_imported_at,
+                   gcm.gradeo_class_name
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -2513,7 +2523,8 @@ async def export_snapshot_report_pdf(
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status,
                    gcea.id AS assignment_id, gar.gradeo_student_id,
-                   gcea.class_name, gar.last_imported_at
+                   gcea.class_name, gar.last_imported_at,
+                   gcm.gradeo_class_name
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -2595,10 +2606,12 @@ async def export_student_report_pdf(
 
     # Look up Gradeo class mapping for this course
     gcm_result = await db.execute(
-        text("SELECT gradeo_class_id FROM gradeo_class_mappings WHERE canvas_course_id = :cid"),
+        text("SELECT gradeo_class_id, gradeo_class_name FROM gradeo_class_mappings WHERE canvas_course_id = :cid"),
         {"cid": course_id},
     )
-    gradeo_class_ids = [r[0] for r in gcm_result.fetchall()]
+    gcm_rows2 = gcm_result.fetchall()
+    gradeo_class_ids = [r[0] for r in gcm_rows2]
+    gradeo_mapping_names2 = {r[1] for r in gcm_rows2 if r[1]}
 
     styles = _pdf_styles()
     els: list = []
@@ -2723,7 +2736,7 @@ async def export_student_report_pdf(
         {"uid": user_id, "gcids": gradeo_class_ids or ["-1"]},
     )
     gradeo_rows = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
-    gradeo_rows = _dedup_gradeo_report_rows(gradeo_rows)
+    gradeo_rows = _dedup_gradeo_report_rows(gradeo_rows, extra_class_names=gradeo_mapping_names2)
 
     if gradeo_rows:
         gr_data = [[PH("Exam"), PH("Mark"), PH("Class Avg"), PH("Topics"), PH("Status")]]
