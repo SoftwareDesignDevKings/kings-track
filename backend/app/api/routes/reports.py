@@ -1833,8 +1833,13 @@ async def export_concern_report(
 
         students_with_issues += 1
         if students_with_issues > 1:
-            els.append(Spacer(1, 14))
-            els.append(HRFlowable(width="100%", thickness=0.5, color=_SLATE_200, spaceAfter=8))
+            els.append(PageBreak())
+            els.append(Paragraph("Missing Content Report", styles["title"]))
+            els.append(Paragraph(
+                f"{course_label} &nbsp;|&nbsp; {date.today().strftime('%d %B %Y')}",
+                styles["subtitle"],
+            ))
+            els.append(HRFlowable(width="100%", thickness=1, color=_SLATE_200, spaceAfter=10))
 
         # Student name heading
         els.append(Paragraph(stu.name, styles["section"]))
