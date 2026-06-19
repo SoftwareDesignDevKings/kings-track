@@ -21,6 +21,42 @@ from app.whitelist import get_effective_whitelist
 
 logger = logging.getLogger(__name__)
 
+_STATUS_PRIORITY = {"not_submitted": 0, "awaiting_marking": 1, "scored": 2}
+
+
+def _dedup_gradeo_overview_rows(rows: list[dict]) -> list[dict]:
+    """Deduplicate Gradeo overview rows by normalised exam name per course.
+
+    Multiple Gradeo classes mapped to the same Canvas course produce rows with
+    different exam names for the same logical cycle (e.g. ``12ENCX_Cycle1`` and
+    ``12ENCY_Cycle1``).  This function normalises names by stripping class
+    prefixes and keeps the best row per (course, normalised name).
+    """
+    if not rows:
+        return rows
+
+    from app.api.routes.courses import _strip_class_prefix
+
+    class_names = {r["class_name"] for r in rows if r.get("class_name")}
+    best_by_key: dict = {}
+    best_tiebreakers: dict = {}
+
+    for r in rows:
+        normalized = _strip_class_prefix(r["exam_name"], class_names)
+        key = (r.get("course_id"), normalized)
+        tb = (
+            _STATUS_PRIORITY.get(r.get("status"), 0),
+            r.get("last_imported_at") is not None,
+            r.get("last_imported_at"),
+        )
+        if key not in best_by_key or tb > best_tiebreakers[key]:
+            r_copy = dict(r)
+            r_copy["exam_name"] = normalized
+            best_by_key[key] = r_copy
+            best_tiebreakers[key] = tb
+
+    return list(best_by_key.values())
+
 
 def _get_base_class_code(class_code: str) -> str:
     """Strip trailing digit after X for amalgamation: '11SENX2' -> '11SENX'."""
@@ -798,13 +834,14 @@ async def get_student_learning_overview(db: AsyncSession, user_id: int) -> dict:
             "course_name": r["course_name"],
         })
 
-    # ── Gradeo: exam results with topics ──
+    # ── Gradeo: exam results with topics (deduplicate by normalised name) ──
     gradeo_sql = text("""
         SELECT COALESCE(gar.canvas_course_id, 0) AS course_id,
                COALESCE(c.name, gcea.class_name, 'Gradeo') AS course_name,
                COALESCE(c.course_code, '') AS course_code,
                gcea.exam_name, gcea.syllabus_title, gcea.topics,
-               gar.status, gar.exam_mark, gar.marks_available, gar.class_average
+               gar.status, gar.exam_mark, gar.marks_available, gar.class_average,
+               gcea.class_name, gar.last_imported_at
         FROM gradeo_assignment_results gar
         JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
         LEFT JOIN courses c ON c.id = gar.canvas_course_id
@@ -813,9 +850,11 @@ async def get_student_learning_overview(db: AsyncSession, user_id: int) -> dict:
         ORDER BY COALESCE(gar.canvas_course_id, 0), gcea.exam_name
     """)
     gradeo_rows = await db.execute(gradeo_sql, {"user_id": user_id, "enrolled": enrolled_ids})
+    all_gradeo_raw = [dict(r) for r in gradeo_rows.mappings().all()]
+    all_gradeo_raw = _dedup_gradeo_overview_rows(all_gradeo_raw)
     gradeo = {}
     gradeo_exams_for_struggling = []
-    for r in gradeo_rows.mappings().all():
+    for r in all_gradeo_raw:
         cid = str(r["course_id"])
         if cid not in gradeo:
             gradeo[cid] = {
@@ -1049,11 +1088,12 @@ async def get_student_academic_breakdown(db: AsyncSession, user_id: int) -> dict
         elif lesson_status == "viewed":
             mod["viewed"] += 1
 
-    # ── Gradeo: exam results (same enrolled filter) ──
+    # ── Gradeo: exam results (same enrolled filter, dedup by normalised name) ──
     gradeo_sql = text("""
         SELECT COALESCE(gar.canvas_course_id, 0) AS course_id,
                gcea.exam_name, gcea.syllabus_title, gcea.topics,
-               gar.status, gar.exam_mark, gar.marks_available, gar.class_average
+               gar.status, gar.exam_mark, gar.marks_available, gar.class_average,
+               gcea.class_name, gar.last_imported_at
         FROM gradeo_assignment_results gar
         JOIN gradeo_class_exam_assignments gcea ON gcea.id = gar.gradeo_class_exam_assignment_id
         LEFT JOIN courses c ON c.id = gar.canvas_course_id
@@ -1062,8 +1102,10 @@ async def get_student_academic_breakdown(db: AsyncSession, user_id: int) -> dict
         ORDER BY COALESCE(gar.canvas_course_id, 0), gcea.exam_name
     """)
     gradeo_rows = await db.execute(gradeo_sql, {"user_id": user_id, "enrolled": enrolled_ids})
+    all_gradeo_raw2 = [dict(r) for r in gradeo_rows.mappings().all()]
+    all_gradeo_raw2 = _dedup_gradeo_overview_rows(all_gradeo_raw2)
     gradeo_by_course: dict = {}
-    for r in gradeo_rows.mappings().all():
+    for r in all_gradeo_raw2:
         cid = str(r["course_id"])
         if cid not in gradeo_by_course:
             gradeo_by_course[cid] = []

@@ -1212,6 +1212,72 @@ def test_gradeo_same_canonical_exam_can_exist_in_multiple_classes(app_client):
     assert eamon_two["results"]["marking-session-2"]["status"] == "scored"
 
 
+def test_gradeo_report_dedupes_different_class_prefix_same_cycle(app_client):
+    """Two classes (12ENCX, 12ENCY) mapped to the same course, each with exams
+    like '12ENCX_Cycle1' and '12ENCY_Cycle1'.  They represent the same logical
+    cycle and should be merged into a single column named 'Cycle1', using the
+    latest/best result."""
+    _whitelist(COURSE_ID, "12 Enterprise Computing", "12ENCX-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "12ENCX",
+        },
+    )
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": SECOND_GRADEO_CLASS_ID,
+            "gradeo_class_name": "12ENCY",
+        },
+    )
+
+    # Import from first class: exam named "12ENCX_Cycle1" with score 7/10
+    first_payload = _summary_import_payload_for(
+        gradeo_class_id=GRADEO_CLASS_ID,
+        gradeo_class_name="12ENCX",
+        marking_session_id="ms-class-x",
+        exam_session_id="es-class-x",
+        exam_mark="7",
+    )
+    first_payload["students"][0]["exam_rows"][0]["exam_name"] = "12ENCX_Cycle1"
+    first_payload["students"][0]["exam_rows"][0]["class_name"] = "12ENCX"
+    first = app_client.post("/api/admin/gradeo/imports", json=first_payload)
+    assert first.status_code == 201
+
+    # Import from second class: exam named "12ENCY_Cycle1" with score 9/10
+    second_payload = _summary_import_payload_for(
+        gradeo_class_id=SECOND_GRADEO_CLASS_ID,
+        gradeo_class_name="12ENCY",
+        marking_session_id="ms-class-y",
+        exam_session_id="es-class-y",
+        exam_mark="9",
+    )
+    second_payload["students"][0]["exam_rows"][0]["exam_name"] = "12ENCY_Cycle1"
+    second_payload["students"][0]["exam_rows"][0]["class_name"] = "12ENCY"
+    second = app_client.post("/api/admin/gradeo/imports", json=second_payload)
+    assert second.status_code == 201
+
+    # There should be 2 DB rows but the report should show only 1 exam column
+    assert _scalar("SELECT COUNT(*) FROM gradeo_class_exam_assignments") == 2
+
+    report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
+    assert report.status_code == 200
+    data = report.json()
+
+    # Should have a single exam column with normalised name (no class prefix)
+    assert len(data["exams"]) == 1
+    assert data["exams"][0]["name"] == "Cycle1"
+
+    # Student should have a single result (the latest/best one)
+    eamon = next(s for s in data["students"] if s["name"] == "Eamon Wong")
+    assert len([v for v in eamon["results"].values() if v is not None]) == 1
+
+
 def test_gradeo_course_endpoint_returns_unmapped_false(app_client):
     resp = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
     assert resp.status_code == 200
