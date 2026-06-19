@@ -72,6 +72,22 @@ def _unmarked_submitted_gradeo_questions(questions: list[dict]) -> list[dict]:
 
 
 def _effective_gradeo_result(result_data: dict, questions: list[dict]) -> dict:
+    """Compute the effective Gradeo exam status from question-level data.
+
+    The Gradeo extension sometimes stores ``status='awaiting_marking'`` and
+    ``exam_mark=NULL`` in ``gradeo_assignment_results`` even when all question
+    parts have been marked (i.e. the extension sent summary-only data without
+    an aggregate mark).  This function detects that case and recalculates:
+
+    - ``status`` → ``'scored'``
+    - ``exam_mark`` → sum of all submitted question marks
+
+    **This logic is also replicated for report PDF queries** via
+    ``_apply_effective_gradeo_status()`` in ``reports.py``.  If you change
+    the derivation rules here, update that function too.
+
+    Used by: course detail Gradeo tab, course group Gradeo tab.
+    """
     status = result_data["status"]
     exam_mark = result_data["exam_mark"]
     marks_available = result_data["marks_available"]
@@ -95,6 +111,110 @@ def _effective_gradeo_result(result_data: dict, questions: list[dict]) -> dict:
         "class_average": result_data["class_average"],
         "questions": questions,
     }
+
+
+def _dedup_exams_by_name(
+    exams_raw,
+    class_to_course: dict[str, int] | None = None,
+) -> tuple[list[dict], dict, dict]:
+    """Deduplicate Gradeo exams so same-named exams within the same Canvas course
+    are merged, but same-named exams across different courses stay separate.
+
+    **Why this is needed:**  Multiple Gradeo classes can map to a single Canvas
+    course (e.g. 11SENX and 11SENY both map to the same ENC course).  Each
+    Gradeo class produces its own ``gradeo_marking_session_id`` for the same
+    exam (e.g. both have a "Cycle1" quiz).  Without dedup, the UI shows two
+    "Cycle1" columns.
+
+    **Per-course vs. cross-course:**  Within a single Canvas course, same exam
+    name = same exam → merge.  Across different Canvas courses (e.g. Software
+    "Cycle1" vs Enterprise "Cycle1"), they are different quizzes → keep separate.
+
+    **Usage:**
+
+    - Single course endpoint (``/{course_id}/gradeo``): call without
+      ``class_to_course`` → dedup key is ``exam_name``.
+    - Course group endpoint (``/group/{group_code}/gradeo``): pass
+      ``class_to_course`` mapping → dedup key is ``(canvas_course_id, exam_name)``.
+      The SQL must include ``gradeo_class_id`` as the first column.
+
+    Must be paired with ``_merge_gradeo_results()`` after building the
+    student results lookup to merge duplicate marking session results.
+
+    Returns ``(exams_list, exams_by_key, marking_sessions_by_key)``.
+    """
+    exams_by_key: dict = {}
+    exam_tiebreakers: dict = {}
+    marking_sessions_by_key: dict = {}
+    for row in exams_raw:
+        if class_to_course is not None:
+            (gradeo_class_id, assignment_id, gradeo_marking_session_id, exam_name,
+             class_average, syllabus_title, syllabus_grade, bands, outcomes,
+             topics, updated_at) = row
+            course_id = class_to_course.get(gradeo_class_id)
+            key: str | tuple = (course_id, exam_name)
+        else:
+            (assignment_id, gradeo_marking_session_id, exam_name, class_average,
+             syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at) = row
+            key = exam_name
+        marking_sessions_by_key.setdefault(key, set()).add(gradeo_marking_session_id)
+        candidate_tiebreaker = (updated_at is not None, updated_at, -assignment_id)
+        if key not in exams_by_key or candidate_tiebreaker > exam_tiebreakers[key]:
+            exams_by_key[key] = {
+                "id": gradeo_marking_session_id,
+                "name": exam_name,
+                "class_average": float(class_average) if class_average is not None else None,
+                "syllabus_title": syllabus_title,
+                "syllabus_grade": syllabus_grade,
+                "bands": _split_csv_list(bands),
+                "outcomes": _split_csv_list(outcomes),
+                "topics": _split_csv_list(topics),
+            }
+            exam_tiebreakers[key] = candidate_tiebreaker
+
+    def _sort_key(k):
+        name = k[1] if isinstance(k, tuple) else k
+        return _natural_sort_key(name)
+
+    exams = [exams_by_key[k] for k in sorted(exams_by_key, key=_sort_key)]
+    return exams, exams_by_key, marking_sessions_by_key
+
+
+_STATUS_PRIORITY = {"not_submitted": 0, "awaiting_marking": 1, "scored": 2}
+
+
+def _merge_gradeo_results(
+    results_lookup: dict[int, dict[str, dict]],
+    marking_sessions_by_key: dict,
+    exams_by_key: dict,
+) -> None:
+    """Merge student results from duplicate marking sessions with the same exam key.
+
+    Mutates *results_lookup* in place: after this call each user's dict is keyed
+    by the canonical ``marking_session_id`` chosen during exam dedup.
+    """
+    for uid in results_lookup:
+        user_results = results_lookup[uid]
+        merged: dict[str, dict] = {}
+        for key, ms_ids in marking_sessions_by_key.items():
+            canonical_id = exams_by_key[key]["id"]
+            best_result = None
+            best_tb: tuple | None = None
+            for ms_id in ms_ids:
+                r = user_results.get(ms_id)
+                if r is not None:
+                    tb = (
+                        r["last_imported_at"] is not None,
+                        r["last_imported_at"],
+                        _STATUS_PRIORITY.get(r["status"], 0),
+                        -r["assignment_id"],
+                    )
+                    if best_tb is None or tb > best_tb:
+                        best_result = r
+                        best_tb = tb
+            if best_result:
+                merged[canonical_id] = best_result
+        results_lookup[uid] = merged
 
 
 def _predicted_band(score_pct: float) -> int:
@@ -641,7 +761,7 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
 
     mapping_result = await db.execute(
         text("""
-            SELECT gradeo_class_id, gradeo_class_name
+            SELECT gradeo_class_id, gradeo_class_name, canvas_course_id
             FROM gradeo_class_mappings
             WHERE canvas_course_id IN :course_ids
             ORDER BY created_at NULLS LAST, id
@@ -649,6 +769,7 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
         {"course_ids": course_ids},
     )
     mapping_rows = mapping_result.fetchall()
+    class_to_course: dict[str, int] = {}
     if not mapping_rows:
         fallback_result = await db.execute(
             text("""
@@ -669,6 +790,8 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
         if row[0] not in seen_class_ids:
             seen_class_ids.add(row[0])
             gradeo_classes.append({"gradeo_class_id": row[0], "gradeo_class_name": row[1]})
+        if len(row) > 2 and row[2] is not None:
+            class_to_course[row[0]] = row[2]
     gradeo_class_ids = list(seen_class_ids)
     gradeo_class_id = gradeo_classes[0]["gradeo_class_id"]
     gradeo_class_name = gradeo_classes[0]["gradeo_class_name"]
@@ -693,7 +816,7 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
 
     exams_result = await db.execute(
         text("""
-            SELECT id, gradeo_marking_session_id, exam_name, class_average,
+            SELECT gradeo_class_id, id, gradeo_marking_session_id, exam_name, class_average,
                    syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at
             FROM gradeo_class_exam_assignments
             WHERE gradeo_class_id IN :gradeo_class_ids
@@ -702,29 +825,9 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
         {"gradeo_class_ids": gradeo_class_ids},
     )
     exams_raw = exams_result.fetchall()
-    exams_by_marking_session: dict[str, dict] = {}
-    exam_sort_keys: dict[str, tuple[str, str]] = {}
-    exam_tiebreakers: dict[str, tuple[bool, object, int]] = {}
-    for row in exams_raw:
-        (assignment_id, gradeo_marking_session_id, exam_name, class_average,
-         syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at) = row
-        candidate_tiebreaker = (updated_at is not None, updated_at, -assignment_id)
-        if (gradeo_marking_session_id not in exams_by_marking_session
-                or candidate_tiebreaker > exam_tiebreakers[gradeo_marking_session_id]):
-            exams_by_marking_session[gradeo_marking_session_id] = {
-                "id": gradeo_marking_session_id, "name": exam_name,
-                "class_average": float(class_average) if class_average is not None else None,
-                "syllabus_title": syllabus_title, "syllabus_grade": syllabus_grade,
-                "bands": _split_csv_list(bands), "outcomes": _split_csv_list(outcomes),
-                "topics": _split_csv_list(topics),
-            }
-            exam_tiebreakers[gradeo_marking_session_id] = candidate_tiebreaker
-        exam_sort_keys.setdefault(gradeo_marking_session_id, (exam_name, gradeo_marking_session_id))
-    exams = [
-        exams_by_marking_session[ms_id]
-        for ms_id in sorted(exams_by_marking_session,
-                            key=lambda k: (_natural_sort_key(exam_sort_keys[k][0]), exam_sort_keys[k][1]))
-    ]
+    exams, exams_by_key, marking_sessions_by_key = _dedup_exams_by_name(
+        exams_raw, class_to_course=class_to_course or None,
+    )
 
     students_result = await db.execute(
         text("""
@@ -786,6 +889,9 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
         ) if existing_result else None
         if existing_tiebreaker is None or candidate_tiebreaker > existing_tiebreaker:
             user_results[gradeo_marking_session_id] = candidate_result
+
+    # Merge results from duplicate marking sessions with same exam name per course
+    _merge_gradeo_results(results_lookup, marking_sessions_by_key, exams_by_key)
 
     if gradeo_student_ids and assignment_ids:
         question_result_rows = await db.execute(
@@ -1650,46 +1756,7 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
         {"gradeo_class_ids": gradeo_class_ids},
     )
     exams_raw = exams_result.fetchall()
-    exams_by_marking_session: dict[str, dict] = {}
-    exam_sort_keys: dict[str, tuple[str, str]] = {}
-    exam_tiebreakers: dict[str, tuple[bool, object, int]] = {}
-    for row in exams_raw:
-        (
-            assignment_id,
-            gradeo_marking_session_id,
-            exam_name,
-            class_average,
-            syllabus_title,
-            syllabus_grade,
-            bands,
-            outcomes,
-            topics,
-            updated_at,
-        ) = row
-        candidate_tiebreaker = (updated_at is not None, updated_at, -assignment_id)
-        if (
-            gradeo_marking_session_id not in exams_by_marking_session
-            or candidate_tiebreaker > exam_tiebreakers[gradeo_marking_session_id]
-        ):
-            exams_by_marking_session[gradeo_marking_session_id] = {
-                "id": gradeo_marking_session_id,
-                "name": exam_name,
-                "class_average": float(class_average) if class_average is not None else None,
-                "syllabus_title": syllabus_title,
-                "syllabus_grade": syllabus_grade,
-                "bands": _split_csv_list(bands),
-                "outcomes": _split_csv_list(outcomes),
-                "topics": _split_csv_list(topics),
-            }
-            exam_tiebreakers[gradeo_marking_session_id] = candidate_tiebreaker
-        exam_sort_keys.setdefault(gradeo_marking_session_id, (exam_name, gradeo_marking_session_id))
-    exams = [
-        exams_by_marking_session[gradeo_marking_session_id]
-        for gradeo_marking_session_id in sorted(
-            exams_by_marking_session,
-            key=lambda key: (_natural_sort_key(exam_sort_keys[key][0]), exam_sort_keys[key][1]),
-        )
-    ]
+    exams, exams_by_name, marking_sessions_by_exam = _dedup_exams_by_name(exams_raw)
 
     students_result = await db.execute(
         text(
@@ -1772,6 +1839,9 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
         ) if existing_result else None
         if existing_tiebreaker is None or candidate_tiebreaker > existing_tiebreaker:
             user_results[gradeo_marking_session_id] = candidate_result
+
+    # Merge results from duplicate marking sessions that share the same exam name
+    _merge_gradeo_results(results_lookup, marking_sessions_by_exam, exams_by_name)
 
     if gradeo_student_ids and assignment_ids:
         question_result_rows = await db.execute(

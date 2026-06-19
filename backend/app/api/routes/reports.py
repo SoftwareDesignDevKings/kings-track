@@ -1387,7 +1387,8 @@ async def _build_full_report_elements(
         text("""
             SELECT DISTINCT ON (gcea.exam_name)
                    gcea.exam_name, gcea.syllabus_title, gcea.topics,
-                   gar.exam_mark, gar.marks_available, gar.class_average, gar.status
+                   gar.exam_mark, gar.marks_available, gar.class_average, gar.status,
+                   gcea.id AS assignment_id, gar.gradeo_student_id
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -1399,7 +1400,7 @@ async def _build_full_report_elements(
         """),
         {"uid": user_id, "gcids": gradeo_class_ids or ["-1"]},
     )
-    gradeo_exams = gradeo_result.fetchall()
+    gradeo_exams = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
 
     # ── Build elements ──
     styles = _pdf_styles()
@@ -1502,20 +1503,20 @@ async def _build_full_report_elements(
         g_cmds = list(_base_table_style())
         for i, ge in enumerate(gradeo_exams, start=1):
             mark_str = (
-                f"{ge.exam_mark}/{ge.marks_available}"
-                if ge.exam_mark is not None else "—"
+                f"{ge['exam_mark']}/{ge['marks_available']}"
+                if ge.get("exam_mark") is not None else "—"
             )
-            avg_str = str(round(ge.class_average, 1)) if ge.class_average is not None else "—"
-            status_str = (ge.status or "").replace("_", " ").title()
-            topics = ge.topics or ""
-            g_data.append([P(ge.exam_name), P(mark_str), P(avg_str), P(status_str), P(topics)])
-            if ge.status == "awaiting_marking":
+            avg_str = str(round(ge["class_average"], 1)) if ge.get("class_average") is not None else "—"
+            status_str = (ge.get("status") or "").replace("_", " ").title()
+            topics = ge.get("topics") or ""
+            g_data.append([P(ge["exam_name"]), P(mark_str), P(avg_str), P(status_str), P(topics)])
+            if ge.get("status") == "awaiting_marking":
                 pass
-            elif ge.status == "not_submitted" or ge.exam_mark is None:
+            elif ge.get("status") == "not_submitted" or ge.get("exam_mark") is None:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-            elif ge.status == "scored" and ge.marks_available and ge.marks_available > 0 and ge.exam_mark / ge.marks_available < 0.5:
+            elif ge.get("status") == "scored" and ge.get("marks_available") and ge["marks_available"] > 0 and ge["exam_mark"] / ge["marks_available"] < 0.5:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            elif ge.status == "scored":
+            elif ge.get("status") == "scored":
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
         g_widths = [avail * 0.26, avail * 0.14, avail * 0.14, avail * 0.16, avail * 0.30]
         gt = Table(g_data, colWidths=g_widths, repeatRows=1)
@@ -1525,8 +1526,8 @@ async def _build_full_report_elements(
         # Summary stats
         gradeo_scores = []
         for ge in gradeo_exams:
-            if ge.status == "scored" and ge.exam_mark is not None and ge.marks_available:
-                gradeo_scores.append((ge.exam_mark / ge.marks_available) * 100)
+            if ge.get("status") == "scored" and ge.get("exam_mark") is not None and ge.get("marks_available"):
+                gradeo_scores.append((ge["exam_mark"] / ge["marks_available"]) * 100)
         avg_str = f"{sum(gradeo_scores) / len(gradeo_scores):.1f}%" if gradeo_scores else "N/A"
         std_str = f"{_stats.stdev(gradeo_scores):.1f}%" if len(gradeo_scores) >= 2 else "N/A"
         els.append(Paragraph(
@@ -1748,7 +1749,8 @@ async def export_concern_report(
             SELECT DISTINCT ON (gar.user_id, gcea.exam_name)
                    gar.user_id,
                    gcea.exam_name, gcea.topics,
-                   gar.exam_mark, gar.marks_available, gar.status
+                   gar.exam_mark, gar.marks_available, gar.status,
+                   gcea.id AS assignment_id, gar.gradeo_student_id
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -1762,17 +1764,18 @@ async def export_concern_report(
         """),
         {"cid": course_id, "uids": user_ids},
     )
+    all_gradeo_rows = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
     gradeo_flagged: dict[int, list] = {}
-    for r in gradeo_result.fetchall():
+    for r in all_gradeo_rows:
         is_flagged = (
-            r.status == "not_submitted"
-            or r.status == "awaiting_marking"
-            or (r.status != "awaiting_marking" and r.exam_mark is None)
-            or (r.status == "scored" and r.marks_available and r.marks_available > 0
-                and r.exam_mark / r.marks_available < 0.5)
+            r["status"] == "not_submitted"
+            or r["status"] == "awaiting_marking"
+            or (r["status"] != "awaiting_marking" and r.get("exam_mark") is None)
+            or (r["status"] == "scored" and r.get("marks_available") and r["marks_available"] > 0
+                and r["exam_mark"] / r["marks_available"] < 0.5)
         )
         if is_flagged:
-            gradeo_flagged.setdefault(r.user_id, []).append(r)
+            gradeo_flagged.setdefault(r["user_id"], []).append(r)
 
     # ── EdStem: incomplete lessons per student (skip for ENC) ──
     edstem_incomplete: dict[int, list] = {}
@@ -1855,12 +1858,12 @@ async def export_concern_report(
             g_data = [[PH("Exam"), PH("Score"), PH("Status"), PH("Topics")]]
             g_cmds = list(_base_table_style())
             for i, r in enumerate(g_rows, start=1):
-                mark = f"{r.exam_mark}/{r.marks_available}" if r.exam_mark is not None else "—"
-                status_str = (r.status or "").replace("_", " ").title()
-                g_data.append([P(r.exam_name), P(mark), P(status_str), P(r.topics or "")])
-                if r.status == "not_submitted" or r.exam_mark is None:
+                mark = f"{r['exam_mark']}/{r['marks_available']}" if r.get("exam_mark") is not None else "—"
+                status_str = (r.get("status") or "").replace("_", " ").title()
+                g_data.append([P(r["exam_name"]), P(mark), P(status_str), P(r.get("topics") or "")])
+                if r.get("status") == "not_submitted" or r.get("exam_mark") is None:
                     g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-                elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
+                elif r.get("status") == "scored" and r.get("marks_available") and r["marks_available"] > 0 and r["exam_mark"] / r["marks_available"] < 0.5:
                     g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
             g_widths = [avail * 0.30, avail * 0.16, avail * 0.22, avail * 0.32]
             gt = Table(g_data, colWidths=g_widths, repeatRows=1)
@@ -1892,6 +1895,95 @@ async def export_concern_report(
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Gradeo effective-status helper (shared by all report Gradeo queries)
+# ---------------------------------------------------------------------------
+
+
+async def _apply_effective_gradeo_status(
+    db: AsyncSession,
+    rows: list,
+) -> list[dict]:
+    """Enhance raw Gradeo result rows with effective status from question-level data.
+
+    **Problem:**  The Gradeo extension sometimes stores
+    ``status='awaiting_marking'`` and ``exam_mark=NULL`` in the
+    ``gradeo_assignment_results`` table even when all question parts have been
+    fully marked.  This happens when the extension sends summary-only data
+    without an aggregate mark.  Without correction, reports show these exams
+    as red (missing/incomplete) even though the student completed them.
+
+    **How it works:**  For candidate rows (``status='awaiting_marking'`` and
+    ``exam_mark IS NULL``), this function batch-queries
+    ``gradeo_assignment_question_results`` and checks whether all submitted
+    questions have marks.  If so, it converts the status to ``'scored'`` and
+    computes ``exam_mark`` as the sum of question marks.
+
+    **Mirror of:**  ``_effective_gradeo_result()`` in ``courses.py`` does the
+    same thing for the course detail page.  If the derivation rules change,
+    update both.
+
+    **SQL requirement:**  The source query must include
+    ``gcea.id AS assignment_id`` and ``gar.gradeo_student_id`` columns so
+    this function can look up question-level data.
+
+    Returns a list of dicts (not Row objects) with corrected status/exam_mark.
+    """
+    results: list[dict] = []
+    candidates: list[tuple[int, int, str]] = []  # (row_index, assignment_id, student_id)
+
+    for i, r in enumerate(rows):
+        d = dict(r._mapping) if hasattr(r, "_mapping") else dict(r)
+        results.append(d)
+        if d.get("status") == "awaiting_marking" and d.get("exam_mark") is None:
+            aid = d.get("assignment_id")
+            sid = d.get("gradeo_student_id")
+            if aid is not None and sid is not None:
+                candidates.append((i, aid, sid))
+
+    if not candidates:
+        return results
+
+    # Batch-query question results for all candidates in one round-trip
+    assignment_ids = list({c[1] for c in candidates})
+    student_ids = list({c[2] for c in candidates})
+    q_result = await db.execute(
+        text("""
+            SELECT gradeo_class_exam_assignment_id, gradeo_student_id,
+                   answer_submitted, mark, marks_available
+            FROM gradeo_assignment_question_results
+            WHERE gradeo_class_exam_assignment_id = ANY(:aids)
+              AND gradeo_student_id = ANY(:sids)
+        """),
+        {"aids": assignment_ids, "sids": student_ids},
+    )
+    questions_by_key: dict[tuple, list] = {}
+    for qr in q_result.fetchall():
+        questions_by_key.setdefault((qr[0], qr[1]), []).append({
+            "answer_submitted": qr[2],
+            "mark": float(qr[3]) if qr[3] is not None else None,
+            "marks_available": float(qr[4]) if qr[4] is not None else None,
+        })
+
+    for idx, aid, sid in candidates:
+        questions = questions_by_key.get((aid, sid), [])
+        submitted = [q for q in questions if q["answer_submitted"]]
+        unmarked = [
+            q for q in submitted
+            if q["mark"] is None
+            and (q["marks_available"] is None or q["marks_available"] > 0)
+        ]
+        if submitted and not unmarked:
+            results[idx]["status"] = "scored"
+            results[idx]["exam_mark"] = sum(q["mark"] or 0 for q in submitted)
+            if results[idx].get("marks_available") is None:
+                results[idx]["marks_available"] = (
+                    sum(q["marks_available"] or 0 for q in questions) or None
+                )
+
+    return results
+
+
 # 11. Missing / Snapshot Report Helpers
 # ---------------------------------------------------------------------------
 
@@ -2172,27 +2264,34 @@ def _build_gradeo_section(
         g_cmds = list(_base_table_style())
         scores: list[float] = []
 
-        for i, r in enumerate(rows, start=1):
-            c_info = courses_map.get(r.course_id, {})
-            c_label = c_info.get("code") or c_info.get("name") or str(r.course_id or 0)
-            mark = (
-                f"{r.exam_mark}/{r.marks_available}"
-                if r.exam_mark is not None else "—"
-            )
-            g_data.append([P(c_label), P(r.exam_name), P(mark), P(r.status or "—"), P(r.topics or "")])
+        def _g(r, key, default=None):
+            """Access field from Row (attribute) or dict (key)."""
+            return r.get(key, default) if isinstance(r, dict) else getattr(r, key, default)
 
-            if r.status == "awaiting_marking":
+        for i, r in enumerate(rows, start=1):
+            c_info = courses_map.get(_g(r, "course_id"), {})
+            c_label = c_info.get("code") or c_info.get("name") or str(_g(r, "course_id") or 0)
+            exam_mark = _g(r, "exam_mark")
+            marks_avail = _g(r, "marks_available")
+            status = _g(r, "status")
+            mark = (
+                f"{exam_mark}/{marks_avail}"
+                if exam_mark is not None else "—"
+            )
+            g_data.append([P(c_label), P(_g(r, "exam_name")), P(mark), P(status or "—"), P(_g(r, "topics") or "")])
+
+            if status == "awaiting_marking":
                 pass  # white — no highlight
-            elif r.status == "not_submitted" or r.exam_mark is None:
+            elif status == "not_submitted" or exam_mark is None:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-            elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
+            elif status == "scored" and marks_avail and marks_avail > 0 and exam_mark / marks_avail < 0.5:
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            elif r.status == "scored":
+            elif status == "scored":
                 g_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
 
             # Collect scores for summary
-            if r.exam_mark is not None and r.marks_available and r.marks_available > 0:
-                scores.append((r.exam_mark / r.marks_available) * 100)
+            if exam_mark is not None and marks_avail and marks_avail > 0:
+                scores.append((exam_mark / marks_avail) * 100)
 
         g_widths = [avail * 0.14, avail * 0.25, avail * 0.14, avail * 0.18, avail * 0.29]
         gt = Table(g_data, colWidths=g_widths, repeatRows=1)
@@ -2261,7 +2360,8 @@ async def export_missing_report_pdf(
             SELECT DISTINCT ON (gcea.exam_name)
                    gcm.canvas_course_id AS course_id,
                    gcea.exam_name, gcea.topics,
-                   gar.exam_mark, gar.marks_available, gar.status
+                   gar.exam_mark, gar.marks_available, gar.status,
+                   gcea.id AS assignment_id, gar.gradeo_student_id
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -2275,12 +2375,12 @@ async def export_missing_report_pdf(
         """),
         {"uid": user_id, "enrolled": enrolled_ids},
     )
-    all_gradeo = gradeo_result.fetchall()
+    all_gradeo = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
     flagged_gradeo = [
         r for r in all_gradeo
-        if r.status in ("awaiting_marking", "not_submitted")
-        or r.exam_mark is None
-        or (r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5)
+        if r.get("status") in ("awaiting_marking", "not_submitted")
+        or r.get("exam_mark") is None
+        or (r.get("marks_available") and r["marks_available"] > 0 and r["exam_mark"] / r["marks_available"] < 0.5)
     ]
 
     # ── Build PDF ──
@@ -2357,7 +2457,8 @@ async def export_snapshot_report_pdf(
             SELECT DISTINCT ON (gcea.exam_name)
                    gcm.canvas_course_id AS course_id,
                    gcea.exam_name, gcea.topics,
-                   gar.exam_mark, gar.marks_available, gar.status
+                   gar.exam_mark, gar.marks_available, gar.status,
+                   gcea.id AS assignment_id, gar.gradeo_student_id
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -2371,7 +2472,7 @@ async def export_snapshot_report_pdf(
         """),
         {"uid": user_id, "enrolled": enrolled_ids},
     )
-    all_gradeo = gradeo_result.fetchall()
+    all_gradeo = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
 
     # ── Build PDF ──
     styles = _pdf_styles()
@@ -2552,7 +2653,8 @@ async def export_student_report_pdf(
         text("""
             SELECT DISTINCT ON (gcea.exam_name)
                    gcea.exam_name, gar.exam_mark, gar.marks_available,
-                   gcea.class_average, gcea.topics, gar.status
+                   gcea.class_average, gcea.topics, gar.status,
+                   gcea.id AS assignment_id, gar.gradeo_student_id
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -2564,22 +2666,22 @@ async def export_student_report_pdf(
         """),
         {"uid": user_id, "gcids": gradeo_class_ids or ["-1"]},
     )
-    gradeo_rows = gradeo_result.fetchall()
+    gradeo_rows = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
 
     if gradeo_rows:
         gr_data = [[PH("Exam"), PH("Mark"), PH("Class Avg"), PH("Topics"), PH("Status")]]
         gr_cmds = list(_base_table_style())
         for i, r in enumerate(gradeo_rows, start=1):
-            mark = f"{r.exam_mark}/{r.marks_available}" if r.exam_mark is not None else "—"
-            avg = f"{r.class_average}" if r.class_average is not None else "—"
-            gr_data.append([P(r.exam_name), P(mark), P(avg), P(r.topics or ""), P(r.status or "—")])
-            if r.status == "awaiting_marking":
+            mark = f"{r['exam_mark']}/{r['marks_available']}" if r.get("exam_mark") is not None else "—"
+            avg = f"{r['class_average']}" if r.get("class_average") is not None else "—"
+            gr_data.append([P(r["exam_name"]), P(mark), P(avg), P(r.get("topics") or ""), P(r.get("status") or "—")])
+            if r.get("status") == "awaiting_marking":
                 pass  # white — no highlight
-            elif r.status == "not_submitted" or r.exam_mark is None:
+            elif r.get("status") == "not_submitted" or r.get("exam_mark") is None:
                 gr_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
-            elif r.status == "scored" and r.marks_available and r.marks_available > 0 and r.exam_mark / r.marks_available < 0.5:
+            elif r.get("status") == "scored" and r.get("marks_available") and r["marks_available"] > 0 and r["exam_mark"] / r["marks_available"] < 0.5:
                 gr_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
-            elif r.status == "scored":
+            elif r.get("status") == "scored":
                 gr_cmds.append(("BACKGROUND", (0, i), (-1, i), _GREEN_LIGHT))
         gr_widths = [avail * 0.25, avail * 0.12, avail * 0.12, avail * 0.33, avail * 0.18]
         grt = Table(gr_data, colWidths=gr_widths, repeatRows=1)
