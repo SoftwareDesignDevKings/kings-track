@@ -233,9 +233,9 @@ def _merge_gradeo_results(
                 r = user_results.get(ms_id)
                 if r is not None:
                     tb = (
+                        _STATUS_PRIORITY.get(r["status"], 0),
                         r["last_imported_at"] is not None,
                         r["last_imported_at"],
-                        _STATUS_PRIORITY.get(r["status"], 0),
                         -r["assignment_id"],
                     )
                     if best_tb is None or tb > best_tb:
