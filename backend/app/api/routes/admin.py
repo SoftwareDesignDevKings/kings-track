@@ -126,6 +126,12 @@ async def add_to_whitelist(
                 course_data = await canvas.get_course(body.course_id)
             term = course_data.get("term") or {}
             canvas_course_code = course_data.get("course_code") or body.course_code
+
+            def _parse_dt(val: str | None) -> datetime | None:
+                if not val:
+                    return None
+                return datetime.fromisoformat(val.replace("Z", "+00:00"))
+
             await db.execute(
                 text("""
                     INSERT INTO courses (
@@ -150,8 +156,8 @@ async def add_to_whitelist(
                     "workflow_state": course_data.get("workflow_state", "available"),
                     "account_id": course_data.get("account_id"),
                     "term_id": term.get("id"),
-                    "term_start_at": term.get("start_at"),
-                    "term_end_at": term.get("end_at"),
+                    "term_start_at": _parse_dt(term.get("start_at")),
+                    "term_end_at": _parse_dt(term.get("end_at")),
                     "total_students": course_data.get("total_students", 0),
                     "synced_at": datetime.now(timezone.utc),
                 },
