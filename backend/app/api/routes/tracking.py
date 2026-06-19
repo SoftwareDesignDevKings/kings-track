@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_auth
+from app.api.routes.courses import _get_course_group_code
 from app.db import get_db
 
 router = APIRouter(prefix="/courses/{course_id}/tracking", tags=["tracking"], dependencies=[Depends(require_auth)])
@@ -56,8 +57,25 @@ async def get_tracking_grid(
         for r in criteria_rows.fetchall()
     ]
 
-    # Build list of course IDs to pull students from (supports course groups)
+    # Auto-resolve all sibling courses in the same course group so
+    # students from every class appear, even on single-course pages.
+    course_row = await db.execute(
+        text("SELECT course_code FROM courses WHERE id = :id"),
+        {"id": course_id},
+    )
+    course_info = course_row.fetchone()
+    group_code = _get_course_group_code(course_info.course_code) if course_info else None
+
     all_course_ids = [course_id]
+    if group_code:
+        all_courses = await db.execute(
+            text("SELECT id, course_code FROM courses"),
+        )
+        for r in all_courses.fetchall():
+            if r.id != course_id and _get_course_group_code(r.course_code) == group_code:
+                all_course_ids.append(r.id)
+
+    # Also include any extra IDs passed explicitly
     if extra_course_ids:
         for cid in extra_course_ids.split(","):
             cid = cid.strip()
