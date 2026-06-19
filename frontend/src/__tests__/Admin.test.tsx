@@ -14,6 +14,7 @@ vi.mock('../services/api', () => ({
   useRemoveFromWhitelist: vi.fn(),
   useSyncStatus: vi.fn(),
   useTriggerSync: vi.fn(),
+  useForceUnlockSync: vi.fn(),
   useEdStemMappings: vi.fn(),
   useEdStemAvailableCourses: vi.fn(),
   useCreateEdStemMapping: vi.fn(),
@@ -42,6 +43,7 @@ import {
   useRemoveFromWhitelist,
   useSyncStatus,
   useTriggerSync,
+  useForceUnlockSync,
   useEdStemMappings,
   useEdStemAvailableCourses,
   useCreateEdStemMapping,
@@ -106,6 +108,7 @@ describe('Admin', () => {
       },
     } as any)
     vi.mocked(useTriggerSync).mockReturnValue({ ...baseMutation } as any)
+    vi.mocked(useForceUnlockSync).mockReturnValue({ ...baseMutation } as any)
     vi.mocked(useEdStemMappings).mockReturnValue({
       data: [
         {

@@ -37,6 +37,13 @@ async def trigger_sync(background_tasks: BackgroundTasks):
     return {"status": "started", "message": "Sync triggered"}
 
 
+@router.post("/force-unlock")
+async def force_unlock_sync():
+    """Force-release the sync lock if a previous sync died without cleaning up."""
+    await sync_engine._release_lock()
+    return {"status": "unlocked", "message": "Sync lock released"}
+
+
 @router.get("/status")
 async def sync_status():
     """Return the latest sync log entries."""
