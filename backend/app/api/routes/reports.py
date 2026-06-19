@@ -2013,12 +2013,13 @@ def _dedup_gradeo_report_rows(
     if not rows:
         return rows
 
-    from app.api.routes.courses import _strip_class_prefix
+    from app.api.routes.courses import _strip_class_prefix, _discover_exam_prefixes
 
     class_names = {r["class_name"] for r in rows if r.get("class_name")}
     class_names |= {r["gradeo_class_name"] for r in rows if r.get("gradeo_class_name")}
     if extra_class_names:
         class_names |= extra_class_names
+    class_names |= _discover_exam_prefixes([r["exam_name"] for r in rows])
     status_priority = {"not_submitted": 0, "awaiting_marking": 1, "scored": 2}
     best_by_key: dict = {}
     best_tiebreakers: dict = {}
