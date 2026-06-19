@@ -1278,6 +1278,63 @@ def test_gradeo_report_dedupes_different_class_prefix_same_cycle(app_client):
     assert len([v for v in eamon["results"].values() if v is not None]) == 1
 
 
+def test_gradeo_dedup_discovers_prefix_from_exam_names(app_client):
+    """When stored class names (e.g. '11ENCX') don't match the actual prefix
+    in exam names (e.g. '11ENC' from '11ENC_Cycle1'), prefix discovery should
+    still strip the prefix and merge duplicates."""
+    _whitelist(COURSE_ID, "11 Enterprise Computing", "11ENC-2026")
+    app_client.post("/api/admin/gradeo/student-directory", json=_directory_payload())
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": GRADEO_CLASS_ID,
+            "gradeo_class_name": "11ENCX",
+        },
+    )
+    app_client.post(
+        "/api/admin/gradeo/mappings",
+        json={
+            "canvas_course_id": COURSE_ID,
+            "gradeo_class_id": SECOND_GRADEO_CLASS_ID,
+            "gradeo_class_name": "11ENCY",
+        },
+    )
+
+    # Import exams with prefix "11ENC" (doesn't match stored "11ENCX"/"11ENCY")
+    first_payload = _summary_import_payload_for(
+        gradeo_class_id=GRADEO_CLASS_ID,
+        gradeo_class_name="11ENCX",
+        marking_session_id="ms-enc-x",
+        exam_session_id="es-enc-x",
+        exam_mark="7",
+    )
+    first_payload["students"][0]["exam_rows"][0]["exam_name"] = "11ENC_Cycle1"
+    first_payload["students"][0]["exam_rows"][0]["class_name"] = "11ENC"
+    first = app_client.post("/api/admin/gradeo/imports", json=first_payload)
+    assert first.status_code == 201
+
+    second_payload = _summary_import_payload_for(
+        gradeo_class_id=SECOND_GRADEO_CLASS_ID,
+        gradeo_class_name="11ENCY",
+        marking_session_id="ms-enc-y",
+        exam_session_id="es-enc-y",
+        exam_mark="9",
+    )
+    second_payload["students"][0]["exam_rows"][0]["exam_name"] = "11ENC_Cycle1"
+    second_payload["students"][0]["exam_rows"][0]["class_name"] = "11ENC"
+    second = app_client.post("/api/admin/gradeo/imports", json=second_payload)
+    assert second.status_code == 201
+
+    report = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
+    assert report.status_code == 200
+    data = report.json()
+
+    # Prefix "11ENC" should be stripped even though stored names are "11ENCX"/"11ENCY"
+    assert len(data["exams"]) == 1
+    assert data["exams"][0]["name"] == "Cycle1"
+
+
 def test_gradeo_course_endpoint_returns_unmapped_false(app_client):
     resp = app_client.get(f"/api/courses/{COURSE_ID}/gradeo")
     assert resp.status_code == 200

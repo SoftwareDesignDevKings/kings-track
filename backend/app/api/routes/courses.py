@@ -134,6 +134,25 @@ def _strip_class_prefix(exam_name: str, class_names: set[str] | None) -> str:
     return exam_name
 
 
+def _discover_exam_prefixes(exam_names: list[str], threshold: int = 2) -> set[str]:
+    """Discover common prefixes from exam names themselves.
+
+    When stored class names (e.g. "11ENCX") don't match the actual prefix
+    used in exam names (e.g. "11ENC" from "11ENC_Cycle1"), prefix stripping
+    fails.  This function extracts the prefix before the first separator in
+    each exam name and returns those that appear at least *threshold* times.
+    """
+    counts: dict[str, int] = {}
+    for name in exam_names:
+        for sep in ("_", "-", " "):
+            idx = name.find(sep)
+            if idx > 0:
+                prefix = name[:idx]
+                counts[prefix] = counts.get(prefix, 0) + 1
+                break
+    return {prefix for prefix, count in counts.items() if count >= threshold}
+
+
 def _dedup_exams_by_name(
     exams_raw,
     class_to_course: dict[str, int] | None = None,
@@ -169,6 +188,14 @@ def _dedup_exams_by_name(
 
     Returns ``(exams_list, exams_by_key, marking_sessions_by_key)``.
     """
+    # Discover prefixes from exam names themselves to supplement stored class
+    # names.  Stored names (e.g. "11ENCX") may not match the prefix actually
+    # used in exam names (e.g. "11ENC" from "11ENC_Cycle1").
+    exam_name_idx = 3 if class_to_course is not None else 2
+    all_exam_names = [row[exam_name_idx] for row in exams_raw]
+    effective_class_names = set(class_names) if class_names else set()
+    effective_class_names |= _discover_exam_prefixes(all_exam_names)
+
     exams_by_key: dict = {}
     exam_tiebreakers: dict = {}
     marking_sessions_by_key: dict = {}
@@ -178,13 +205,13 @@ def _dedup_exams_by_name(
              class_average, syllabus_title, syllabus_grade, bands, outcomes,
              topics, updated_at, *_extra) = row
             course_id = class_to_course.get(gradeo_class_id)
-            normalized_name = _strip_class_prefix(exam_name, class_names)
+            normalized_name = _strip_class_prefix(exam_name, effective_class_names)
             key: str | tuple = (course_id, normalized_name)
         else:
             (assignment_id, gradeo_marking_session_id, exam_name, class_average,
              syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at,
              *_extra) = row
-            normalized_name = _strip_class_prefix(exam_name, class_names)
+            normalized_name = _strip_class_prefix(exam_name, effective_class_names)
             key = normalized_name
         marking_sessions_by_key.setdefault(key, set()).add(gradeo_marking_session_id)
         candidate_tiebreaker = (updated_at is not None, updated_at, -assignment_id)
