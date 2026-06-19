@@ -11,6 +11,8 @@ import type {
   GradeoTopicBands,
   GradeoTopicSummary,
   SubmissionStatus,
+  GradeoStudentRow,
+  GradeoStudentExamResult,
 } from '../types'
 import {
   buildCanvasActivityColumns,
@@ -295,12 +297,69 @@ function buildQuestionTooltip(exam: GradeoExam, questions: GradeoQuestionResult[
   ].filter(Boolean).join('\n')
 }
 
+const GRADEO_STATUS_PRIORITY: Record<string, number> = {
+  not_submitted: 0,
+  awaiting_marking: 1,
+  scored: 2,
+}
+
+/**
+ * Deduplicate Gradeo exams by name, keeping the best exam metadata and
+ * merging student results so each student gets their best result per cycle.
+ */
+function deduplicateGradeoExams(
+  exams: GradeoExam[],
+  students: GradeoStudentRow[],
+): { exams: GradeoExam[]; students: GradeoStudentRow[] } {
+  // Group exams by name — if no duplicates, return as-is
+  const examsByName = new Map<string, GradeoExam[]>()
+  for (const exam of exams) {
+    const group = examsByName.get(exam.name)
+    if (group) group.push(exam)
+    else examsByName.set(exam.name, [exam])
+  }
+  if (examsByName.size === exams.length) return { exams, students }
+
+  // Build canonical exam list (first occurrence per name)
+  const canonicalExams: GradeoExam[] = []
+  const mergeMap = new Map<string, string[]>() // canonical id -> all ids for this name
+  for (const [, group] of examsByName) {
+    canonicalExams.push(group[0])
+    mergeMap.set(group[0].id, group.map(e => e.id))
+  }
+
+  // Merge student results: for each student, pick the best result across
+  // duplicate exam IDs for the same cycle
+  const mergedStudents = students.map(student => {
+    const mergedResults: Record<string, GradeoStudentExamResult | null> = {}
+    for (const [canonicalId, allIds] of mergeMap) {
+      let best: GradeoStudentExamResult | null = null
+      let bestPriority = -1
+      for (const id of allIds) {
+        const r = student.results[id]
+        if (r) {
+          const priority = GRADEO_STATUS_PRIORITY[r.status] ?? 0
+          if (priority > bestPriority) {
+            best = r
+            bestPriority = priority
+          }
+        }
+      }
+      mergedResults[canonicalId] = best ?? null
+    }
+    return { ...student, results: mergedResults }
+  })
+
+  return { exams: canonicalExams, students: mergedStudents }
+}
+
 export function buildGradeoReportMatrixTableModel(
   report: GradeoCourseReport,
   hiddenStudents: Array<{ id: number; name: string }> = [],
 ): MatrixTableModel {
-  const exams = report.exams ?? []
-  const rows = (report.students ?? []).map(student => {
+  const deduped = deduplicateGradeoExams(report.exams ?? [], report.students ?? [])
+  const exams = deduped.exams
+  const rows = deduped.students.map(student => {
     const markPcts: number[] = []
     let scoredCount = 0
 
