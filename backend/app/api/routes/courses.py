@@ -113,9 +113,31 @@ def _effective_gradeo_result(result_data: dict, questions: list[dict]) -> dict:
     }
 
 
+def _strip_class_prefix(exam_name: str, class_names: set[str] | None) -> str:
+    """Strip a Gradeo class-name prefix from *exam_name* for dedup purposes.
+
+    Gradeo exams are typically named ``<ClassName>_<CycleName>`` (e.g.
+    ``12ENCX_Cycle1``).  When multiple classes map to the same Canvas course
+    each class produces its own version of the same exam with a different
+    prefix.  Stripping that prefix allows us to recognise them as duplicates.
+    """
+    if not class_names:
+        return exam_name
+    # Try longest class name first so "12ENCX" is preferred over "12".
+    for cn in sorted(class_names, key=len, reverse=True):
+        for sep in ("_", "-", " "):
+            prefix = cn + sep
+            if exam_name.startswith(prefix):
+                stripped = exam_name[len(prefix):].strip()
+                if stripped:
+                    return stripped
+    return exam_name
+
+
 def _dedup_exams_by_name(
     exams_raw,
     class_to_course: dict[str, int] | None = None,
+    class_names: set[str] | None = None,
 ) -> tuple[list[dict], dict, dict]:
     """Deduplicate Gradeo exams so same-named exams within the same Canvas course
     are merged, but same-named exams across different courses stay separate.
@@ -126,6 +148,10 @@ def _dedup_exams_by_name(
     exam (e.g. both have a "Cycle1" quiz).  Without dedup, the UI shows two
     "Cycle1" columns.
 
+    Exam names are normalised by stripping known class-name prefixes (e.g.
+    ``12ENCX_Cycle1`` → ``Cycle1``) so that exams from different classes that
+    represent the same cycle are merged.
+
     **Per-course vs. cross-course:**  Within a single Canvas course, same exam
     name = same exam → merge.  Across different Canvas courses (e.g. Software
     "Cycle1" vs Enterprise "Cycle1"), they are different quizzes → keep separate.
@@ -133,9 +159,9 @@ def _dedup_exams_by_name(
     **Usage:**
 
     - Single course endpoint (``/{course_id}/gradeo``): call without
-      ``class_to_course`` → dedup key is ``exam_name``.
+      ``class_to_course`` → dedup key is the normalised ``exam_name``.
     - Course group endpoint (``/group/{group_code}/gradeo``): pass
-      ``class_to_course`` mapping → dedup key is ``(canvas_course_id, exam_name)``.
+      ``class_to_course`` mapping → dedup key is ``(canvas_course_id, normalised_exam_name)``.
       The SQL must include ``gradeo_class_id`` as the first column.
 
     Must be paired with ``_merge_gradeo_results()`` after building the
@@ -152,17 +178,19 @@ def _dedup_exams_by_name(
              class_average, syllabus_title, syllabus_grade, bands, outcomes,
              topics, updated_at) = row
             course_id = class_to_course.get(gradeo_class_id)
-            key: str | tuple = (course_id, exam_name)
+            normalized_name = _strip_class_prefix(exam_name, class_names)
+            key: str | tuple = (course_id, normalized_name)
         else:
             (assignment_id, gradeo_marking_session_id, exam_name, class_average,
              syllabus_title, syllabus_grade, bands, outcomes, topics, updated_at) = row
-            key = exam_name
+            normalized_name = _strip_class_prefix(exam_name, class_names)
+            key = normalized_name
         marking_sessions_by_key.setdefault(key, set()).add(gradeo_marking_session_id)
         candidate_tiebreaker = (updated_at is not None, updated_at, -assignment_id)
         if key not in exams_by_key or candidate_tiebreaker > exam_tiebreakers[key]:
             exams_by_key[key] = {
                 "id": gradeo_marking_session_id,
-                "name": exam_name,
+                "name": normalized_name,
                 "class_average": float(class_average) if class_average is not None else None,
                 "syllabus_title": syllabus_title,
                 "syllabus_grade": syllabus_grade,
@@ -825,8 +853,10 @@ async def get_course_group_gradeo(group_code: str, db: AsyncSession = Depends(ge
         {"gradeo_class_ids": gradeo_class_ids},
     )
     exams_raw = exams_result.fetchall()
+    class_name_set = {gc["gradeo_class_name"] for gc in gradeo_classes if gc.get("gradeo_class_name")}
     exams, exams_by_key, marking_sessions_by_key = _dedup_exams_by_name(
         exams_raw, class_to_course=class_to_course or None,
+        class_names=class_name_set,
     )
 
     students_result = await db.execute(
@@ -1756,7 +1786,10 @@ async def get_gradeo_report(course_id: int, db: AsyncSession = Depends(get_db)):
         {"gradeo_class_ids": gradeo_class_ids},
     )
     exams_raw = exams_result.fetchall()
-    exams, exams_by_name, marking_sessions_by_exam = _dedup_exams_by_name(exams_raw)
+    class_name_set = {gc["gradeo_class_name"] for gc in gradeo_classes if gc.get("gradeo_class_name")}
+    exams, exams_by_name, marking_sessions_by_exam = _dedup_exams_by_name(
+        exams_raw, class_names=class_name_set,
+    )
 
     students_result = await db.execute(
         text(

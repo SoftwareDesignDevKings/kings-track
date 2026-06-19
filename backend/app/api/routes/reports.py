@@ -1382,13 +1382,13 @@ async def _build_full_report_elements(
     )
     gradeo_class_ids = [r[0] for r in gcm_result.fetchall()]
 
-    # ── Fetch Gradeo results (deduplicate by exam name) ──
+    # ── Fetch Gradeo results (deduplicate by normalised exam name) ──
     gradeo_result = await db.execute(
         text("""
-            SELECT DISTINCT ON (gcea.exam_name)
-                   gcea.exam_name, gcea.syllabus_title, gcea.topics,
+            SELECT gcea.exam_name, gcea.syllabus_title, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.class_average, gar.status,
-                   gcea.id AS assignment_id, gar.gradeo_student_id
+                   gcea.id AS assignment_id, gar.gradeo_student_id,
+                   gcea.class_name, gar.last_imported_at
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -1401,6 +1401,7 @@ async def _build_full_report_elements(
         {"uid": user_id, "gcids": gradeo_class_ids or ["-1"]},
     )
     gradeo_exams = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
+    gradeo_exams = _dedup_gradeo_report_rows(gradeo_exams)
 
     # ── Build elements ──
     styles = _pdf_styles()
@@ -1746,11 +1747,11 @@ async def export_concern_report(
     # ── Gradeo: flagged results per student ──
     gradeo_result = await db.execute(
         text("""
-            SELECT DISTINCT ON (gar.user_id, gcea.exam_name)
-                   gar.user_id,
+            SELECT gar.user_id,
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status,
-                   gcea.id AS assignment_id, gar.gradeo_student_id
+                   gcea.id AS assignment_id, gar.gradeo_student_id,
+                   gcea.class_name, gar.last_imported_at
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -1765,6 +1766,7 @@ async def export_concern_report(
         {"cid": course_id, "uids": user_ids},
     )
     all_gradeo_rows = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
+    all_gradeo_rows = _dedup_gradeo_report_rows(all_gradeo_rows, per_user=True)
     gradeo_flagged: dict[int, list] = {}
     for r in all_gradeo_rows:
         is_flagged = (
@@ -1861,7 +1863,9 @@ async def export_concern_report(
                 mark = f"{r['exam_mark']}/{r['marks_available']}" if r.get("exam_mark") is not None else "—"
                 status_str = (r.get("status") or "").replace("_", " ").title()
                 g_data.append([P(r["exam_name"]), P(mark), P(status_str), P(r.get("topics") or "")])
-                if r.get("status") == "not_submitted" or r.get("exam_mark") is None:
+                if r.get("status") == "awaiting_marking":
+                    pass  # white — no highlight
+                elif r.get("status") == "not_submitted" or r.get("exam_mark") is None:
                     g_cmds.append(("BACKGROUND", (0, i), (-1, i), _RED_LIGHT))
                 elif r.get("status") == "scored" and r.get("marks_available") and r["marks_available"] > 0 and r["exam_mark"] / r["marks_available"] < 0.5:
                     g_cmds.append(("BACKGROUND", (0, i), (-1, i), _AMBER_LIGHT))
@@ -1982,6 +1986,56 @@ async def _apply_effective_gradeo_status(
                 )
 
     return results
+
+
+def _dedup_gradeo_report_rows(
+    rows: list[dict],
+    *,
+    per_user: bool = False,
+    per_course: bool = False,
+) -> list[dict]:
+    """Deduplicate Gradeo report rows by normalised exam name.
+
+    Multiple Gradeo classes mapped to the same Canvas course can produce rows
+    with different exam names for the same logical cycle (e.g.
+    ``12ENCX_Cycle1`` and ``12ENCY_Cycle1``).  This function normalises names
+    by stripping class prefixes, then keeps the best row per normalised name.
+
+    Set *per_user* when the result set spans multiple students (batch queries).
+    Set *per_course* when the result set spans multiple courses.
+    """
+    if not rows:
+        return rows
+
+    from app.api.routes.courses import _strip_class_prefix
+
+    class_names = {r["class_name"] for r in rows if r.get("class_name")}
+    status_priority = {"not_submitted": 0, "awaiting_marking": 1, "scored": 2}
+    best_by_key: dict = {}
+    best_tiebreakers: dict = {}
+
+    for r in rows:
+        normalized = _strip_class_prefix(r["exam_name"], class_names)
+        parts: list = []
+        if per_user:
+            parts.append(r.get("user_id"))
+        if per_course:
+            parts.append(r.get("course_id"))
+        parts.append(normalized)
+        key = tuple(parts) if len(parts) > 1 else parts[0]
+
+        tb = (
+            status_priority.get(r.get("status"), 0),
+            r.get("last_imported_at") is not None,
+            r.get("last_imported_at"),
+        )
+        if key not in best_by_key or tb > best_tiebreakers[key]:
+            r_copy = dict(r)
+            r_copy["exam_name"] = normalized
+            best_by_key[key] = r_copy
+            best_tiebreakers[key] = tb
+
+    return list(best_by_key.values())
 
 
 # 11. Missing / Snapshot Report Helpers
@@ -2354,14 +2408,14 @@ async def export_missing_report_pdf(
     # ── EdStem: incomplete lessons ──
     missing_edstem, has_edstem = await _fetch_edstem_incomplete(db, user_id, data)
 
-    # ── Gradeo: deduplicated by exam name, then filter to flagged only ──
+    # ── Gradeo: deduplicated by normalised exam name, then filter to flagged only ──
     gradeo_result = await db.execute(
         text("""
-            SELECT DISTINCT ON (gcea.exam_name)
-                   gcm.canvas_course_id AS course_id,
+            SELECT gcm.canvas_course_id AS course_id,
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status,
-                   gcea.id AS assignment_id, gar.gradeo_student_id
+                   gcea.id AS assignment_id, gar.gradeo_student_id,
+                   gcea.class_name, gar.last_imported_at
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -2376,6 +2430,7 @@ async def export_missing_report_pdf(
         {"uid": user_id, "enrolled": enrolled_ids},
     )
     all_gradeo = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
+    all_gradeo = _dedup_gradeo_report_rows(all_gradeo, per_course=True)
     flagged_gradeo = [
         r for r in all_gradeo
         if r.get("status") in ("awaiting_marking", "not_submitted")
@@ -2451,14 +2506,14 @@ async def export_snapshot_report_pdf(
     # ── EdStem: incomplete lessons ──
     missing_edstem, has_edstem = await _fetch_edstem_incomplete(db, user_id, data)
 
-    # ── Gradeo: all results, deduplicated by exam name ──
+    # ── Gradeo: all results, deduplicated by normalised exam name ──
     gradeo_result = await db.execute(
         text("""
-            SELECT DISTINCT ON (gcea.exam_name)
-                   gcm.canvas_course_id AS course_id,
+            SELECT gcm.canvas_course_id AS course_id,
                    gcea.exam_name, gcea.topics,
                    gar.exam_mark, gar.marks_available, gar.status,
-                   gcea.id AS assignment_id, gar.gradeo_student_id
+                   gcea.id AS assignment_id, gar.gradeo_student_id,
+                   gcea.class_name, gar.last_imported_at
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -2473,6 +2528,7 @@ async def export_snapshot_report_pdf(
         {"uid": user_id, "enrolled": enrolled_ids},
     )
     all_gradeo = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
+    all_gradeo = _dedup_gradeo_report_rows(all_gradeo, per_course=True)
 
     # ── Build PDF ──
     styles = _pdf_styles()
@@ -2647,14 +2703,14 @@ async def export_student_report_pdf(
 
     # ── Section 4: Assessment Tracking — disabled until data is fixed ──
 
-    # ── Section 5: Gradeo Results (deduplicate by exam name, keep latest) ──
+    # ── Section 5: Gradeo Results (deduplicate by normalised exam name, keep latest) ──
     els.append(Paragraph("Gradeo Results", styles["section"]))
     gradeo_result = await db.execute(
         text("""
-            SELECT DISTINCT ON (gcea.exam_name)
-                   gcea.exam_name, gar.exam_mark, gar.marks_available,
+            SELECT gcea.exam_name, gar.exam_mark, gar.marks_available,
                    gcea.class_average, gcea.topics, gar.status,
-                   gcea.id AS assignment_id, gar.gradeo_student_id
+                   gcea.id AS assignment_id, gar.gradeo_student_id,
+                   gcea.class_name, gar.last_imported_at
             FROM gradeo_assignment_results gar
             JOIN gradeo_class_exam_assignments gcea
                 ON gcea.id = gar.gradeo_class_exam_assignment_id
@@ -2667,6 +2723,7 @@ async def export_student_report_pdf(
         {"uid": user_id, "gcids": gradeo_class_ids or ["-1"]},
     )
     gradeo_rows = await _apply_effective_gradeo_status(db, gradeo_result.fetchall())
+    gradeo_rows = _dedup_gradeo_report_rows(gradeo_rows)
 
     if gradeo_rows:
         gr_data = [[PH("Exam"), PH("Mark"), PH("Class Avg"), PH("Topics"), PH("Status")]]
