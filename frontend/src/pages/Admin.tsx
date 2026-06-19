@@ -13,6 +13,7 @@ import {
   useRemoveFromWhitelist,
   useSyncStatus,
   useTriggerSync,
+  useForceUnlockSync,
   useEdStemMappings,
   useEdStemAvailableCourses,
   useCreateEdStemMapping,
@@ -108,6 +109,7 @@ export default function Admin() {
   const removeFromWhitelist = useRemoveFromWhitelist()
   const { data: syncStatus } = useSyncStatus()
   const triggerSync = useTriggerSync()
+  const forceUnlock = useForceUnlockSync()
 
   const isRunning = syncStatus?.is_running ?? false
   const lastSync = syncStatus?.logs?.find(l => l.status === 'completed')?.completed_at
@@ -140,6 +142,9 @@ export default function Admin() {
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState<'admin' | 'teacher'>('teacher')
   const [courseSearch, setCourseSearch] = useState('')
+  const [manualCourseId, setManualCourseId] = useState('')
+  const [manualCourseName, setManualCourseName] = useState('')
+  const [manualCourseCode, setManualCourseCode] = useState('')
   const [edStemCanvasId, setEdStemCanvasId] = useState<number | ''>('')
   const [edStemCourseId, setEdStemCourseId] = useState<number | ''>('')
   const [gradeoCanvasId, setGradeoCanvasId] = useState<number | ''>('')
@@ -300,13 +305,25 @@ export default function Admin() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => triggerSync.mutate()}
-                disabled={isRunning || triggerSync.isPending}
-                className="shrink-0 px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {isRunning ? 'Syncing…' : 'Sync Now'}
-              </button>
+              <div className="flex items-center gap-2">
+                {isRunning && (
+                  <button
+                    onClick={() => forceUnlock.mutate()}
+                    disabled={forceUnlock.isPending}
+                    className="shrink-0 px-3 py-2 text-xs font-medium rounded-lg border border-red-200 text-red-600 bg-white hover:bg-red-50 hover:border-red-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title="Force release the sync lock if it appears stuck"
+                  >
+                    {forceUnlock.isPending ? 'Unlocking…' : 'Force Unlock'}
+                  </button>
+                )}
+                <button
+                  onClick={() => triggerSync.mutate()}
+                  disabled={isRunning || triggerSync.isPending}
+                  className="shrink-0 px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isRunning ? 'Syncing…' : 'Sync Now'}
+                </button>
+              </div>
             </div>
 
             {/* Progress */}
@@ -613,6 +630,72 @@ export default function Admin() {
 
               </div>
             )}
+
+            {/* Manual add by Canvas Course ID */}
+            <div className="px-5 py-4 border-t border-slate-100">
+              <p className="text-xs font-medium text-slate-500 mb-2">Add course manually by Canvas ID</p>
+              <form
+                onSubmit={e => {
+                  e.preventDefault()
+                  const id = parseInt(manualCourseId, 10)
+                  if (!id || isNaN(id)) return
+                  addToWhitelist.mutate(
+                    { id, name: manualCourseName || `Course ${id}`, course_code: manualCourseCode || null },
+                    {
+                      onSuccess: (data) => {
+                        setManualCourseId('')
+                        setManualCourseName('')
+                        setManualCourseCode('')
+                        if (data?.edstem_matched) {
+                          setAutoMatchedCourse(`Course ${id} auto-linked to EdStem: ${data.edstem_matched.edstem_course_name}`)
+                          setTimeout(() => setAutoMatchedCourse(null), 5000)
+                        }
+                      },
+                    },
+                  )
+                }}
+                className="flex flex-wrap items-end gap-2"
+              >
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">Course ID *</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 12345"
+                    value={manualCourseId}
+                    onChange={e => setManualCourseId(e.target.value)}
+                    required
+                    className="w-28 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 11 Software Engineering"
+                    value={manualCourseName}
+                    onChange={e => setManualCourseName(e.target.value)}
+                    className="w-52 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">Course Code</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 11SENE1_2026"
+                    value={manualCourseCode}
+                    onChange={e => setManualCourseCode(e.target.value)}
+                    className="w-40 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={!manualCourseId || addToWhitelist.isPending}
+                  className="px-3 py-1.5 text-sm font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Add
+                </button>
+              </form>
+            </div>
           </section>
 
           {/* ── EdStem Course Mapping ───────────────────────────────── */}
