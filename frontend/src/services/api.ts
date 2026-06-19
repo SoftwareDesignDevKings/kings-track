@@ -212,6 +212,19 @@ export function useTriggerSync() {
   })
 }
 
+export function useForceUnlockSync() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      fetchJSON<{ status: string; message: string }>('/sync/force-unlock', {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sync-status'] })
+    },
+  })
+}
+
 // ─── Current user ─────────────────────────────────────────────────────────────
 
 export function useCurrentUser() {
