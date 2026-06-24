@@ -32,6 +32,7 @@ function makeJwt(payload) {
 function setupBrowserMock() {
   const storageData = {}
   const messageListeners = []
+  const sentMessages = []
   let platformInfoCalls = 0
 
   globalThis.browser = {
@@ -41,7 +42,8 @@ function setupBrowserMock() {
           messageListeners.push(listener)
         },
       },
-      async sendMessage() {
+      async sendMessage(message) {
+        sentMessages.push(message)
         return undefined
       },
       async getPlatformInfo() {
@@ -78,6 +80,7 @@ function setupBrowserMock() {
   return {
     storageData,
     messageListeners,
+    sentMessages,
     get platformInfoCalls() {
       return platformInfoCalls
     },
@@ -183,6 +186,76 @@ describe('Gradeo extension built utilities', () => {
     assert.equal(response.hasAuthorization, true)
     assert.equal(mock.storageData.kingsTrackGradeoSession.authorization, `Bearer ${token}`)
     assert.doesNotMatch(JSON.stringify(mock.storageData.kingsTrackDebugLogs || []), new RegExp(token))
+  })
+
+  it('captures a Gradeo session from page storage and cookies in the content bridge', async () => {
+    const mock = setupBrowserMock()
+    const dom = new JSDOM('<main>Gradeo</main>', {
+      url: 'https://platform.gradeo.com.au/admin/schoolStudents',
+    })
+    const token = makeJwt({
+      iss: 'https://gradeo.au.auth0.com/',
+      aud: ['https://api.portal.gradeo.com.au'],
+      exp: 2000000000,
+    })
+    dom.window.localStorage.setItem('gradeo-auth', JSON.stringify({ access_token: token }))
+    dom.window.document.cookie = 'admin_user_schoolId=7572b03a-1507-4309-950e-2a286bdcf0a4'
+
+    globalThis.window = dom.window
+    globalThis.document = dom.window.document
+    globalThis.localStorage = dom.window.localStorage
+    globalThis.sessionStorage = dom.window.sessionStorage
+    globalThis.XMLHttpRequest = dom.window.XMLHttpRequest
+    globalThis.Headers = dom.window.Headers
+    globalThis.Request = dom.window.Request
+
+    await importBuilt('src/shared/gradeoSession.js')
+    await importBuilt('src/content/gradeoSession.js')
+    await delay(0)
+
+    const capture = mock.sentMessages.find(message => message?.type === 'kings.gradeo.sessionCaptured')
+    assert.equal(capture.session.authorization, `Bearer ${token}`)
+    assert.equal(capture.session.schoolId, '7572b03a-1507-4309-950e-2a286bdcf0a4')
+    assert.equal(capture.session.source, 'localStorage')
+  })
+
+  it('forwards sanitized Gradeo page-world capture events from the content bridge', async () => {
+    const mock = setupBrowserMock()
+    const dom = new JSDOM('<main>Gradeo</main>', {
+      url: 'https://platform.gradeo.com.au/reporting',
+    })
+    const token = makeJwt({
+      iss: 'https://gradeo.au.auth0.com/',
+      aud: ['https://api.portal.gradeo.com.au'],
+      exp: 2000000000,
+    })
+
+    globalThis.window = dom.window
+    globalThis.document = dom.window.document
+    globalThis.localStorage = dom.window.localStorage
+    globalThis.sessionStorage = dom.window.sessionStorage
+    globalThis.XMLHttpRequest = dom.window.XMLHttpRequest
+    globalThis.Headers = dom.window.Headers
+    globalThis.Request = dom.window.Request
+    globalThis.MessageEvent = dom.window.MessageEvent
+
+    await importBuilt('src/shared/gradeoSession.js')
+    await importBuilt('src/content/gradeoSession.js')
+    dom.window.postMessage({
+      type: 'kings.gradeo.pageSessionCaptured',
+      session: {
+        authorization: `Bearer ${token}`,
+        schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
+        source: 'page_fetch',
+        cookie: 'admin_user_name=Should Not Forward',
+      },
+    }, '*')
+    await delay(0)
+
+    const capture = mock.sentMessages.find(message => message?.session?.source === 'page_fetch')
+    assert.equal(capture.session.authorization, `Bearer ${token}`)
+    assert.equal(capture.session.schoolId, '7572b03a-1507-4309-950e-2a286bdcf0a4')
+    assert.equal(capture.session.cookie, undefined)
   })
 
   it('parses Gradeo CSV rows into a student import payload', async () => {

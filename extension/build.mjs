@@ -15,6 +15,8 @@ const entryPoints = [
   'src/shared/dom.ts',
   'src/shared/gradeoSession.ts',
   'src/content/schoolStudents.parsers.ts',
+  'src/content/gradeoSession.ts',
+  'src/content/gradeoSession.page.ts',
   'src/content/schoolStudents.ts',
   'src/content/schoolGroups.parsers.ts',
   'src/content/schoolGroups.ts',
