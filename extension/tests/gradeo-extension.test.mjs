@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it, beforeEach } from 'node:test'
+import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
 
@@ -87,12 +88,59 @@ function setupBrowserMock() {
   }
 }
 
+async function setupPopupHarness(context) {
+  const html = await readFile(new URL('../dist/src/popup/popup.html', import.meta.url), 'utf8')
+  const dom = new JSDOM(html, {
+    url: 'moz-extension://kings-track/src/popup/popup.html',
+  })
+  const sentMessages = []
+  const originalSetInterval = globalThis.setInterval
+
+  globalThis.window = dom.window
+  globalThis.document = dom.window.document
+  globalThis.HTMLElement = dom.window.HTMLElement
+  globalThis.HTMLButtonElement = dom.window.HTMLButtonElement
+  globalThis.HTMLInputElement = dom.window.HTMLInputElement
+  globalThis.HTMLSelectElement = dom.window.HTMLSelectElement
+  globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement
+  globalThis.setInterval = () => 0
+  globalThis.browser = {
+    runtime: {
+      async sendMessage(message) {
+        sentMessages.push(message)
+        if (message?.type === 'kings.popup.getContext') {
+          return context
+        }
+        if (message?.type === 'kings.popup.getGradeoMappings') {
+          return []
+        }
+        if (message?.type === 'kings.popup.detectGradeoSession') {
+          return context.gradeoSessionStatus || { hasAuthorization: false, stale: true }
+        }
+        return undefined
+      },
+    },
+  }
+
+  try {
+    await importBuilt('src/popup/popup.js')
+    await delay(0)
+    await delay(0)
+  } finally {
+    globalThis.setInterval = originalSetInterval
+  }
+
+  return { dom, sentMessages }
+}
+
 beforeEach(() => {
   globalThis.self = globalThis
   globalThis.KingsTrackExtension = {
     async logDebug() {},
   }
   delete globalThis.browser
+  delete globalThis.window
+  delete globalThis.document
 })
 
 describe('Gradeo extension built utilities', () => {
@@ -256,6 +304,52 @@ describe('Gradeo extension built utilities', () => {
     assert.equal(capture.session.authorization, `Bearer ${token}`)
     assert.equal(capture.session.schoolId, '7572b03a-1507-4309-950e-2a286bdcf0a4')
     assert.equal(capture.session.cookie, undefined)
+  })
+
+  it('shows automatic Gradeo session readiness in the popup', async () => {
+    const { dom } = await setupPopupHarness({
+      config: {
+        frontendUrl: 'http://localhost:5173',
+        gradeoApiHeadersJson: '{}',
+      },
+      state: { status: 'idle' },
+      bridgeTabOpen: true,
+      gradeoSessionStatus: {
+        hasAuthorization: true,
+        schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
+        capturedAt: '2026-06-24T00:00:00.000Z',
+        source: 'localStorage',
+        stale: false,
+      },
+    })
+
+    assert.equal(dom.window.document.getElementById('settingsHeadersPill').textContent, 'Gradeo session detected')
+    assert.equal(dom.window.document.getElementById('homeNote').style.display, 'none')
+  })
+
+  it('sends a detect Gradeo session request from the popup', async () => {
+    const { dom, sentMessages } = await setupPopupHarness({
+      config: {
+        frontendUrl: 'http://localhost:5173',
+        gradeoApiHeadersJson: '{}',
+      },
+      state: { status: 'idle' },
+      bridgeTabOpen: true,
+      gradeoSessionStatus: {
+        hasAuthorization: false,
+        schoolId: null,
+        capturedAt: null,
+        source: null,
+        stale: true,
+      },
+    })
+
+    const button = dom.window.document.getElementById('detectGradeoSession')
+    assert.ok(button)
+    button.click()
+    await delay(0)
+
+    assert.ok(sentMessages.some(message => message?.type === 'kings.popup.detectGradeoSession'))
   })
 
   it('parses Gradeo CSV rows into a student import payload', async () => {
