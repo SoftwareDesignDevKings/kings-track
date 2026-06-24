@@ -5,6 +5,13 @@ interface ExtensionConfig {
   gradeoApiHeadersJson: string
 }
 
+interface GradeoCapturedSession {
+  authorization: string
+  schoolId?: string | null
+  capturedAt?: string
+  source?: string
+}
+
 interface ImportStudent {
   gradeo_student_id: string
   student_name: string
@@ -45,6 +52,11 @@ interface KingsTrackExtensionApi {
   toImportRow: (row: AnyRecord, canonicalMarkingSessionId?: string | null) => AnyRecord
   buildStudentImportFromRows: (rows: AnyRecord[], fallbackStudent: { id: string; name: string }) => ImportStudent
   buildStudentImport: (csvText: string, fallbackStudent: { id: string; name: string }) => ImportStudent
+  findGradeoBearerTokenFromText: (text: string) => string | null
+  extractGradeoSchoolIdFromText: (text: string) => string | null
+  extractGradeoSessionFromSources: (sources: AnyRecord) => GradeoCapturedSession | null
+  normalizeGradeoSession: (candidate: AnyRecord) => GradeoCapturedSession | null
+  describeGradeoSession: (session?: AnyRecord | null) => AnyRecord
   runReportingSync: (deps: AnyRecord) => Promise<AnyRecord>
   extractStudentDirectoryFromDocument: (doc: Document) => GradeoDirectoryStudent[]
   inspectStudentDirectoryDocument: (doc: Document) => AnyRecord

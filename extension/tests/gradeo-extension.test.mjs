@@ -16,6 +16,19 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function encodeBase64Url(value) {
+  return Buffer.from(JSON.stringify(value))
+    .toString('base64url')
+}
+
+function makeJwt(payload) {
+  return [
+    encodeBase64Url({ alg: 'RS256', typ: 'JWT', kid: 'test-key' }),
+    encodeBase64Url(payload),
+    'test-signature',
+  ].join('.')
+}
+
 function setupBrowserMock() {
   const storageData = {}
   const messageListeners = []
@@ -80,6 +93,44 @@ beforeEach(() => {
 })
 
 describe('Gradeo extension built utilities', () => {
+  it('extracts Gradeo session details from storage, cookies, and API urls', async () => {
+    await importBuilt('src/shared/gradeoSession.js')
+    const ext = globalThis.KingsTrackExtension
+    const token = makeJwt({
+      iss: 'https://gradeo.au.auth0.com/',
+      aud: ['https://api.portal.gradeo.com.au'],
+      exp: 2000000000,
+    })
+
+    const result = ext.extractGradeoSessionFromSources({
+      storageItems: [{ key: 'gradeo-auth', value: JSON.stringify({ access_token: token }) }],
+      cookie: 'admin_user_schoolId=7572b03a-1507-4309-950e-2a286bdcf0a4',
+      urls: ['https://platform.gradeo.com.au/api/school/v2/list/student/7572b03a-1507-4309-950e-2a286bdcf0a4?limit=10'],
+    })
+
+    assert.equal(result.authorization, `Bearer ${token}`)
+    assert.equal(result.schoolId, '7572b03a-1507-4309-950e-2a286bdcf0a4')
+    assert.equal(result.source, 'localStorage')
+  })
+
+  it('redacts captured sessions for diagnostics', async () => {
+    await importBuilt('src/shared/gradeoSession.js')
+    const ext = globalThis.KingsTrackExtension
+
+    assert.deepEqual(ext.describeGradeoSession({
+      authorization: 'Bearer test-token',
+      schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
+      capturedAt: '2026-06-24T00:00:00.000Z',
+      source: 'fetch',
+    }), {
+      hasAuthorization: true,
+      schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
+      capturedAt: '2026-06-24T00:00:00.000Z',
+      source: 'fetch',
+      stale: false,
+    })
+  })
+
   it('parses Gradeo CSV rows into a student import payload', async () => {
     await importBuilt('src/shared/csv.js')
     const ext = globalThis.KingsTrackExtension
