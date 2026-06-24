@@ -295,7 +295,7 @@ describe('Gradeo extension built utilities', () => {
         authorization: `Bearer ${token}`,
         schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
         source: 'page_fetch',
-        cookie: 'admin_user_name=Should Not Forward',
+        rawHeaderBlock: 'Should Not Forward',
       },
     }, '*')
     await delay(0)
@@ -303,7 +303,7 @@ describe('Gradeo extension built utilities', () => {
     const capture = mock.sentMessages.find(message => message?.session?.source === 'page_fetch')
     assert.equal(capture.session.authorization, `Bearer ${token}`)
     assert.equal(capture.session.schoolId, '7572b03a-1507-4309-950e-2a286bdcf0a4')
-    assert.equal(capture.session.cookie, undefined)
+    assert.equal(capture.session.rawHeaderBlock, undefined)
   })
 
   it('shows automatic Gradeo session readiness in the popup', async () => {
