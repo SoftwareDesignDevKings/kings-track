@@ -38,6 +38,10 @@ interface KingsTrackExtensionApi {
   defaultConfig: ExtensionConfig
   getConfig: () => Promise<ExtensionConfig>
   saveConfig: (config: Partial<ExtensionConfig>) => Promise<ExtensionConfig>
+  getGradeoSession: () => Promise<GradeoCapturedSession | null>
+  saveGradeoSession: (session: Partial<GradeoCapturedSession>) => Promise<GradeoCapturedSession>
+  clearGradeoSession: () => Promise<void>
+  getGradeoSessionStatus: () => Promise<AnyRecord>
   bridgeRequest: (path: string, options?: AnyRecord) => Promise<any>
   getDebugLogs: () => Promise<AnyRecord[]>
   clearDebugLogs: () => Promise<void>

@@ -1863,6 +1863,46 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     }
   }
 
+  async function detectGradeoSession() {
+    const tabs = await browser.tabs.query({})
+    const gradeoTabs = (tabs || [])
+      .filter(tab => typeof tab.url === 'string' && tab.url.includes('platform.gradeo.com.au'))
+      .sort((left, right) => {
+        if (left.active && !right.active) return -1
+        if (!left.active && right.active) return 1
+        return 0
+      })
+
+    if (gradeoTabs.length === 0) {
+      await browser.tabs.create({ url: 'https://platform.gradeo.com.au/' })
+      return {
+        ...(await ext.getGradeoSessionStatus()),
+        openedGradeoTab: true,
+      }
+    }
+
+    let lastError = null
+    for (const tab of gradeoTabs) {
+      if (!tab.id) {
+        continue
+      }
+      try {
+        const response = await browser.tabs.sendMessage(tab.id, { type: 'kings.gradeo.scanSession' })
+        if (response?.hasAuthorization || response?.captured) {
+          return ext.getGradeoSessionStatus()
+        }
+      } catch (error) {
+        lastError = error
+      }
+    }
+
+    await ext.logDebug('background', 'gradeo_session_detect_failed', {
+      error: lastError ? String(lastError) : null,
+      tabs: gradeoTabs.length,
+    })
+    return ext.getGradeoSessionStatus()
+  }
+
   ext.__gradeoBackgroundTest = {
     runLongAction,
     runVisibleAction,
@@ -1886,6 +1926,8 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     getMarkingItemsForStudent,
     buildAuthoritativeQuestionRowsForStudent,
     applyAuthoritativeRowsToExamSummary,
+    getGradeoApiContext,
+    detectGradeoSession,
   }
 
   registerMessageHandlers({
@@ -1900,5 +1942,6 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     importMappedClassTask,
     syncSchoolGroupsScrape,
     syncReportingClass,
+    detectGradeoSession,
   })
 })()

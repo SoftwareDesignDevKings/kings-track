@@ -131,6 +131,60 @@ describe('Gradeo extension built utilities', () => {
     })
   })
 
+  it('prefers an automatically captured Gradeo session over manual headers', async () => {
+    const mock = setupBrowserMock()
+    const token = makeJwt({
+      iss: 'https://gradeo.au.auth0.com/',
+      aud: ['https://api.portal.gradeo.com.au'],
+      exp: 2000000000,
+    })
+    mock.storageData.kingsTrackGradeoSession = {
+      authorization: `Bearer ${token}`,
+      schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
+      capturedAt: new Date().toISOString(),
+      source: 'localStorage',
+    }
+    mock.storageData.kingsTrackConfig = {
+      frontendUrl: 'http://localhost:5173',
+      gradeoApiHeadersJson: '{"Authorization":"Bearer manual"}',
+    }
+    await importBuilt('src/shared/config.js')
+    await importBuilt('src/shared/logger.js')
+    await importBuilt('src/shared/gradeoSession.js')
+    await importBuilt('src/background/index.js')
+
+    const ctx = await globalThis.KingsTrackExtension.__gradeoBackgroundTest.getGradeoApiContext()
+
+    assert.equal(ctx.headers.Authorization, `Bearer ${token}`)
+    assert.equal(ctx.schoolId, '7572b03a-1507-4309-950e-2a286bdcf0a4')
+  })
+
+  it('stores captured Gradeo sessions without logging token values', async () => {
+    const mock = setupBrowserMock()
+    const token = makeJwt({
+      iss: 'https://gradeo.au.auth0.com/',
+      aud: ['https://api.portal.gradeo.com.au'],
+      exp: 2000000000,
+    })
+    await importBuilt('src/shared/config.js')
+    await importBuilt('src/shared/logger.js')
+    await importBuilt('src/shared/gradeoSession.js')
+    await importBuilt('src/background/index.js')
+
+    const response = await mock.messageListeners[0]({
+      type: 'kings.gradeo.sessionCaptured',
+      session: {
+        authorization: `Bearer ${token}`,
+        schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
+        source: 'fetch',
+      },
+    })
+
+    assert.equal(response.hasAuthorization, true)
+    assert.equal(mock.storageData.kingsTrackGradeoSession.authorization, `Bearer ${token}`)
+    assert.doesNotMatch(JSON.stringify(mock.storageData.kingsTrackDebugLogs || []), new RegExp(token))
+  })
+
   it('parses Gradeo CSV rows into a student import payload', async () => {
     await importBuilt('src/shared/csv.js')
     const ext = globalThis.KingsTrackExtension

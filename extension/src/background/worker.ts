@@ -4,5 +4,6 @@ importScripts(
   '../shared/logger.js',
   '../shared/auth.js',
   '../shared/csv.js',
+  '../shared/gradeoSession.js',
   './index.js'
 )
