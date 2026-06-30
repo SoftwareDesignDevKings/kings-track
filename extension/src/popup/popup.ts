@@ -6,6 +6,7 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
   const openSettingsButton = getRequiredElement<HTMLButtonElement>('openSettings')
   const closeSettingsButton = getRequiredElement<HTMLButtonElement>('closeSettings')
   const saveSettingsButton = getRequiredElement<HTMLButtonElement>('saveSettings')
+  const detectGradeoSessionButton = getRequiredElement<HTMLButtonElement>('detectGradeoSession')
   const openBridgeTabButton = getRequiredElement<HTMLButtonElement>('openBridgeTab')
 
   const frontendUrl = getRequiredElement<HTMLInputElement>('frontendUrl')
@@ -66,6 +67,33 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
   function hasSavedHeaders(config) {
     const raw = String(config?.gradeoApiHeadersJson || '').trim()
     return Boolean(raw && raw !== '{}' && raw !== 'null')
+  }
+
+  function hasDetectedGradeoSession(status) {
+    return Boolean(status?.hasAuthorization && status?.schoolId && !status?.stale)
+  }
+
+  function getGradeoSessionLabel(config, status) {
+    if (hasDetectedGradeoSession(status)) {
+      return 'Gradeo session detected'
+    }
+    if (hasSavedHeaders(config)) {
+      return 'Manual headers saved'
+    }
+    return 'Open Gradeo to detect session'
+  }
+
+  function getGradeoDetectionResult(status) {
+    if (hasDetectedGradeoSession(status)) {
+      return { kind: 'good', message: 'Gradeo session detected.' }
+    }
+    if (status?.openedGradeoTab) {
+      return { kind: 'warn', message: 'Gradeo opened. Sign in, open Admin Students or Classes, then detect again.' }
+    }
+    if (status?.hasAuthorization && !status?.schoolId) {
+      return { kind: 'warn', message: 'Gradeo token found, but school ID is missing. Open Admin Students or Classes, then detect again.' }
+    }
+    return { kind: 'warn', message: 'No Gradeo session found yet. Open or reload Gradeo after loading the extension.' }
   }
 
   function getTone(status) {
@@ -312,21 +340,22 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     }
   }
 
-  function buildHomeNote(configReady, bridgeOpen, headersReady) {
+  function buildHomeNote(configReady, bridgeOpen, gradeoReady) {
     if (!configReady) {
       return 'Set the Dashboard URL in Settings.'
     }
     if (!bridgeOpen) {
       return 'Open the Extension Bridge tab and sign in as admin.'
     }
-    if (!headersReady) {
-      return 'Paste fresh Gradeo headers in Settings.'
+    if (!gradeoReady) {
+      return 'Open Gradeo to detect session, or save manual headers in Settings.'
     }
     return ''
   }
 
   function renderState(context) {
     const config = context.config || {}
+    const gradeoSessionStatus = context.gradeoSessionStatus || {}
 
     if (!isEditingConfig()) {
       frontendUrl.value = config.frontendUrl || ''
@@ -334,7 +363,7 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     }
 
     const configReady = Boolean(String(config.frontendUrl || '').trim())
-    const headersReady = hasSavedHeaders(config)
+    const headersReady = hasDetectedGradeoSession(gradeoSessionStatus) || hasSavedHeaders(config)
     const bridgeOpen = Boolean(context.bridgeTabOpen)
 
     let bridgeTone = 'warn'
@@ -345,12 +374,14 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     }
 
     updateSignalGroup(bridgeSignals, bridgeOpen ? 'Bridge tab open' : 'Bridge tab closed', bridgeTone)
-    updateSignalGroup(headerSignals, 'Gradeo Headers', headersReady ? 'good' : 'warn')
+    updateSignalGroup(headerSignals, getGradeoSessionLabel(config, gradeoSessionStatus), headersReady ? 'good' : 'warn')
 
     if (!configReady) {
       authDetail.textContent = 'Set the Kings Track Dashboard URL.'
     } else if (!bridgeOpen) {
       authDetail.textContent = 'Open the Bridge tab to connect.'
+    } else if (!headersReady) {
+      authDetail.textContent = 'Open Gradeo, sign in, then detect the session.'
     } else {
       authDetail.textContent = 'Bridge tab is open and listening.'
     }
@@ -361,7 +392,7 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     const baseReady = configReady && bridgeOpen && headersReady
     updateActionAvailability(baseReady)
     if (!baseReady) {
-      targetedSyncNote.textContent = 'Connect the bridge and Gradeo headers first.'
+      targetedSyncNote.textContent = 'Connect the bridge and Gradeo session first.'
     } else if (mappingsLoading) {
       targetedSyncNote.textContent = 'Loading mapped classes...'
     } else if (mappedClasses.length === 0) {
@@ -382,8 +413,9 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
   async function refresh() {
     const context = await browser.runtime.sendMessage({ type: 'kings.popup.getContext' })
     const config = context.config || {}
+    const gradeoSessionStatus = context.gradeoSessionStatus || {}
     const configReady = Boolean(String(config.frontendUrl || '').trim())
-    const headersReady = hasSavedHeaders(config)
+    const headersReady = hasDetectedGradeoSession(gradeoSessionStatus) || hasSavedHeaders(config)
     await ensureMappingsLoaded(configReady && Boolean(context.bridgeTabOpen) && headersReady)
     renderState(context)
   }
@@ -431,6 +463,20 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
       showView('home')
     } catch (error) {
       showNotice('warn', error.message || String(error))
+    }
+  })
+
+  detectGradeoSessionButton.addEventListener('click', async () => {
+    try {
+      detectGradeoSessionButton.disabled = true
+      const status = await browser.runtime.sendMessage({ type: 'kings.popup.detectGradeoSession' })
+      const result = getGradeoDetectionResult(status || {})
+      showNotice(result.kind, result.message)
+      await refresh()
+    } catch (error) {
+      showNotice('warn', error.message || String(error))
+    } finally {
+      detectGradeoSessionButton.disabled = false
     }
   })
 

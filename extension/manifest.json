@@ -5,6 +5,7 @@
   "description": "Push Gradeo data into the Kings Track dashboard via an open bridge tab — no API key required.",
   "permissions": [
     "activeTab",
+    "scripting",
     "storage",
     "tabs"
   ],
@@ -21,6 +22,7 @@
       "src/shared/logger.js",
       "src/shared/auth.js",
       "src/shared/csv.js",
+      "src/shared/gradeoSession.js",
       "src/background/index.js"
     ],
     "service_worker": "src/background/worker.js",
@@ -34,6 +36,15 @@
     "default_popup": "src/popup/popup.html"
   },
   "content_scripts": [
+    {
+      "matches": ["https://platform.gradeo.com.au/*"],
+      "js": [
+        "vendor/webextension-polyfill.js",
+        "src/shared/gradeoSession.js",
+        "src/content/gradeoSession.js"
+      ],
+      "run_at": "document_start"
+    },
     {
       "matches": ["https://platform.gradeo.com.au/admin/schoolStudents*"],
       "js": [
@@ -82,6 +93,12 @@
         "src/content/bridge.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/content/gradeoSession.page.js"],
+      "matches": ["https://platform.gradeo.com.au/*"]
     }
   ],
   "browser_specific_settings": {

@@ -79,6 +79,24 @@ function extractSchoolIdFromRaw(rawText: string, parsedHeaders: Record<string, a
 
 export async function getGradeoApiContext() {
   const config = await ext.getConfig()
+  const capturedSession = await ext.getGradeoSession?.()
+  const capturedStatus = ext.describeGradeoSession?.(capturedSession)
+  if (capturedSession?.authorization && capturedSession.schoolId && !capturedStatus?.stale) {
+    await ext.logDebug('background', 'gradeo_api_context_loaded', {
+      source: capturedSession.source || 'captured',
+      schoolId: capturedSession.schoolId,
+      keys: ['Authorization'],
+      capturedAt: capturedSession.capturedAt || null,
+    })
+    return {
+      headers: {
+        Authorization: capturedSession.authorization,
+      },
+      schoolId: capturedSession.schoolId,
+      baseUrl: GRADEO_BASE_URL,
+    }
+  }
+
   const raw = String(config?.gradeoApiHeadersJson || '{}').trim() || '{}'
 
   let parsedHeaders: Record<string, any> = {}
@@ -108,6 +126,7 @@ export async function getGradeoApiContext() {
   const schoolId = extractSchoolIdFromRaw(raw, parsedHeaders, requestLine)
 
   await ext.logDebug('background', 'gradeo_api_context_loaded', {
+    source: 'manual_headers',
     schoolId,
     keys: Object.keys(headers),
   })

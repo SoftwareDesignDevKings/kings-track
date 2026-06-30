@@ -12,6 +12,7 @@ interface BackgroundActions {
   importMappedClassTask: (classId: string, className: string, taskQuery: string) => Promise<any>
   syncSchoolGroupsScrape: () => Promise<any>
   syncReportingClass: () => Promise<any>
+  detectGradeoSession: () => Promise<any>
 }
 
 export function registerMessageHandlers(actions: BackgroundActions) {
@@ -40,8 +41,25 @@ export function registerMessageHandlers(actions: BackgroundActions) {
               bridgeTabOpen = false
             }
           }
-          return { config, state, bridgeTabOpen }
+          const gradeoSessionStatus = await ext.getGradeoSessionStatus?.()
+          return { config, state, bridgeTabOpen, gradeoSessionStatus }
         })
+    }
+
+    if (message?.type === 'kings.gradeo.sessionCaptured') {
+      return ext.saveGradeoSession(message.session).then(async (session) => {
+        const status = ext.describeGradeoSession(session)
+        await ext.logDebug('background', 'gradeo_session_captured', status)
+        return status
+      })
+    }
+
+    if (message?.type === 'kings.popup.detectGradeoSession') {
+      return actions.detectGradeoSession()
+    }
+
+    if (message?.type === 'kings.popup.clearGradeoSession') {
+      return ext.clearGradeoSession().then(() => ext.getGradeoSessionStatus())
     }
 
     if (message?.type === 'kings.popup.saveConfig') {

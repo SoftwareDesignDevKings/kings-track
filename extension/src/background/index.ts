@@ -9,6 +9,11 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
   const EXTENSION_VERSION = '0.1.0'
   const LONG_IMPORT_TIMEOUT_MS = 5 * 60 * 1000
   const KEEP_ALIVE_HEARTBEAT_MS = 20 * 1000
+  const GRADEO_SESSION_SCANNER_FILES = [
+    'vendor/webextension-polyfill.js',
+    'src/shared/gradeoSession.js',
+    'src/content/gradeoSession.js',
+  ]
 
   async function tickKeepAlive(action) {
     try {
@@ -1863,6 +1868,84 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     }
   }
 
+  function isMissingContentScriptError(error) {
+    return /receiving end does not exist|could not establish connection|no matching message handler/i.test(
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+
+  async function injectGradeoSessionScanner(tabId) {
+    if (!browser.scripting?.executeScript) {
+      return false
+    }
+    for (const file of GRADEO_SESSION_SCANNER_FILES) {
+      await browser.scripting.executeScript({
+        target: { tabId },
+        files: [file],
+      })
+    }
+    await ext.logDebug('background', 'gradeo_session_scanner_injected', { tabId })
+    return true
+  }
+
+  async function scanGradeoTabForSession(tab) {
+    if (!tab.id) {
+      return null
+    }
+    try {
+      return await browser.tabs.sendMessage(tab.id, { type: 'kings.gradeo.scanSession' })
+    } catch (error) {
+      if (!isMissingContentScriptError(error)) {
+        throw error
+      }
+      const injected = await injectGradeoSessionScanner(tab.id)
+      if (!injected) {
+        throw error
+      }
+      return browser.tabs.sendMessage(tab.id, { type: 'kings.gradeo.scanSession' })
+    }
+  }
+
+  async function detectGradeoSession() {
+    const tabs = await browser.tabs.query({})
+    const gradeoTabs = (tabs || [])
+      .filter(tab => typeof tab.url === 'string' && tab.url.includes('platform.gradeo.com.au'))
+      .sort((left, right) => {
+        if (left.active && !right.active) return -1
+        if (!left.active && right.active) return 1
+        return 0
+      })
+
+    if (gradeoTabs.length === 0) {
+      await browser.tabs.create({ url: 'https://platform.gradeo.com.au/' })
+      return {
+        ...(await ext.getGradeoSessionStatus()),
+        openedGradeoTab: true,
+      }
+    }
+
+    let lastError = null
+    for (const tab of gradeoTabs) {
+      try {
+        const response = await scanGradeoTabForSession(tab)
+        if (response?.hasAuthorization || response?.captured) {
+          return response?.hasAuthorization ? response : ext.getGradeoSessionStatus()
+        }
+      } catch (error) {
+        lastError = error
+      }
+    }
+
+    await ext.logDebug('background', 'gradeo_session_detect_failed', {
+      error: lastError ? String(lastError) : null,
+      tabs: gradeoTabs.length,
+    })
+    return {
+      ...(await ext.getGradeoSessionStatus()),
+      detectionError: lastError ? String(lastError) : null,
+    }
+  }
+
   ext.__gradeoBackgroundTest = {
     runLongAction,
     runVisibleAction,
@@ -1886,6 +1969,9 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     getMarkingItemsForStudent,
     buildAuthoritativeQuestionRowsForStudent,
     applyAuthoritativeRowsToExamSummary,
+    getGradeoApiContext,
+    detectGradeoSession,
+    injectGradeoSessionScanner,
   }
 
   registerMessageHandlers({
@@ -1900,5 +1986,6 @@ import { __stateTest, beginActiveJob, getState, heartbeatActiveJob, setState } f
     importMappedClassTask,
     syncSchoolGroupsScrape,
     syncReportingClass,
+    detectGradeoSession,
   })
 })()
