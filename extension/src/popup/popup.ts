@@ -83,6 +83,19 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
     return 'Open Gradeo to detect session'
   }
 
+  function getGradeoDetectionResult(status) {
+    if (hasDetectedGradeoSession(status)) {
+      return { kind: 'good', message: 'Gradeo session detected.' }
+    }
+    if (status?.openedGradeoTab) {
+      return { kind: 'warn', message: 'Gradeo opened. Sign in, open Admin Students or Classes, then detect again.' }
+    }
+    if (status?.hasAuthorization && !status?.schoolId) {
+      return { kind: 'warn', message: 'Gradeo token found, but school ID is missing. Open Admin Students or Classes, then detect again.' }
+    }
+    return { kind: 'warn', message: 'No Gradeo session found yet. Open or reload Gradeo after loading the extension.' }
+  }
+
   function getTone(status) {
     if (['completed', 'authenticated', 'ready'].includes(status)) {
       return 'good'
@@ -400,8 +413,9 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
   async function refresh() {
     const context = await browser.runtime.sendMessage({ type: 'kings.popup.getContext' })
     const config = context.config || {}
+    const gradeoSessionStatus = context.gradeoSessionStatus || {}
     const configReady = Boolean(String(config.frontendUrl || '').trim())
-    const headersReady = hasSavedHeaders(config)
+    const headersReady = hasDetectedGradeoSession(gradeoSessionStatus) || hasSavedHeaders(config)
     await ensureMappingsLoaded(configReady && Boolean(context.bridgeTabOpen) && headersReady)
     renderState(context)
   }
@@ -455,8 +469,9 @@ import { getOptionalElement, getRequiredElement, setButtonsBusy } from './dom'
   detectGradeoSessionButton.addEventListener('click', async () => {
     try {
       detectGradeoSessionButton.disabled = true
-      await browser.runtime.sendMessage({ type: 'kings.popup.detectGradeoSession' })
-      showNotice('good', 'Gradeo session checked.')
+      const status = await browser.runtime.sendMessage({ type: 'kings.popup.detectGradeoSession' })
+      const result = getGradeoDetectionResult(status || {})
+      showNotice(result.kind, result.message)
       await refresh()
     } catch (error) {
       showNotice('warn', error.message || String(error))

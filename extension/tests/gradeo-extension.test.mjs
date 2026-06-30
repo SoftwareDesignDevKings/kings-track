@@ -30,11 +30,15 @@ function makeJwt(payload) {
   ].join('.')
 }
 
-function setupBrowserMock() {
+function setupBrowserMock(options = {}) {
   const storageData = {}
   const messageListeners = []
   const sentMessages = []
+  const tabMessages = []
+  const createdTabs = []
+  const executedScripts = []
   let platformInfoCalls = 0
+  const tabSendMessage = options.tabSendMessage || (async () => undefined)
 
   globalThis.browser = {
     runtime: {
@@ -73,6 +77,23 @@ function setupBrowserMock() {
     },
     tabs: {
       async query() {
+        return options.tabs || []
+      },
+      async sendMessage(tabId, message) {
+        tabMessages.push({ tabId, message })
+        return tabSendMessage(tabId, message)
+      },
+      async create(tab) {
+        createdTabs.push(tab)
+        return { id: 99, ...tab }
+      },
+    },
+    scripting: {
+      async executeScript(details) {
+        executedScripts.push(details)
+        if (typeof options.executeScript === 'function') {
+          return options.executeScript(details)
+        }
         return []
       },
     },
@@ -82,6 +103,9 @@ function setupBrowserMock() {
     storageData,
     messageListeners,
     sentMessages,
+    tabMessages,
+    createdTabs,
+    executedScripts,
     get platformInfoCalls() {
       return platformInfoCalls
     },
@@ -167,16 +191,17 @@ describe('Gradeo extension built utilities', () => {
   it('redacts captured sessions for diagnostics', async () => {
     await importBuilt('src/shared/gradeoSession.js')
     const ext = globalThis.KingsTrackExtension
+    const capturedAt = new Date().toISOString()
 
     assert.deepEqual(ext.describeGradeoSession({
       authorization: 'Bearer test-token',
       schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
-      capturedAt: '2026-06-24T00:00:00.000Z',
+      capturedAt,
       source: 'fetch',
     }), {
       hasAuthorization: true,
       schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
-      capturedAt: '2026-06-24T00:00:00.000Z',
+      capturedAt,
       source: 'fetch',
       stale: false,
     })
@@ -234,6 +259,45 @@ describe('Gradeo extension built utilities', () => {
     assert.equal(response.hasAuthorization, true)
     assert.equal(mock.storageData.kingsTrackGradeoSession.authorization, `Bearer ${token}`)
     assert.doesNotMatch(JSON.stringify(mock.storageData.kingsTrackDebugLogs || []), new RegExp(token))
+  })
+
+  it('injects the Gradeo session scanner before retrying manual detection', async () => {
+    let attempts = 0
+    const mock = setupBrowserMock({
+      tabs: [{
+        id: 12,
+        active: true,
+        url: 'https://platform.gradeo.com.au/admin/schoolStudents',
+      }],
+      async tabSendMessage() {
+        attempts += 1
+        if (attempts === 1) {
+          throw new Error('Could not establish connection. Receiving end does not exist.')
+        }
+        return {
+          hasAuthorization: true,
+          schoolId: '7572b03a-1507-4309-950e-2a286bdcf0a4',
+          capturedAt: new Date().toISOString(),
+          source: 'manual_scan',
+          stale: false,
+        }
+      },
+    })
+
+    await importBuilt('src/shared/config.js')
+    await importBuilt('src/shared/logger.js')
+    await importBuilt('src/shared/gradeoSession.js')
+    await importBuilt('src/background/index.js')
+
+    const status = await globalThis.KingsTrackExtension.__gradeoBackgroundTest.detectGradeoSession()
+
+    assert.equal(status.hasAuthorization, true)
+    assert.equal(attempts, 2)
+    assert.deepEqual(mock.executedScripts.map(call => call.files?.[0]), [
+      'vendor/webextension-polyfill.js',
+      'src/shared/gradeoSession.js',
+      'src/content/gradeoSession.js',
+    ])
   })
 
   it('captures a Gradeo session from page storage and cookies in the content bridge', async () => {

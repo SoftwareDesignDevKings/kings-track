@@ -5,6 +5,7 @@
   "description": "Push Gradeo data into the Kings Track dashboard via an open bridge tab — no API key required.",
   "permissions": [
     "activeTab",
+    "scripting",
     "storage",
     "tabs"
   ],
