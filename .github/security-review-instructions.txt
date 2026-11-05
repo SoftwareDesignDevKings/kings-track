@@ -1,0 +1,19 @@
+**Student and guardian data (KingsTrack-specific):**
+- This app stores school students' grades, attendance, Gradeo/EdStem results and guardian contact details. Treat any path that lets an unauthenticated user, a non-admin teacher, or a teacher outside a course read or export this data as HIGH severity.
+- Endpoints, CSV exports and reports must filter by the caller's role and the courses they are allowed to see; flag missing per-course or per-student authorization checks (IDOR).
+- Flag student or guardian personal data written to logs, error messages, analytics, or third-party services.
+
+**Authentication mode and fail-open defaults:**
+- `AUTH_MODE` defaults to "local", which makes every request an admin user without a token. Flag any change that makes local auth reachable when `ENVIRONMENT` is "production", that weakens the Supabase JWT check (algorithms, audience, issuer, expiry), or that adds a route without `require_auth`.
+- Flag new settings whose default is the less-safe option (test modes enabled, auth bypassed, CORS wide open).
+
+**Browser extension and frontend bridge:**
+- The Gradeo browser extension exchanges messages with the KingsTrack frontend (`extension/src/content/bridge.ts`, `frontend/src/lib/extensionBridge.ts`). Flag message handlers that do not check `event.origin` / sender, use `*` as a target origin, forward tokens or session data to pages they shouldn't, or trust message payloads without validation.
+- Flag manifest changes that broaden host permissions, `externally_connectable`, or content-script matches.
+
+**Third-party tokens and outbound email:**
+- Canvas, EdStem, Supabase, SMTP and Redis credentials must only come from environment variables; flag hard-coded values or tokens returned in API responses.
+- Reminder emails go to students/guardians: flag header or template injection, recipients taken from request input, and anything that could let a user send mail to arbitrary addresses.
+
+**File and data imports:**
+- Attendance CSV parsing and Gradeo import endpoints accept user-supplied data: flag formula injection in CSV exports, unbounded file sizes, path traversal in file handling, and raw SQL built from imported values.
